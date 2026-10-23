@@ -722,7 +722,7 @@ def test_a_redone_windows_rounds_leave_the_strong_buffer_when_its_input_lands():
     probe = declared_run.OccupancyProbe(machine.windows.window_manager)
     machine.engine.action_done.connect(probe.observe)
     machine.run()
-    timeline = probe.strong_timeline
+    timeline = probe.landing_timeline
     snapshot = machine.control.pauli_frame.snapshot()
     strong_record = snapshot.records[0]
     expected_committed = decsim_config.microseconds_to_ticks(74.0)

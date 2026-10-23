@@ -668,18 +668,18 @@ class OccupancyProbe:
 
     def __init__(self, window_manager):
         self.window_manager = window_manager
-        self.weak_timeline = []
-        self.strong_timeline = []
+        self.entry_timeline = []
+        self.landing_timeline = []
 
     def observe(self, tick):
         """Note each store's occupancy whenever it changed."""
         retention = self.window_manager.retention
         entry_stores = retention.entry_stores()
-        weak_store = _first_or_none(entry_stores)
-        self._note(self.weak_timeline, tick, weak_store)
+        entry_store = _first_or_none(entry_stores)
+        self._note(self.entry_timeline, tick, entry_store)
         landing_stores = retention.landing_stores()
-        strong_store = _first_or_none(landing_stores)
-        self._note(self.strong_timeline, tick, strong_store)
+        landing_store = _first_or_none(landing_stores)
+        self._note(self.landing_timeline, tick, landing_store)
 
     def _note(self, timeline, tick, store):
         """Append the occupancy when this store has a new one."""

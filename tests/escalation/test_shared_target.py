@@ -15,11 +15,13 @@ import pytest
 
 import decsim.config as config
 import decsim.decoders.decoders as decoders
+import decsim.decoders.execution_slots as execution_slots
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as topology_graph
 import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
@@ -226,3 +228,62 @@ def test_the_shared_strong_pool_escalates_on_to_a_deep_pool_for_both():
     }
     assert transfers["deep_to_frame"] == 4
     assert "strong_to_frame" not in transfers
+
+
+def test_a_predecoder_per_patch_feeds_one_gpu_over_its_link_and_slots():
+    """Chip predecoders in the fridge, one GPU at gpu0 behind one link.
+
+    design.md's mix of a cryo predecoder feeding a room-temperature
+    GPU: both patches' escalations queue on the shared link, and the
+    GPU's two strong units share its execution slots, so one slot
+    decodes one window at a time and two slots decode as with none
+    (decoders/execution_slots.py; CUDA-Q's streams share one GPU).
+    """
+    two_units = _predecoders_and_gpu()
+    on_one_slot = _on_gpu_slots(two_units, 1)
+    on_two_slots = _on_gpu_slots(two_units, 2)
+    alone = _strong_decodes(two_units)
+    one_slot = _strong_decodes(on_one_slot)
+    two_slots = _strong_decodes(on_two_slots)
+
+    assert len(alone) == 4
+    assert _decoded_at_once(alone) > 0
+    assert _decoded_at_once(one_slot) == 0
+    assert two_slots == alone
+
+
+def _predecoders_and_gpu():
+    cable = fabrics.TimedLink(1.0, 100_000.0)
+    shared = fabrics.SiteLink((fabrics.FRIDGE, "gpu0"), cable, shared=True)
+    declared_fabric = declared_run.declared_fabric()
+    fabric = fabrics.SiteLinks((shared,), declared_fabric)
+    graph = _shared_strong("direct", strong_site="gpu0", fabric=fabric)
+    return graph.with_settings("strong", unit_count=2)
+
+
+def _on_gpu_slots(graph, slot_count: int):
+    slots = execution_slots.ExecutionSlots.Settings(slot_count)
+    device = topology_graph.Part("gpu", slots, "gpu0")
+    return graph.with_part(device)
+
+
+def _strong_decodes(graph) -> list:
+    """(start, end) of each strong decode's algorithm stage, in order."""
+    machine = machine_module.Machine.build(graph, 0)
+    result = machine.run()
+    assert result.terminal_status == "complete"
+    spans = []
+    for record in machine.observation.stages.records:
+        if record.stage != "algorithm":
+            continue
+        if not record.unit_name.startswith("strong"):
+            continue
+        spans.append((record.start_ticks, record.end_ticks))
+    return sorted(spans)
+
+
+def _decoded_at_once(spans: list) -> int:
+    """How many decodes started before the one started before them ended."""
+    # each decode beside the one that started next
+    pairs = zip(spans, spans[1:], strict=False)
+    return sum(later[0] < earlier[1] for earlier, later in pairs)

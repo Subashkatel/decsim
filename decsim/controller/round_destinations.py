@@ -53,8 +53,9 @@ class RoundDestinations:
     router = ports.Port(ports.StreamRouting)
     # the run's former seats, told when a round left every store it went
     # to; bound only with several entry stores, the only ones that tell
-    # these destinations rather than the seats
-    detection_events = ports.Port(ports.RoundRetirement)
+    # these destinations rather than the seats, so None with one store,
+    # where retire_round is never called
+    detection_events = ports.Port(ports.RoundRetirement, optional=True)
 
     def __init__(self, side_by_pool: dict) -> None:
         self.side_by_pool = side_by_pool

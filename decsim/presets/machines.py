@@ -373,6 +373,7 @@ def with_router(
     entry_store: str = WEAK_STORE,
     entry_pool: str = WEAK_POOL,
     site: str = fabrics.FRIDGE,
+    factory_pool: Optional[str] = None,
 ) -> graph.Machine:
     """The machine whose entry store feeds a router to several entry pools.
 
@@ -381,9 +382,12 @@ def with_router(
     of pools, each (name, DecoderPoolSettings) at site, read from the
     entry store over its own hop, entry_store_to_name, and answering the
     frame. by_patch is VQD's decoder per logical qubit (Maurya and
-    Tannu 2406.17995v2 Sec. 4.1).
+    Tannu 2406.17995v2 Sec. 4.1). The magic-state factory's decodes go
+    to factory_pool, the machine's entry pool unless named.
     """
-    router_settings = routers.Router.Settings(rule)
+    if factory_pool is None:
+        factory_pool = entry_pool
+    router_settings = routers.Router.Settings(rule, factory_pool)
     router_part = graph.Part(ROUTER, router_settings)
     rewired = machine.without_wire(
         f"{entry_store}.reads", f"{entry_pool}.rounds"
@@ -393,12 +397,16 @@ def with_router(
         graph.Wire(f"{entry_store}.reads", f"{ROUTER}.rounds"),
         graph.Wire(f"{ROUTER}.windows", f"{entry_pool}.rounds"),
     ]
+    frames = machine.parts_of("pauli_frame")
     for name, pool in pools:
         part = graph.Part(name, pool, site)
         grown = grown.with_part(part)
         windows = graph.Wire(f"{ROUTER}.windows", f"{name}.rounds")
-        corrections = graph.Wire(f"{name}.corrections", f"{FRAME}.corrections")
-        wires.extend((windows, corrections))
+        wires.append(windows)
+        # a pool corrects the frame when the machine has one, as with_pool
+        if frames:
+            corrections = f"{frames[0].name}.corrections"
+            wires.append(graph.Wire(f"{name}.corrections", corrections))
     return grown.with_wires(*wires)
 
 

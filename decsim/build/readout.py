@@ -33,8 +33,9 @@ import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 class StoreParts:
     """One store, its outgoing end and its receiving end, and its plan.
 
-    other_outputs holds an outgoing end per entry pool past the first a
-    router feeds from this store, as (pool, output) pairs.
+    output sends to the pool the plan names as its reader;
+    other_outputs holds an outgoing end per other entry pool a router
+    feeds from this store, as (pool, output) pairs.
     """
 
     plan: layout_module.StorePlan
@@ -46,7 +47,9 @@ class StoreParts:
     def output_for(
         self, pool: window_records.PoolId
     ) -> round_output.SyndromeBufferOutput:
-        """The outgoing end that sends to one of the other entry pools."""
+        """The outgoing end that sends to one pool that reads the store."""
+        if pool.word == self.plan.reader:
+            return self.output
         for reader_pool, output in self.other_outputs:
             if reader_pool == pool:
                 return output
@@ -145,14 +148,6 @@ class Readout:
         if parts is None:
             return None
         return parts.store
-
-    @property
-    def primary_output(self) -> Optional[round_output.SyndromeBufferOutput]:
-        """The entry store's outgoing end; None with no store."""
-        if not self.stores:
-            return None
-        entry = self.stores[0]
-        return entry.output
 
     def connect(
         self,

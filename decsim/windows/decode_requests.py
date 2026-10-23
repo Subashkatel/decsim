@@ -347,29 +347,23 @@ class DecodeRequestBuilder:
 class DecodeRequester:
     """Requests a decode for every complete window, once.
 
-    gap_join is the confidence join of a run whose gap is two
-    forced-class solves; it is both jobs' on_decoded and None when the
-    run's weak decoder reports its own soft output from one decode.
-    decode_queue, store_output and gap_join are the primary tier's; a
-    router names each window's entry pool and holds every other entry
-    pool's (windows/routers.py).
+    The router names each window's entry pool and holds its side: its
+    manager, the store end that sends to it, and its confidence join,
+    which is both forced-class solves' on_decoded and None when the
+    pool reports its own soft output from one decode
+    (windows/routers.py).
     """
 
     tracker = ports.Port(round_tracker_module.RoundTracker)
     retention = ports.Port(round_retention_module.RoundRetention)
     builder = ports.Port(DecodeRequestBuilder)
-    decode_queue = ports.Port(ports.DecodeQueue)
     # the run's escalate edges: the edge leaving the primary tier builds
     # the speculative decode a window submits beside its weak job, and
     # each edge's target manager serves its own; a run with no
     # switching has none, and decodes its windows on the primary alone
     edges = ports.Port(escalate_edges.EscalateEdges)
     verdict = ports.Port(window_commits.WindowVerdict)
-    # the primary store's outgoing port; it executes the input send
-    store_output = ports.Port(ports.SyndromeBufferOutput)
-    # a run whose weak decoder reports its own soft output has no join
-    gap_join = ports.Port(ports.WindowGapJoin, optional=True)
-    # which entry pool decodes each window (routers.py)
+    # which entry pool decodes each window, and that pool's side
     router = ports.Port(routers.Router)
 
     def __init__(
@@ -496,41 +490,24 @@ class DecodeRequester:
         """The entry pool that decodes the window."""
         return self.router.pool_for(window)
 
-    def _routed_side(
-        self, pool: window_records.PoolId
-    ) -> Optional[routers.EntrySide]:
-        """The side of an entry pool past the first; None for the first."""
-        return self.router.side_of(pool)
-
     def _queue_of(self, pool: window_records.PoolId) -> ports.DecodeQueue:
         """The manager of an entry pool."""
-        side = self._routed_side(pool)
-        if side is None:
-            return self.decode_queue
+        side = self.router.side(pool)
         return side.decode_queue
 
     def _join_of(
         self, pool: window_records.PoolId
     ) -> Optional[ports.WindowGapJoin]:
         """The join of an entry pool's solves; None when it has none."""
-        side = self._routed_side(pool)
-        if side is None:
-            return self.gap_join
+        side = self.router.side(pool)
         return side.gap_join
 
     def _store_output_of(
         self, pool: window_records.PoolId
     ) -> ports.SyndromeBufferOutput:
-        """The entry store's end that sends to an entry pool."""
-        side = self._routed_side(pool)
-        if side is None:
-            return self.store_output
+        """The end of the store an entry pool reads that sends to it."""
+        side = self.router.side(pool)
         return side.store_output
-
-    def _routed_queues(self) -> list:
-        """Every entry pool's manager past the first, in build order."""
-        sides = self.router.sides()
-        return [side.decode_queue for side in sides]
 
     def _primary_jobs(
         self, job: decoding_records.DecodeJob, forced_classes: tuple
@@ -584,15 +561,8 @@ class DecodeRequester:
 
     def check_settled(self) -> None:
         """At the end of a run no window may still hold an unjoined solve."""
-        if self.gap_join is None:
-            return
-        unresolved = self.gap_join.unresolved_windows()
-        if not unresolved:
-            return
-        raise RuntimeError(
-            f"the run ended with windows holding an unjoined solve: "
-            f"{unresolved}"
-        )
+        for side in self.router.sides():
+            _check_joined(side)
 
     def withdraw(self, window: window_records.Window) -> None:
         """Withdraw one window's unstarted decode.
@@ -616,12 +586,12 @@ class DecodeRequester:
     def release_window(self, window_key: tuple) -> None:
         """The window's last boundary arrived: its waiting decodes may start.
 
-        The window's weak decode waits in the chip's manager's queue; a
+        The window's first decode waits in its entry pool's manager; a
         speculative strong decode or a re-decode of the same window waits
         in its edge's target manager. A speculative strong decode the
-        primary edge waited to plan until this boundary is submitted
-        first; then every manager releases the window, the primary's
-        first, each other entry pool's, then each edge's target in graph
+        edge out of the entry pool waited to plan until this boundary is
+        submitted first; then every manager releases the window, each
+        entry pool's in build order, then each edge's target in graph
         order.
         """
         stream_id, _window_index = window_key
@@ -632,9 +602,8 @@ class DecodeRequester:
             started = _speculative_submissions(speculative)
             for submission in started:
                 self._admit(submission)
-        self.decode_queue.release_window(window_key)
-        for decode_queue in self._routed_queues():
-            decode_queue.release_window(window_key)
+        for side in self.router.sides():
+            side.decode_queue.release_window(window_key)
         for decode_queue in self.edges.target_queues():
             decode_queue.release_window(window_key)
 
@@ -696,3 +665,16 @@ class _TraceSources:
     """Every event the decode request builder reports, as one member."""
 
     window_data_complete: trace_source.TraceSource = trace_source.new_source()
+
+
+def _check_joined(side: routers.EntrySide) -> None:
+    """No window of the entry pool still holds an unjoined solve."""
+    if side.gap_join is None:
+        return
+    unresolved = side.gap_join.unresolved_windows()
+    if not unresolved:
+        return
+    raise RuntimeError(
+        f"the run ended with windows of {side.pool.word} holding an "
+        f"unjoined solve: {unresolved}"
+    )

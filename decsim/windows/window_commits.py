@@ -317,27 +317,19 @@ class WindowVerdict:
     A revision of a pool an escalate edge leaves meets that edge's
     policy, priced on the edge's own clock, like gem5's frontend and
     forward latencies (src/mem/XBar.py); zero costs keep the handoff
-    synchronous. A revision no edge leaves is final. window_pool
-    decodes the planner's windows, so its revision is the first, as is
-    the revision of every other entry pool a router feeds.
+    synchronous. A revision no edge leaves is final. The revision of
+    the entry pool the router sends the window to is its first.
     """
 
     planner = ports.Port(window_planner.WindowPlanner)
     tracker = ports.Port(round_tracker_module.RoundTracker)
-    # the window pool's manager; an edge's target pool is its edge's
-    decode_queue = ports.Port(ports.DecodeQueue)
     committer = ports.Port(WindowCommitter)
     edges = ports.Port(escalate_edges.EscalateEdges)
-    # which entry pool decodes each window (routers.py)
+    # which entry pool decodes each window, and each entry pool's manager
     router = ports.Port(routers.Router)
 
-    def __init__(
-        self,
-        engine: engine_module.Engine,
-        window_pool: window_records.PoolId,
-    ) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
-        self.window_pool = window_pool
 
     def accept_revision(
         self,
@@ -455,10 +447,8 @@ class WindowVerdict:
 
     def _queue_of(self, pool: window_records.PoolId) -> ports.DecodeQueue:
         """The manager that served a revision of pool."""
-        if pool == self.window_pool:
-            return self.decode_queue
-        side = self._routed_side(pool)
-        if side is not None:
+        if self.router.is_entry(pool):
+            side = self.router.side(pool)
             return side.decode_queue
         return self.edges.queue_of(pool)
 
@@ -471,12 +461,6 @@ class WindowVerdict:
         window = self._window_of(job)
         entry = self.router.pool_for(window)
         return job.request_key.pool == entry
-
-    def _routed_side(
-        self, pool: window_records.PoolId
-    ) -> Optional[routers.EntrySide]:
-        """The side of an entry pool past the first; None for any other."""
-        return self.router.side_of(pool)
 
 
 def _verdict_for(

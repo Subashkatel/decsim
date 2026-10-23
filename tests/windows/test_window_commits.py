@@ -195,14 +195,11 @@ class _Fixture:
         committer.edges = edges
         committer.router = one_entry.router()
         self.committer = committer
-        self.verdict = window_commits.WindowVerdict(
-            self.engine, window_records.WEAK_POOL_ID
-        )
+        self.verdict = window_commits.WindowVerdict(self.engine)
         self.verdict.planner = planner
         self.verdict.tracker = tracker
-        self.verdict.router = one_entry.router()
+        self.verdict.router = one_entry.router(decode_queue=self.decode_queue)
         self.verdict.edges = edges
-        self.verdict.decode_queue = self.decode_queue
         self.verdict.committer = committer
 
     def job(self, tier, sequence, awaiting=False) -> decoding_records.DecodeJob:

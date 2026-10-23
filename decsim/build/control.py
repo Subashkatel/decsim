@@ -101,7 +101,7 @@ class Control:
         qpu: ports.Qpu,
         factory: ports.MagicStateFactory,
         windows: ports.WindowInput,
-        decode_queue: ports.DecodeQueue,
+        entry_queues: ports.EntryQueues,
     ) -> None:
         """Drive the QPU and hand the window side each stream and idle."""
         self.execution_runtime.factory = factory
@@ -110,7 +110,7 @@ class Control:
         self.streams.windows = windows
         self.idle_rounds.qpu = qpu
         self.idle_rounds.windows = windows
-        self.idle_rounds.decode_queue = decode_queue
+        self.idle_rounds.entry_queues = entry_queues
 
     def seed_roots(self) -> tuple:
         """This part's stochastic owners, each by the name its seed hashes."""

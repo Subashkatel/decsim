@@ -27,7 +27,8 @@ class IdleRoundAccounting:
     charges.
     """
 
-    decode_queue = ports.Port(ports.DecodeQueue)
+    # the router: an idle decode goes to the entry pool of its operation
+    entry_queues = ports.Port(ports.EntryQueues)
     streams = ports.Port(feedback_streams.Streams)
     qpu = ports.Port(ports.Qpu)
     windows = ports.Port(ports.WindowInput)
@@ -171,7 +172,8 @@ class IdleRoundAccounting:
         patch_record = self.geometry_by_patch[patch]
         geometry = patch_record.code_geometry
         rounds = idle_round_count + geometry.buffer_round_count
-        self.decode_queue.enqueue_without_input(
+        decode_queue = self.entry_queues.queue_for(operation)
+        decode_queue.enqueue_without_input(
             rounds,
             on_done=_ignore_completion,
             label=f"mem({operation.name},r{round_index})",

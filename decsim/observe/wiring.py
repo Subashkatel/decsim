@@ -90,8 +90,10 @@ def observe(
         )
     decode_records = _decode_records(observation, keeps_records)
     _connect_decode_records(decoder_managers, decode_records)
-    gap_join = windows.gap_join
-    confidence = _connect_confidence(gap_join, decoder_managers, keeps_records)
+    computes_confidence = bool(windows.entry_joins())
+    confidence = _connect_confidence(
+        computes_confidence, decoder_managers, keeps_records
+    )
     store_names = _store_names(readout)
     trace_writer = _trace_writer(
         observation, engine, process_name, links_card, store_names
@@ -394,7 +396,8 @@ def _connect_window_trace(
     sources = window_manager.window_sources()
     sources.window_planned.connect(trace_writer.window_planned)
     sources.window_data_complete.connect(trace_writer.window_ready)
-    sources.solve_held.connect(trace_writer.solve_held)
+    for solve_held in sources.solve_held_sources:
+        solve_held.connect(trace_writer.solve_held)
     sources.window_committed.connect(trace_writer.window_committed)
     sources.window_final.connect(trace_writer.window_final)
     sources.window_absorbed.connect(trace_writer.window_absorbed)
@@ -436,14 +439,14 @@ def _connect_decode_records(
 
 
 def _connect_confidence(
-    gap_join, decoder_managers: tuple, keeps_records: bool
+    computes_confidence: bool, decoder_managers: tuple, keeps_records: bool
 ) -> Optional[decode_records_module.ConfidenceLedger]:
     """The confidence ledger, only on a run that computes a confidence.
 
     It keeps every window's verdict result, which a stream that lets its
     windows go never reads (observation.folds_windows).
     """
-    if gap_join is None or not keeps_records:
+    if not computes_confidence or not keeps_records:
         return None
     confidence = decode_records_module.ConfidenceLedger()
     for manager in decoder_managers:

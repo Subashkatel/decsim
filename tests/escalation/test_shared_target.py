@@ -17,14 +17,18 @@ import decsim.config as config
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
+import decsim.records.windows as window_records
 import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.escalation.test_switching_mode as switching_mode
 
 
-def _shared_strong(answer_route: str):
-    """Two chip pools, by patch, each escalating every window to strong."""
+def _shared_strong(answer_route: str, factory_pool="weak"):
+    """Two chip pools, by patch, each escalating every window to strong.
+
+    The magic-state factory's decodes go to factory_pool.
+    """
     weak, strong = declared_run.switching_decoders(True)
     engine = declared_run.DECLARED_ENGINE
     weak_pool = decoder_settings.DecoderPoolSettings(
@@ -60,7 +64,9 @@ def _shared_strong(answer_route: str):
     by_patch = routers.ByPatch.Settings(
         pool_by_patch=((1, "weak"), (2, "fpga_b"))
     )
-    machine = machines.with_router(machine, by_patch, (("fpga_b", weak_pool),))
+    machine = machines.with_router(
+        machine, by_patch, (("fpga_b", weak_pool),), factory_pool=factory_pool
+    )
     return machines.with_escalation_to(machine, "fpga_b", "strong", switching)
 
 
@@ -116,3 +122,23 @@ def test_one_learned_threshold_over_two_entry_edges_is_refused():
         machine_module.Machine.build(
             _shared_strong("direct"), 0, online_threshold=calibrator
         )
+
+
+def test_the_factorys_decodes_go_to_the_pool_the_router_names():
+    machine = machine_module.Machine.build(
+        _shared_strong("direct", factory_pool="fpga_b"), 0
+    )
+
+    fpga_b = machine.decoders.manager_of(window_records.PoolId("fpga_b"))
+    assert machine.qpu.factory.decode_queue is fpga_b
+
+
+def test_two_entry_pools_with_no_factory_pool_are_refused():
+    """No paper sets a default; the run names which pool serves them."""
+    graph = _shared_strong("direct")
+    router_part = graph.part(machines.ROUTER)
+    unnamed = dataclasses.replace(router_part.settings, factory_pool=None)
+    unnamed_graph = graph.with_record(machines.ROUTER, unnamed)
+
+    with pytest.raises(ValueError, match="router.factory_pool names no pool"):
+        machine_module.Machine.build(unnamed_graph, 0)

@@ -462,9 +462,9 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     whole_machine = machine_module.Machine.build(machine_graph, 0)
     whole = whole_machine.run()
 
-    requester = windows.window_manager.requester
+    entry_side = windows.router.side(layout.entry_pool.pool)
     assert arrivals.windows is windows.window_manager
-    assert requester.decode_queue is decoders.decoder_manager
+    assert entry_side.decode_queue is decoders.decoder_manager
     assert result.terminal_status == "complete"
     assert result.fully_done_ticks == 279_904_000
     assert result.operation_results[0].logical_failure is False

@@ -2303,6 +2303,18 @@ class RoundsPolicy(Protocol):
 
 
 @runtime_checkable
+class EntryQueues(Protocol):
+    """Which entry pool's manager decodes an operation's rounds.
+
+    The router answers it (windows/routers.py), so a decode that reads
+    no window, an idle patch's, goes where its operation's windows go.
+    """
+
+    def queue_for(self, operation: program_records.Operation) -> "DecodeQueue":
+        """The manager of the entry pool that decodes the operation."""
+
+
+@runtime_checkable
 class MagicStateFactory(Protocol):
     """Where a non-Clifford operation gets its magic state.
 
@@ -2310,7 +2322,8 @@ class MagicStateFactory(Protocol):
     of demand queues its first attempt in start, never in its
     constructor, so the build order cannot move a tick (gem5's startup,
     src/sim/sim_object.hh lines 194 and 280). A factory declares a
-    decode_queue port, bound to the run's decoder manager. trace holds
+    decode_queue port, bound to the manager of the pool the router names
+    for it (windows/routers.py factory_pool). trace holds
     state_delivered(operation_id, waited_ticks), the supply stall of
     each delivery.
     """

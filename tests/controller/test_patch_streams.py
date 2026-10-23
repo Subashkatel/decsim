@@ -31,6 +31,7 @@ import decsim.records.workload as workload_records
 import decsim.windows.coupling_orders as coupling_orders
 import decsim.windows.region_layout as region_layout
 import decsim.windows.release_rules as release_rules
+import decsim.windows.routers as routers
 import decsim.windows.schemes.region_sliding as region_sliding
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
@@ -56,19 +57,29 @@ RELEASE_RULES = (OWN_STREAMS, DECODED_ANCESTORS)
 
 
 def run(workload, decode_microseconds: float):
+    settings, graph = patch_stream_graph(workload, decode_microseconds)
+    machine = machine_module.Machine.build(graph, 0)
+    result = machine.run()
+    return settings, machine, result
+
+
+def patch_stream_graph(workload, decode_microseconds: float) -> tuple:
+    """The workload's settings and its one-pool machine on patch streams."""
     settings = workload_settings.WorkloadSettings.running(workload)
-    algorithm = decoders.PresetLatencyDecoder.Settings(decode_microseconds)
-    pool = decoder_settings.DecoderPoolSettings(
-        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
-    )
+    pool = _preset_pool(decode_microseconds)
     scheme = region_sliding.RegionSlidingScheme.Settings()
     windows = window_settings.WindowSettings(scheme=scheme)
     qpu = qpu_settings.QpuSettings(distance=DISTANCE)
     base = machines.base(settings, windows, qpu)
     graph = machines.with_pool(base, pool)
-    machine = machine_module.Machine.build(graph, 0)
-    result = machine.run()
-    return settings, machine, result
+    return settings, graph
+
+
+def _preset_pool(decode_microseconds: float):
+    algorithm = decoders.PresetLatencyDecoder.Settings(decode_microseconds)
+    return decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
+    )
 
 
 def rounds_by_stream(machine) -> dict:
@@ -356,3 +367,48 @@ def _expected(layout, window) -> tuple:
         deps.append((reader.stream_id, reader_index))
     deps.sort(key=str)
     return (window.key, region.last_round, buffer_hi, reads, deps)
+
+
+def _t_gate_by_patch(tmp_path, table: tuple):
+    """The T gate on two chip pools, each patch's stream to its table pool.
+
+    VQD's decoder per logical qubit (2406.17995v2 Sec. 4.1); DecoNet
+    statically assigns each decoder instance one logical qubit's blocks
+    (2504.11805 Sec. VI-C).
+    """
+    path = tmp_path / "t_gate.lss"
+    path.write_text(patch_lives_test.T_GATE)
+    workload = lattice_surgery.read_schedule(path, DISTANCE)
+    _settings, graph = patch_stream_graph(workload, T_GATE_DECODE_MICROSECONDS)
+    rule = routers.ByPatch.Settings(pool_by_patch=table)
+    fpga_b = ("fpga_b", _preset_pool(T_GATE_DECODE_MICROSECONDS))
+    return machines.with_router(graph, rule, (fpga_b,))
+
+
+def test_each_patch_stream_is_decoded_on_the_pool_its_router_names(tmp_path):
+    table = (((0, 0), "weak"), ((0, 1), "fpga_b"), ((1, 0), "fpga_b"))
+    graph = _t_gate_by_patch(tmp_path, table)
+    machine = machine_module.Machine.build(graph, 0)
+
+    result = machine.run()
+
+    units = collections.defaultdict(set)
+    for record in machine.observation.stages.records:
+        units[record.stream_id].add(record.unit_name)
+    assert result.terminal_status == "complete"
+    assert dict(units) == {
+        CONTROL_STREAM: {"weak#0"},
+        T_STREAM: {"fpga_b#0"},
+        S_ANCILLA_STREAM: {"fpga_b#0"},
+    }
+
+
+def test_a_patch_stream_whose_patch_no_pool_routes_is_refused_at_build(
+    tmp_path,
+):
+    """Patch (1,0) is missing: refused before the run, not mid-run."""
+    table = (((0, 0), "weak"), ((0, 1), "fpga_b"))
+    graph = _t_gate_by_patch(tmp_path, table)
+
+    with pytest.raises(ValueError, match=r"routes no pool .* \(\(1, 0\),\)"):
+        machine_module.Machine.build(graph, 0)

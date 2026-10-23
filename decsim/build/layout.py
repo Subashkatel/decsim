@@ -259,6 +259,32 @@ class Layout:
         entry_edge = self.edges[0]
         return entry_edge.settings
 
+    def factory_pool(self) -> window_records.PoolId:
+        """The pool the magic-state factory's decodes go to.
+
+        The router's factory_pool, or the one entry pool of a machine
+        with one; a machine of several entry pools must name it.
+        """
+        name = None
+        if self.router is not None:
+            name = self.router.factory_pool
+        if name is None:
+            return self._only_entry_pool("router.factory_pool")
+        pool = window_records.PoolId(name)
+        _refuse_a_pool_not_held(self, pool)
+        return pool
+
+    def _only_entry_pool(self, setting: str) -> window_records.PoolId:
+        """The one entry pool; refused when there are several."""
+        if self.entry_count == 1:
+            return self.entry_pool.pool
+        names = [entry.pool.word for entry in self.entry_pools]
+        raise ValueError(
+            f"{setting} names no pool, and this machine has "
+            f"{self.entry_count} entry pools {names}; name the one that "
+            "serves the magic-state factory's decodes"
+        )
+
     def entry_escalation_hops(self) -> tuple:
         """The hop each edge out of an entry pool escalates a window over."""
         hops = []
@@ -320,3 +346,16 @@ def _add_once(paths: list, path: tuple) -> None:
     if path in paths:
         return
     paths.append(path)
+
+
+def _refuse_a_pool_not_held(
+    layout: Layout, pool: window_records.PoolId
+) -> None:
+    for plan in layout.pools:
+        if plan.pool == pool:
+            return
+    names = [plan.pool.word for plan in layout.pools]
+    raise ValueError(
+        f"router.factory_pool names {pool.word!r}, which is no pool of "
+        f"this machine; its pools are {names}"
+    )

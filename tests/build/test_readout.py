@@ -20,6 +20,7 @@ import decsim.links.settings as link_settings
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.records.transfers as transfer_records
+import decsim.records.windows as window_records
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import tests.declared_run as declared_run
@@ -224,7 +225,7 @@ def test_a_weak_only_run_reads_nothing_from_the_room_side():
     weak = readout.store_parts(machines.WEAK_STORE)
     strong = readout.store_parts(machines.STRONG_STORE)
 
-    assert readout.primary_output is weak.output
+    assert weak.output_for(window_records.WEAK_POOL_ID) is weak.output
     assert strong is None
 
 

@@ -180,13 +180,13 @@ class _Fixture:
             clock=clock,
         )
         self.requester.tracker = self.tracker
-        self.requester.router = one_entry.router()
+        self.requester.router = one_entry.router(
+            decode_queue=self.queue, store_output=store_output
+        )
         self.requester.retention = self.retention
         self.requester.builder = self.builder
-        self.requester.decode_queue = self.queue
         self.requester.verdict = verdict
         self.requester.edges = escalate_edges.EscalateEdges()
-        self.requester.store_output = store_output
         self.retention.register_window((1, 0), self.window)
         self.interaction = interaction
 

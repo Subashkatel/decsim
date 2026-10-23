@@ -263,7 +263,7 @@ def test_a_windows_two_requests_are_one_attempt():
 def test_a_window_whose_other_solve_never_arrives_refuses_the_run():
     """A solve nobody joins is unsettled state, refused at the run's end."""
     machine = _switching_machine(1)
-    join = machine.windows.window_manager.requester.gap_join
+    join = machine.windows.join_of(window_records.WEAK_POOL_ID)
     joined_solves = join.accept_result
 
     def hold_the_first_solve_alone(job, result):

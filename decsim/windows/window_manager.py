@@ -30,6 +30,7 @@ import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.operation_results as operation_results
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
+import decsim.windows.routers as routers
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_planner as window_planner
@@ -40,9 +41,9 @@ class WindowTraceSources:
     """One window's life as the observers hear it, named once by the facade.
 
     window_planned when the plan or a stream lays a window,
-    window_data_complete when its rounds are all there,
-    solve_held when one of a window's several solves waits for the
-    others, window_committed when its correction is the frame's,
+    window_data_complete when its rounds are all there, each of
+    solve_held_sources when one of a window's several solves waits for
+    the others, window_committed when its correction is the frame's,
     window_final once its record is final, and window_absorbed when a
     strong window takes it over instead.
     edge_traces holds each escalate edge's own sources, in graph order:
@@ -55,8 +56,9 @@ class WindowTraceSources:
     window_final: trace_source.TraceSource
     # the silent source on a run that escalates nothing
     window_absorbed: Union[trace_source.TraceSource, trace_source.SilentSource]
-    # the silent source on a run whose confidence reads one solve
-    solve_held: Union[trace_source.TraceSource, trace_source.SilentSource]
+    # each entry pool's join's; none on a run whose confidence reads one
+    # solve
+    solve_held_sources: tuple = ()
     edge_traces: tuple = ()
 
 
@@ -72,6 +74,8 @@ class WindowManager:
     # the run's escalate edges; none when the run never escalates
     edges = ports.Port(escalate_edges.EscalateEdges)
     window_interaction = ports.Port(window_interactions.WindowInteraction)
+    # every entry pool's side, whose joins hold solves
+    router = ports.Port(routers.Router)
 
     def __init__(
         self,
@@ -501,10 +505,10 @@ class WindowManager:
         edge = self.edges.leaving(primary_tier)
         if edge is not None:
             absorbed = edge.shape.window_absorbed
-        held = trace_source.SILENT
-        gap_join = self.requester.gap_join
-        if gap_join is not None:
-            held = gap_join.trace.solve_held
+        held = []
+        for side in self.router.sides():
+            if side.gap_join is not None:
+                held.append(side.gap_join.trace.solve_held)
         builder = self.requester.builder
         committer = self.requester.verdict.committer
         edge_traces = []
@@ -516,7 +520,7 @@ class WindowManager:
             window_committed=committer.trace.window_committed,
             window_final=committer.trace.window_final,
             window_absorbed=absorbed,
-            solve_held=held,
+            solve_held_sources=tuple(held),
             edge_traces=tuple(edge_traces),
         )
 

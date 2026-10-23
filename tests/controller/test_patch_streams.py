@@ -18,6 +18,7 @@ import pathlib
 
 import pytest
 
+import decsim.config as config
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.lattice_surgery as lattice_surgery
@@ -80,6 +81,11 @@ def _preset_pool(decode_microseconds: float):
     return decoder_settings.DecoderPoolSettings(
         algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
     )
+
+
+# a second chip pool on the weak pool's row, and a slower row of its own
+FPGA_B = ("fpga_b", _preset_pool(T_GATE_DECODE_MICROSECONDS))
+SLOW = ("slow", _preset_pool(2 * T_GATE_DECODE_MICROSECONDS))
 
 
 def rounds_by_stream(machine) -> dict:
@@ -369,8 +375,8 @@ def _expected(layout, window) -> tuple:
     return (window.key, region.last_round, buffer_hi, reads, deps)
 
 
-def _t_gate_by_patch(tmp_path, table: tuple):
-    """The T gate on two chip pools, each patch's stream to its table pool.
+def _t_gate_by_patch(tmp_path, table: tuple, pools: tuple):
+    """The T gate on the weak pool and pools, each patch's stream to its pool.
 
     VQD's decoder per logical qubit (2406.17995v2 Sec. 4.1); DecoNet
     statically assigns each decoder instance one logical qubit's blocks
@@ -381,13 +387,12 @@ def _t_gate_by_patch(tmp_path, table: tuple):
     workload = lattice_surgery.read_schedule(path, DISTANCE)
     _settings, graph = patch_stream_graph(workload, T_GATE_DECODE_MICROSECONDS)
     rule = routers.ByPatch.Settings(pool_by_patch=table)
-    fpga_b = ("fpga_b", _preset_pool(T_GATE_DECODE_MICROSECONDS))
-    return machines.with_router(graph, rule, (fpga_b,))
+    return machines.with_router(graph, rule, pools)
 
 
 def test_each_patch_stream_is_decoded_on_the_pool_its_router_names(tmp_path):
     table = (((0, 0), "weak"), ((0, 1), "fpga_b"), ((1, 0), "fpga_b"))
-    graph = _t_gate_by_patch(tmp_path, table)
+    graph = _t_gate_by_patch(tmp_path, table, (FPGA_B,))
     machine = machine_module.Machine.build(graph, 0)
 
     result = machine.run()
@@ -408,7 +413,39 @@ def test_a_patch_stream_whose_patch_no_pool_routes_is_refused_at_build(
 ):
     """Patch (1,0) is missing: refused before the run, not mid-run."""
     table = (((0, 0), "weak"), ((0, 1), "fpga_b"))
-    graph = _t_gate_by_patch(tmp_path, table)
+    graph = _t_gate_by_patch(tmp_path, table, (FPGA_B,))
 
     with pytest.raises(ValueError, match=r"routes no pool .* \(\(1, 0\),\)"):
         machine_module.Machine.build(graph, 0)
+
+
+def test_a_group_of_patches_shares_a_pool_and_a_region_has_its_own_row(
+    tmp_path,
+):
+    """Patches (0,0) and (0,1) share weak; (1,0) decodes on slow's row.
+
+    A fixed group of patches sharing one decoder is AFS's (2001.06598);
+    a different decoder for one part of the machine, Tour de gross's
+    (2506.03094).
+    """
+    table = (((0, 0), "weak"), ((0, 1), "weak"), ((1, 0), "slow"))
+    graph = _t_gate_by_patch(tmp_path, table, (SLOW,))
+    machine = machine_module.Machine.build(graph, 0)
+
+    result = machine.run()
+
+    units = collections.defaultdict(set)
+    decode_ticks = collections.defaultdict(set)
+    for record in machine.observation.stages.records:
+        units[record.stream_id].add(record.unit_name)
+        duration = record.end_ticks - record.start_ticks
+        decode_ticks[(record.unit_name, record.stage)].add(duration)
+    weak_ticks = config.microseconds_to_ticks(T_GATE_DECODE_MICROSECONDS)
+    assert result.terminal_status == "complete"
+    assert dict(units) == {
+        CONTROL_STREAM: {"weak#0"},
+        T_STREAM: {"weak#0"},
+        S_ANCILLA_STREAM: {"slow#0"},
+    }
+    assert decode_ticks[("weak#0", "algorithm")] == {weak_ticks}
+    assert decode_ticks[("slow#0", "algorithm")] == {2 * weak_ticks}

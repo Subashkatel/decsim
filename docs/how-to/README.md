@@ -34,7 +34,7 @@ the [reference](../reference/README.md) pages.
   the run reports for it.
 - [How to route windows to several pools](route_windows_to_several_pools.md):
   a router in front of the entry pool, a rule that names each window's
-  pool, and what it costs.
+  pool, pools escalating to one shared pool, and pools on one device.
 - [How to share a pool among patches](share_a_pool_among_patches.md):
   VQD's critical-first schedulers (MLS, RR, MFD) for a pool with fewer
   units than patches.

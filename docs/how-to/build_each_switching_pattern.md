@@ -77,7 +77,6 @@ to this table, when the machine is built:
 |---|---|
 | `double_window` on an edge past the entry pool | Toshio defines it over the entry pool's sliding chain; a pool past it decodes only what it is sent. A `redo_window` there redoes the double region. |
 | `double_window` beside a router | it absorbs neighbouring windows, which a router may send to two pools |
-| an escalate edge from an entry pool past the first | the edge's boundaries are the first entry pool's |
 | more than one router | |
 | a VQD scheduler over a stream | a stream's critical point is a segment's end, which the scheduler does not read |
 | likelihood pooling over members of two fault representations | Harmony prices a matching's hyperedge errors by an edge decomposition |

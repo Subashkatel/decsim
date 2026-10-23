@@ -52,8 +52,56 @@ is the pool that answered, and each pool's statistics sit at its name.
 With the same decoder on every pool, routing changes no correction,
 only the timing (`tests/windows/test_routers.py`).
 
+## 4. Escalate from any routed pool, to a pool they share
+
+Any entry pool may escalate. Several may escalate to one target, as
+Delfosse's lazy decoders share decoding units (2001.11427 Sec. V) and
+Toshio's weak decoders share one strong decoder (2510.25222 Sec. III C):
+
+```python
+grown = machines.with_escalation(routed, "weak", "strong", strong, switching)
+shared = machines.with_escalation_to(grown, "fpga_b", "strong", switching)
+```
+
+A window climbs the chain its own entry pool starts; each pool leaves
+by at most one edge. An answer that goes back through a chip
+(`strong_answer_route=through_weak_chip`) goes to the chip that asked.
+Every edge out of an entry pool must agree on `strong_window` and
+`confidence`, since the planner lays one plan for all of them, and a
+task's learned threshold is refused over more than one entry edge:
+give each a fixed one. `tests/escalation/test_shared_target.py` runs
+both answer routes and a third level behind the shared pool.
+
+## 5. Name the pool that decodes the factory
+
+Idle rounds go to the pool of their operation's patch. No paper
+dedicates a decoder to a magic-state factory (DecoNet 2504.11805
+Sec. VIII-F and SWIPER 2412.05115 Fig. 10 decode distillation as
+ordinary patches), so with more than one entry pool the
+router names one: `with_router(..., factory_pool="fpga_b")`, else the
+build refuses.
+
+## 6. Put pools on one device
+
+A device is a site whose links are shared. Place the pools at one site
+name, any name, and give the fabric one shared link per site pair:
+
+```python
+import decsim.topology.fabrics as fabrics
+
+cable = fabrics.TimedLink(1.0, 100_000.0)
+shared = fabrics.SiteLink((fabrics.FRIDGE, "gpu0"), cable, shared=True)
+fabric = fabrics.SiteLinks((shared,), base_fabric)
+```
+
+Every hop from `fridge` into `gpu0` then queues on one channel,
+`fridge_to_gpu0`, and every hop back on `gpu0_to_fridge`. The pools on
+the device share its links, not its compute: each pool keeps its own
+units.
+
 ## What a router does not do yet
 
-An escalate edge may leave only the first entry pool, and an absorbing
-strong window (`double_window`) is refused beside a router; both say
-"not implemented yet" ([the refusals](build_each_switching_pattern.md#what-is-refused-for-now)).
+An absorbing strong window (`double_window`) is refused beside a
+router, "not implemented yet" ([the refusals](build_each_switching_pattern.md#what-is-refused-for-now)).
+Every routed pool reads the one entry store; a store per pool is
+designed, not built.

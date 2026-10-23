@@ -14,6 +14,7 @@ import dataclasses
 import pytest
 
 import decsim.config as config
+import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
@@ -184,3 +185,37 @@ def test_a_strong_pool_on_its_own_site_shares_its_link_with_both_chips():
     assert channel_by_path["weak_to_strong"] == "fridge_to_gpu0"
     assert channel_by_path["fpga_b_to_strong"] == "fridge_to_gpu0"
     assert channel_by_path["strong_to_weak"] == "gpu0_to_fridge"
+
+
+def test_the_shared_strong_pool_escalates_on_to_a_deep_pool_for_both():
+    """Three levels with a fan-in: weak and fpga_b, then strong, then deep.
+
+    Strong doubts every window, so each window of both patches climbs
+    the chain its own entry pool starts and is answered by deep.
+    """
+    graph = _shared_strong("direct")
+    doubting, _strong = declared_run.switching_decoders(True)
+    graph = graph.with_settings("strong", algorithm=doubting)
+    deep_algorithm = decoders.PresetLatencyDecoder.Settings(50.0)
+    deep_pool = decoder_settings.DecoderPoolSettings(
+        algorithm=deep_algorithm, engine=declared_run.DECLARED_ENGINE
+    )
+    deep_switching = declared_run.declared_switching()
+    graph = machines.with_escalation(
+        graph, "strong", "deep", deep_pool, deep_switching
+    )
+    machine = machine_module.Machine.build(graph, 0)
+
+    result = machine.run()
+
+    tiers = dict(declared_run.frame_tiers(machine))
+    transfers = switching_mode.transfers_by_path(result)
+    assert result.terminal_status == "complete"
+    assert tiers == {
+        (1, 0): "deep",
+        (1, 1): "deep",
+        (2, 0): "deep",
+        (2, 1): "deep",
+    }
+    assert transfers["deep_to_frame"] == 4
+    assert "strong_to_frame" not in transfers

@@ -1257,13 +1257,24 @@ bits bounds the store; None is unbounded. A full store makes the controller hold
 | --- | --- | --- |
 | `pool_by_patch` | `tuple` | `()` |
 
+### `OnePool.Settings`
+
+`decsim/windows/routers.py`. The one entry pool, by its part's name.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `pool` | `str` | required |
+
 ### `Router.Settings`
 
-`decsim/windows/routers.py`. The router's rule (this module's rows).
+`decsim/windows/routers.py`. The router's rule (this module's rows), and the factory's pool.
+
+factory_pool names the pool the magic-state factory's correction decodes go to; None names the one entry pool of a machine with one. No paper sets decoders aside for a factory: DecoNet decodes 15-to-1 distillation on its per-qubit decoders (2504.11805 Sec. VIII-F) and VQD decodes the factory's storage patches in its shared pool (2406.17995 Sec. 5.3), so a run names which pool serves them (build/layout.py factory_pool).
 
 | Field | Type | Default |
 | --- | --- | --- |
 | `rule` | `RuleSettings` | `ByPatch.Settings()` |
+| `factory_pool` | `Optional[str]` | `None` |
 
 ### `SchemeSettings`
 

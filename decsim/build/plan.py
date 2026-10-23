@@ -512,10 +512,9 @@ def _physical_formation_tables(physical_circuits: tuple) -> dict:
 def _physical_formation_table(
     physical: workload_records.FiniteCircuit,
 ) -> formation_records.FormationTable:
-    """The recipes, formed off the declared measurement schedule."""
+    """The recipes, formed off its measurement schedule or its detectors."""
     schedule = dict(physical.measurement_rounds)
-    rounds = schedule.values()
-    round_count = max(rounds)
+    round_count = physical.round_count()
     return detector_formation.build_formation_table(
         physical.circuit, round_count, measurement_rounds=schedule
     )

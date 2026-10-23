@@ -64,6 +64,25 @@ def test_a_finite_workload_reads_back_what_was_written(tmp_path):
     assert read == workload
 
 
+def test_a_circuit_whose_detectors_carry_their_rounds_needs_no_rounds_file(
+    tmp_path,
+):
+    program = program_records.Operation(1, "program", (0,), patches=(0,))
+    circuit = stim.Circuit(
+        "M 0\nDETECTOR(0, 0) rec[-1]\nM 0\nDETECTOR(0, 1) rec[-1]"
+    )
+    physical = workload_records.FiniteCircuit(circuit)
+    workload = workload_records.Workload((program,), {1: 2}, physical)
+
+    keys = workload_files.write_workload(workload, tmp_path)
+    operations_path = tmp_path / keys["operations"]
+    circuit_path = tmp_path / keys["circuit"]
+    read = workload_files.read_workload(operations_path, circuit_path)
+
+    assert "measurement_rounds" not in keys
+    assert read == workload
+
+
 def test_live_fragments_read_back_what_was_written(tmp_path):
     workload = _live_workload()
 

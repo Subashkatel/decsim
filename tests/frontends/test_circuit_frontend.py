@@ -7,15 +7,35 @@ region and its rounds are derived as examples/live_memory_example.py
 writes them by hand; the region follows the papers' rule that a
 waiting patch keeps measuring (Terhal 1302.3428 lines 2697-2698,
 Holmes 2004.04794 line 451).
+
+A lattice-surgery circuit run as one operation over its whole history
+is decoded as PyMatching decodes the whole circuit's error model
+(stim.Circuit.detector_error_model, decompose_errors), shot for shot,
+when one window commits every round.
 """
 
+import pathlib
+
+import numpy
+import pymatching
 import pytest
 import stim
 
 import decsim.frontends.circuit_frontend as circuit_frontend
+import decsim.frontends.settings as workload_settings
+import decsim.machine as machine_module
+import decsim.presets.machines as machines
 import decsim.records.circuits as circuit_records
 import decsim.records.program as program_records
 import decsim.records.workload as workload_records
+import tests.declared_run as declared_run
+
+THIS_FILE = pathlib.Path(__file__)
+DATA_DIRECTORY = THIS_FILE.parents[1] / "data"
+# tqec's lattice-surgery CNOT at k = 1: d = 3, twelve rounds, a merge
+# readout and two observables, its detectors timed by coordinate
+TQEC_CNOT_PATH = DATA_DIRECTORY / "tqec_cnot_k1.stim"
+TQEC_CNOT = stim.Circuit.from_file(TQEC_CNOT_PATH)
 
 
 def _by_id(operations) -> dict:
@@ -29,6 +49,23 @@ def _lowered_operations(operations) -> dict:
     workload = workload_records.Workload(tuple(operations))
     program = circuit_frontend.lowered(workload)
     return _by_id(program.operations)
+
+
+def _one_window_machine(circuit: stim.Circuit, seed: int):
+    """The weak baseline running the circuit as one operation, one window."""
+    physical = workload_records.FiniteCircuit(circuit)
+    program = program_records.Operation(1, "program", (0,), patches=(0,))
+    round_count = physical.round_count()
+    workload = workload_records.Workload((program,), {}, physical)
+    running = workload_settings.WorkloadSettings.running(workload)
+    graph = machines.weak_baseline(3, 0.002, 1.0)
+    graph = graph.with_held("workload", running)
+    base_windows = graph.held("windows")
+    windows = declared_run.windows_on(
+        base_windows, commit_rounds=round_count, buffer_rounds=0
+    )
+    graph = graph.with_held("windows", windows)
+    return machine_module.Machine.build(graph, seed)
 
 
 def _live_workload() -> workload_records.Workload:
@@ -143,3 +180,19 @@ def test_one_circuit_under_two_operations_without_ranges_is_refused():
 
     with pytest.raises(ValueError, match="the workload's one circuit"):
         circuit_frontend.lowered(workload)
+
+
+@pytest.mark.parametrize("seed", range(24))
+def test_a_lattice_surgery_circuit_decodes_as_whole_circuit_matching(seed):
+    """No schedule is declared: the rounds come off the detectors."""
+    machine = _one_window_machine(TQEC_CNOT, seed)
+    model = TQEC_CNOT.detector_error_model(decompose_errors=True)
+    matching = pymatching.Matching.from_detector_error_model(model)
+
+    result = machine.run()
+    (row,) = result.operation_results
+    events = machine.qpu.syndrome_source.sampled_detection_events(1)
+    event_bits = numpy.array(events, dtype=numpy.uint8)
+    whole_circuit = matching.decode(event_bits)
+
+    assert tuple(whole_circuit) == tuple(row.logical_observables)

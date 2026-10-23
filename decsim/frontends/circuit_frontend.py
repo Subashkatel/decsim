@@ -269,9 +269,7 @@ def _owner_round_count(physical) -> int:
     (qpu/streaming_stim_device.py), so the owner declares no length.
     """
     if isinstance(physical, workload_records.FiniteCircuit):
-        schedule = dict(physical.measurement_rounds)
-        rounds = schedule.values()
-        return max(rounds)
+        return physical.round_count()
     return 0
 
 

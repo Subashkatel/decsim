@@ -18,16 +18,39 @@ class FiniteCircuit:
 
     measurement_rounds is the round each measurement lands in: the packet
     schedule a front end declares when its detectors carry no round
-    coordinate, held as pairs so the record hashes.
+    coordinate, held as pairs so the record hashes. Left empty, each
+    measurement takes the round its DETECTOR group announces, its time
+    coordinate plus one (detector_error_model/detector_formation.py), as
+    a tqec lattice-surgery circuit's detectors carry it.
     """
 
     # Stim's circuit has no hash; equal records hold equal circuits.
     circuit: stim.Circuit = dataclasses.field(hash=False)
-    measurement_rounds: tuple
+    measurement_rounds: tuple = ()
 
     def __post_init__(self) -> None:
         pairs = _held_pairs(self.measurement_rounds)
         object.__setattr__(self, "measurement_rounds", pairs)
+        if pairs:
+            return
+        _refuse_a_detector_with_no_time(self.circuit)
+
+    def round_count(self) -> int:
+        """The history's rounds: its schedule's last, or its last DETECTOR's.
+
+        Read off the circuit, the count is one past the last time
+        coordinate, so a post-readout detector layer, as Stim's generated
+        memory writes one, is a round of its own; a front end that folds
+        it into the last round declares the schedule.
+        """
+        if self.measurement_rounds:
+            schedule = dict(self.measurement_rounds)
+            rounds = schedule.values()
+            return max(rounds)
+        coordinates = self.circuit.get_detector_coordinates()
+        times = [coordinate[-1] for coordinate in coordinates.values()]
+        last_time = max(times)
+        return int(last_time) + 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,6 +78,23 @@ class Workload:
     def __post_init__(self) -> None:
         pairs = _held_pairs(self.round_counts)
         object.__setattr__(self, "round_counts", pairs)
+
+
+def _refuse_a_detector_with_no_time(circuit: stim.Circuit) -> None:
+    """Rounds read off a circuit need a time coordinate on every detector."""
+    coordinates = circuit.get_detector_coordinates()
+    untimed = []
+    for detector, coordinate in coordinates.items():
+        if not coordinate:
+            untimed.append(detector)
+    if coordinates and not untimed:
+        return
+    raise ValueError(
+        "a finite circuit with no measurement_rounds has its rounds read off "
+        "its DETECTOR time coordinates, and this one has "
+        f"{len(coordinates)} detectors, {len(untimed)} with no coordinate; "
+        "declare measurement_rounds"
+    )
 
 
 def _held_pairs(keyed_values) -> tuple:

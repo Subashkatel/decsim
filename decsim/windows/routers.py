@@ -87,7 +87,9 @@ class ByPatch:
             """Every operation's first patch has an entry pool."""
             table = dict(self.pool_by_patch)
             for pool_name in table.values():
-                _refuse_a_pool_not_routed_to(pool_name, pool_names)
+                _refuse_a_pool_not_routed_to(
+                    "pool_by_patch", pool_name, pool_names
+                )
             for operation in operations:
                 _refuse_an_unrouted_operation(operation, table)
 
@@ -110,8 +112,13 @@ class OnePool:
         def check_operations(
             self, operations: tuple, pool_names: tuple
         ) -> None:
-            """Nothing to refuse: the build names the entry pool itself."""
-            del operations, pool_names
+            """The one pool is one the router's windows port reaches.
+
+            A machine with no router part names its entry pool itself, so
+            only a router a run sets can name a pool it does not reach.
+            """
+            del operations
+            _refuse_a_pool_not_routed_to("pool", self.pool, pool_names)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -218,11 +225,13 @@ class Router:
         return tuple(sides)
 
 
-def _refuse_a_pool_not_routed_to(pool_name: str, pool_names: tuple) -> None:
+def _refuse_a_pool_not_routed_to(
+    field: str, pool_name: str, pool_names: tuple
+) -> None:
     if pool_name in pool_names:
         return
     raise ValueError(
-        f"router.rule.pool_by_patch names the pool {pool_name!r}, which "
+        f"router.rule.{field} names the pool {pool_name!r}, which "
         f"the router's windows port does not reach; it reaches "
         f"{list(pool_names)}"
     )

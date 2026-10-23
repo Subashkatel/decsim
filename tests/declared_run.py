@@ -674,9 +674,11 @@ class OccupancyProbe:
     def observe(self, tick):
         """Note each store's occupancy whenever it changed."""
         retention = self.window_manager.retention
-        weak_store = _first_or_none(retention.entry_stores())
+        entry_stores = retention.entry_stores()
+        weak_store = _first_or_none(entry_stores)
         self._note(self.weak_timeline, tick, weak_store)
-        strong_store = _first_or_none(retention.landing_stores())
+        landing_stores = retention.landing_stores()
+        strong_store = _first_or_none(landing_stores)
         self._note(self.strong_timeline, tick, strong_store)
 
     def _note(self, timeline, tick, store):

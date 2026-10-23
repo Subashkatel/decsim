@@ -91,8 +91,9 @@ class _Fixture:
             blocking_operation_ids=set(),
         )
         self.store = _Store()
+        stores = (self.store,)
         retention = types.SimpleNamespace(
-            entry_stores=lambda: (self.store,),
+            entry_stores=lambda: stores,
             release_hold_if_live=lambda _owner, _store: None,
             release_potential_strong=lambda _key: None,
             landing_stores=tuple,

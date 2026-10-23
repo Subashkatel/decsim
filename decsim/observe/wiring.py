@@ -90,7 +90,8 @@ def observe(
         )
     decode_records = _decode_records(observation, keeps_records)
     _connect_decode_records(decoder_managers, decode_records)
-    computes_confidence = bool(windows.entry_joins())
+    entry_joins = windows.entry_joins()
+    computes_confidence = bool(entry_joins)
     confidence = _connect_confidence(
         computes_confidence, decoder_managers, keeps_records
     )

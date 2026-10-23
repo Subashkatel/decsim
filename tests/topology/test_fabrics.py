@@ -385,9 +385,8 @@ def _priced_channel(rule, route) -> str:
 
 
 def test_a_site_link_prices_every_route_between_its_two_sites():
-    rule = fabrics.SiteLinks(
-        (fabrics.SiteLink((fabrics.FRIDGE, GPU_SITE), CABLE),)
-    )
+    link = fabrics.SiteLink((fabrics.FRIDGE, GPU_SITE), CABLE)
+    rule = fabrics.SiteLinks((link,))
     up = fabrics.Route("weak_to_strong", fabrics.FRIDGE, GPU_SITE, FORWARD)
     inside = fabrics.Route(
         "weak_to_weak", fabrics.FRIDGE, fabrics.FRIDGE, FORWARD

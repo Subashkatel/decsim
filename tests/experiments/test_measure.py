@@ -3204,8 +3204,7 @@ def test_a_rounds_copy_is_not_counted_as_a_second_write_of_the_round():
     )
     hops = ("controller_to_weak_buffer", "controller_to_fpga_b_buffer")
 
-    delays = measure.controller_write_delays_us(
-        [own, copy], hops, observe_settings.ObservationSettings()
-    )
+    settings = observe_settings.ObservationSettings()
+    delays = measure.controller_write_delays_us([own, copy], hops, settings)
 
     assert delays == [1.0]

@@ -45,7 +45,8 @@ def stores_router(store_by_pool: dict, entry_of) -> types.SimpleNamespace:
     for pool, store in store_by_pool.items():
         side = routers.EntrySide(pool, None, None, store=store)
         side_by_pool[pool] = side
-    sides = tuple(side_by_pool.values())
+    each_side = side_by_pool.values()
+    sides = tuple(each_side)
     return types.SimpleNamespace(
         pool_of_stream=entry_of,
         side=side_by_pool.__getitem__,

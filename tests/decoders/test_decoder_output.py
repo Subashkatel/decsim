@@ -280,12 +280,13 @@ def _timing_only_job(patch_ids: tuple) -> decoding_records.DecodeJob:
         size_bits=8,
         fragment_index=0,
     )
+    request_key = _request_key(window_records.WEAK_POOL_ID)
     return decoding_records.DecodeJob(
         stream_id=4,
         window_id=1,
         round_count=5,
         payloads=[fragment],
-        request_key=_request_key(window_records.WEAK_POOL_ID),
+        request_key=request_key,
     )
 
 
@@ -319,12 +320,13 @@ def test_a_direct_selection_carries_a_crossing_bit_per_observable():
         graphlike_faults=None,
         physical_faults=placed,
     )
+    request_key = _request_key(window_records.WEAK_POOL_ID)
     weak_job = decoding_records.DecodeJob(
         stream_id=4,
         window_id=1,
         round_count=5,
         detector_error_model=model,
-        request_key=_request_key(window_records.WEAK_POOL_ID),
+        request_key=request_key,
     )
     assert _selection_bits("direct", weak_job) == 64 + 2
 

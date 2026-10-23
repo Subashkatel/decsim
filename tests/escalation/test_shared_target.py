@@ -50,22 +50,23 @@ def _shared_strong(
         declared_run.memory_operation(2),
     ]
     workload = declared_run.declared_workload(operations, 6)
+    plain_windows = window_settings.WindowSettings()
     windows = window_settings.switching_windows(
-        window_settings.WindowSettings(), declared_run.REDO_WINDOW
+        plain_windows, declared_run.REDO_WINDOW
     )
     switching = declared_run.declared_switching(
         strong_window=declared_run.REDO_WINDOW
     )
+    switching_clock = config.Clock(4)
     switching = dataclasses.replace(
-        switching, strong_answer_route=answer_route, clock=config.Clock(4)
+        switching, strong_answer_route=answer_route, clock=switching_clock
     )
+    qpu = declared_run.declared_qpu()
+    controller = declared_run.declared_controller()
+    frame = declared_run.declared_frame()
+    declared_fabric = declared_run.declared_fabric()
     machine = machines.base(
-        workload,
-        declared_run.declared_qpu(),
-        windows,
-        declared_run.declared_controller(),
-        declared_run.declared_frame(),
-        fabric=declared_run.declared_fabric(),
+        workload, qpu, windows, controller, frame, fabric=declared_fabric
     )
     machine = machines.with_pool(machine, weak_pool)
     machine = machines.with_escalation(
@@ -89,14 +90,16 @@ def _shared_strong(
 
 
 def _run(answer_route: str):
-    machine = machine_module.Machine.build(_shared_strong(answer_route), 0)
+    graph = _shared_strong(answer_route)
+    machine = machine_module.Machine.build(graph, 0)
     result = machine.run()
     return machine, result
 
 
 def test_both_pools_escalate_every_window_to_the_one_strong_pool():
     machine, result = _run("direct")
-    tiers = dict(declared_run.frame_tiers(machine))
+    frame_tiers = declared_run.frame_tiers(machine)
+    tiers = dict(frame_tiers)
     transfers = switching_mode.transfers_by_path(result)
     assert tiers == {
         (1, 0): "strong",
@@ -136,18 +139,18 @@ def test_one_learned_threshold_over_two_entry_edges_is_refused():
     # the refusal reads only that the task learns a threshold
     calibrator = object()
 
+    graph = _shared_strong("direct")
+
     with pytest.raises(ValueError, match="2 edges leave entry pools"):
-        machine_module.Machine.build(
-            _shared_strong("direct"), 0, online_threshold=calibrator
-        )
+        machine_module.Machine.build(graph, 0, online_threshold=calibrator)
 
 
 def test_the_factorys_decodes_go_to_the_pool_the_router_names():
-    machine = machine_module.Machine.build(
-        _shared_strong("direct", factory_pool="fpga_b"), 0
-    )
+    graph = _shared_strong("direct", factory_pool="fpga_b")
+    machine = machine_module.Machine.build(graph, 0)
 
-    fpga_b = machine.decoders.manager_of(window_records.PoolId("fpga_b"))
+    fpga_b_id = window_records.PoolId("fpga_b")
+    fpga_b = machine.decoders.manager_of(fpga_b_id)
     assert machine.qpu.factory.decode_queue is fpga_b
 
 
@@ -170,7 +173,8 @@ def test_a_strong_pool_on_its_own_site_shares_its_link_with_both_chips():
     """
     cable = fabrics.TimedLink(1.0, 100_000.0)
     shared = fabrics.SiteLink((fabrics.FRIDGE, "gpu0"), cable, shared=True)
-    fabric = fabrics.SiteLinks((shared,), declared_run.declared_fabric())
+    declared_fabric = declared_run.declared_fabric()
+    fabric = fabrics.SiteLinks((shared,), declared_fabric)
     graph = _shared_strong("direct", strong_site="gpu0", fabric=fabric)
     machine = machine_module.Machine.build(graph, 0)
 
@@ -179,9 +183,11 @@ def test_a_strong_pool_on_its_own_site_shares_its_link_with_both_chips():
     channel_by_path = {}
     for path in machine.layout.card.paths:
         channel_by_path[path.name] = path.settings.channel.name
-    tiers = dict(declared_run.frame_tiers(machine))
+    frame_tiers = declared_run.frame_tiers(machine)
+    tiers = dict(frame_tiers)
+    tier_names = tiers.values()
     assert result.terminal_status == "complete"
-    assert set(tiers.values()) == {"strong"}
+    assert set(tier_names) == {"strong"}
     assert channel_by_path["weak_to_strong"] == "fridge_to_gpu0"
     assert channel_by_path["fpga_b_to_strong"] == "fridge_to_gpu0"
     assert channel_by_path["strong_to_weak"] == "gpu0_to_fridge"
@@ -208,7 +214,8 @@ def test_the_shared_strong_pool_escalates_on_to_a_deep_pool_for_both():
 
     result = machine.run()
 
-    tiers = dict(declared_run.frame_tiers(machine))
+    frame_tiers = declared_run.frame_tiers(machine)
+    tiers = dict(frame_tiers)
     transfers = switching_mode.transfers_by_path(result)
     assert result.terminal_status == "complete"
     assert tiers == {

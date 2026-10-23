@@ -194,7 +194,8 @@ class Router:
     ) -> ports.DecodeQueue:
         """The manager of the entry pool that decodes the operation."""
         name = self.rule.pool_for(operation)
-        side = self.side(window_records.PoolId(name))
+        pool = window_records.PoolId(name)
+        side = self.side(pool)
         return side.decode_queue
 
     def side(self, pool: window_records.PoolId) -> EntrySide:

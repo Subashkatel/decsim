@@ -393,9 +393,7 @@ class DecodeRequester:
         ):
             store = self.retention.store_of_stream(window.stream_id)
             self.builder.stamp_first_round(window, store)
-        if not self.tracker.is_data_complete(window):
-            return
-        if not self.retention.copied_reads_landed(window):
+        if not self._has_its_rounds(window):
             return
         operation = self.tracker.operation_by_id[window.stream_id]
         read_keys = self.retention.read_keys_for_bounds(
@@ -446,6 +444,16 @@ class DecodeRequester:
         delay = edge - engine.now
         decide = functools.partial(self._decide, window.key)
         engine.schedule(delay, decide, label="window decision")
+
+    def _has_its_rounds(self, window: window_records.Window) -> bool:
+        """Whether every round the window reads is in its pool's store.
+
+        A round of another pool's stream is there once its copy landed
+        (controller/round_destinations.py).
+        """
+        if not self.tracker.is_data_complete(window):
+            return False
+        return self.retention.copied_reads_landed(window)
 
     def _decide(self, window_key: tuple) -> None:
         """The window's decision ended: issue its requests, unless withdrawn."""

@@ -232,24 +232,23 @@ class Machine:
         """
         root_seed = _root_seed(seed)
         edges = escalation_build.escalate_edges_of(switching_parts)
-        weak_name, strong_name = layout.entry_edge_stores()
-        weak_store = readout.store_named(weak_name)
-        strong_store = readout.store_named(strong_name)
+        factory_pool = layout.factory_pool()
+        factory_queue = decoders.manager_of(factory_pool)
         qpu.connect(
             readout_receiver=readout.controller,
             runtime=control.execution_runtime,
             idle_rounds=control.idle_rounds,
-            decode_queue=decoders.manager_of(layout.factory_pool()),
+            decode_queue=factory_queue,
         )
         readout.connect(
             windows=windows.window_manager,
             retention=windows.retention,
+            router=windows.router,
         )
         input_fold = decoders.decoder_manager.input_fold()
         entry_sides = _entry_sides(layout, readout, decoders, windows)
         windows.connect(
-            weak_store=weak_store,
-            strong_store=strong_store,
+            writes=readout.destinations,
             primary_decoder=decoders.primary_decoder,
             target_decoders=decoders.target_decoders,
             edges=edges,
@@ -516,7 +515,7 @@ def _entry_sides(
     decoders: decoders_part.Decoders,
     windows: windows_part.Windows,
 ) -> tuple:
-    """Every entry pool's manager, store end and join, each alike.
+    """Every entry pool's manager, store, store end and join, each alike.
 
     The store a pool reads sends to it over a hop of its own (layout
     StoreReader). A pool that computes a confidence joins its solves on
@@ -526,26 +525,36 @@ def _entry_sides(
     for entry in layout.entry_pools:
         pool = entry.pool
         manager = decoders.manager_of(pool)
-        store_output = _store_output_for(readout, entry)
         gap_join = windows.join_of(pool)
         if gap_join is not None:
             gap_join.decode_queue = manager
-        side = routers.EntrySide(pool, manager, store_output, gap_join)
+        side = _entry_side(readout, entry, manager, gap_join)
         sides.append(side)
     return tuple(sides)
 
 
-def _store_output_for(
-    readout: readout_part.Readout, entry: layout_module.PoolPlan
-) -> Optional[ports.SyndromeBufferOutput]:
-    """The end of the store the pool reads that sends to it.
+def _entry_side(
+    readout: readout_part.Readout,
+    entry: layout_module.PoolPlan,
+    manager: ports.DecodeQueue,
+    gap_join: Optional[ports.WindowGapJoin],
+) -> routers.EntrySide:
+    """One entry pool's side: its store and the end that sends to it.
 
-    None on a run with no decoder, whose idle pool reads no store.
+    A run with no decoder has an idle pool that reads no store.
     """
     store_parts = readout.store_parts(entry.store)
     if store_parts is None:
-        return None
-    return store_parts.output_for(entry.pool)
+        return routers.EntrySide(entry.pool, manager, None, gap_join)
+    store_output = store_parts.output_for(entry.pool)
+    return routers.EntrySide(
+        entry.pool,
+        manager,
+        store_output,
+        gap_join,
+        store=store_parts.store,
+        is_store_written=store_parts.is_written,
+    )
 
 
 def _root_seed(value) -> Optional[int]:

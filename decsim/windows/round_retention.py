@@ -1,7 +1,16 @@
 """The round retention: which rounds each window and request holds.
 
 A window holds [start_round, buffer_hi], with any successor overflow, in
-the store its tier reads. When the strong tier may re-decode it, the
+the store its entry pool reads: every hold on a stream's windows sits in
+the store of the pool the router sends the stream to. A read of another
+pool's stream, a merge's partner region or a successor's first rounds,
+is held there too, so the controller writes the round to that store as
+well as to its own (controller/round_destinations.py): DecoNet's router
+sends "measurement data to the appropriate decoder instances"
+(2504.11805 Sec. VI-B.2), and no source has a decoder fetch a
+neighbour's raw rounds when it decodes.
+
+When the strong tier may re-decode a window, the
 same rounds and those a strong redo reads (records/windows.py
 strong_context_bounds) are also held as a potential strong read in both
 stores of each escalate edge on its chain, the one it carries from and
@@ -67,17 +76,15 @@ class RoundRetention:
     A holder is a window or a request.
     """
 
-    # the store the entry pools read, and the one the first entry edge's
-    # target reads. A run whose plan's windows the strong tier decodes
-    # has no weak store; a run that reads no rounds from the room side
-    # has no store there
-    weak_store = ports.Port(ports.RetainedRounds, optional=True)
-    strong_store = ports.Port(ports.RetainedRounds, optional=True)
     planner = ports.Port(window_planner.WindowPlanner)
     tracker = ports.Port(round_tracker.RoundTracker)
-    # the owner of which entry pool decodes a stream, where its chain
-    # of edges starts; a run with no edge never asks it
-    router = ports.Port(routers.Router, optional=True)
+    # the owner of which entry pool decodes a stream, so which store
+    # holds its windows' reads and where its chain of edges starts
+    router = ports.Port(routers.Router)
+    # the controller's writes, asked whether a round another pool's
+    # window reads has already left without a copy; absent on a run
+    # with no decoder, which copies nothing
+    writes = ports.Port(ports.RoundWrites, optional=True)
     # the run's placement, asked how many rounds before a read's first
     # round its recipes read when a seat on that read forms the events
     detection_events = ports.Port(ports.DetectionEventPlacement)
@@ -98,6 +105,8 @@ class RoundRetention:
         # each escalate edge, by its source pool: a pool leaves by at
         # most one edge (topology/part_kinds.py), so its source names it
         self.edge_by_source: dict = {}
+        # each live copy hold, by the reader stream whose windows end it
+        self.copy_holds_by_stream: dict = {}
 
     def add_edge(
         self,
@@ -112,38 +121,90 @@ class RoundRetention:
 
     # ---- the stores
 
-    @property
-    def primary_store(self) -> ports.RetainedRounds:
-        """The store the primary tier reads.
+    def entry_stores(self) -> tuple:
+        """Each store an entry pool reads, once, the first pool's first.
 
-        The weak syndrome buffer, or the strong one for a run with none.
+        The router's sides name them; a run with no decoder has none.
         """
-        if self.weak_store is None:
-            return self.strong_store
-        return self.weak_store
+        stores = []
+        for side in self.router.sides():
+            if side.store is None or _holds_store(stores, side.store):
+                continue
+            stores.append(side.store)
+        return tuple(stores)
 
-    def store_for(
-        self, store: Optional[ports.RetainedRounds]
+    def store_of_stream(
+        self,
+        stream_id: Any,  # an opaque identity
     ) -> ports.RetainedRounds:
-        """The given store, or the store the primary tier reads."""
-        if store is None:
-            return self.primary_store
-        return store
+        """The store the stream's entry pool reads: its windows' reads."""
+        pool = self.router.pool_of_stream(stream_id)
+        side = self.router.side(pool)
+        return side.store
 
     def install_planned_holds(
         self, buffering_plan: decoding_records.SyndromeBufferingPlan
     ) -> None:
-        """Place the holds the plan's windows keep on the stores."""
+        """Place the holds the plan's windows keep on the stores.
+
+        They are placed before the run, so a planned window's read of a
+        successor another pool decodes is copied to its store.
+        """
         for owner, identities in buffering_plan.weak_holds:
-            self.primary_store.register_hold(owner, identities)
+            served_key = owner.served_window_key()
+            store = self.store_of_stream(served_key[0])
+            store.register_hold(owner, identities)
         for owner, identities in buffering_plan.potential_holds:
             self._hold_on_the_chain(owner, identities)
 
-    def release_round_if_unheld(self, round_key: tuple) -> None:
-        """Free a weak syndrome buffer round whose every consumer resolved."""
-        if self.weak_store is None:
+    def release_round_if_unheld(
+        self, store: ports.RetainedRounds, round_key: tuple
+    ) -> None:
+        """Free a stored round whose every consumer resolved."""
+        store.release_round_if_unheld(round_key)
+
+    def hold_copied_span(
+        self,
+        reader_span: window_records.RoundSpan,
+        read_span: window_records.RoundSpan,
+    ) -> None:
+        """Keep a merge's read span in the reader's store until claimed.
+
+        The reader's windows read the span (Window.spatial_reads); when
+        another pool decodes the read stream, the hold makes the
+        controller copy each round there as it writes it. A round
+        already written left without that copy, which no window could
+        then read: the coupling must come first.
+        """
+        store = self.store_of_stream(reader_span.stream_id)
+        if store is self.store_of_stream(read_span.stream_id):
             return
-        self.weak_store.release_round_if_unheld(round_key)
+        _refuse_a_copy_already_written(self.writes, read_span)
+        holder = decoding_records.CopiedReads(
+            reader_span.stream_id, read_span, reader_span.last_round
+        )
+        round_keys = _round_keys_of(read_span)
+        store.register_hold(holder, round_keys)
+        holds = self.copy_holds_by_stream.setdefault(reader_span.stream_id, [])
+        holds.append(holder)
+
+    def copied_reads_landed(self, window: window_records.Window) -> bool:
+        """Whether every round the window reads of another pool is here.
+
+        Its own stream's rounds are ready by the tracker's count; a copy
+        is ready once stored in the store the window reads.
+        """
+        entry_stores = self.entry_stores()
+        if len(entry_stores) == 1:
+            # one store takes every round, so nothing is a copy
+            return True
+        store = self.store_of_stream(window.stream_id)
+        for round_key in self.primary_read_keys(window):
+            if self.store_of_stream(round_key[0]) is store:
+                continue
+            if store.retained_fragments(round_key) is None:
+                return False
+        return True
 
     # ---- a window's reads
 
@@ -159,11 +220,13 @@ class RoundRetention:
         primary_reads = self.primary_read_keys(window)
         strong_context = self.strong_context_read_keys(window, primary_reads)
         reads = decoding_records.WindowReads(key)
-        self.primary_store.register_hold(reads, primary_reads)
+        store = self.store_of_stream(window.stream_id)
+        store.register_hold(reads, primary_reads)
         potential = decoding_records.PotentialStrong(key)
         held = primary_reads + strong_context
         self._hold_on_the_chain(potential, held)
         self._hold_later_stream_reads(window)
+        self._release_claimed_copies(window, store)
 
     def release_later_stream_reads(
         self,
@@ -201,13 +264,14 @@ class RoundRetention:
         window before the seal reaches it.
         """
         reads = decoding_records.WindowReads(window.key)
-        if not self.primary_store.has_hold(reads):
+        store = self.store_of_stream(window.stream_id)
+        if not store.has_hold(reads):
             return
         stop_round = window.commit_hi + 1
         new_reads = []
         for round_index in range(window.start_round, stop_round):
             new_reads.append((window.stream_id, round_index))
-        self.primary_store.replace_hold(reads, new_reads)
+        store.replace_hold(reads, new_reads)
 
     def primary_read_keys(self, window: window_records.Window) -> list:
         """The rounds the window's primary decode reads, from its start.
@@ -296,23 +360,29 @@ class RoundRetention:
         owner: decoding_records.Hold,
         store: Optional[ports.RetainedRounds] = None,
     ) -> None:
-        """Drop a hold that is still live; nothing for one already gone."""
-        store = self.store_for(store)
+        """Drop a hold that is still live; nothing for one already gone.
+
+        store None is the store of the window the hold serves.
+        """
+        if store is None:
+            served_key = owner.served_window_key()
+            store = self.store_of_stream(served_key[0])
         if store.has_hold(owner):
             store.release_hold(owner)
 
     def holds_input(self, job: decoding_records.DecodeJob) -> bool:
-        """Whether the job's input is held in the primary tier's store."""
+        """Whether the job's input is held in the store its pool reads."""
         if job.request_key is None:
             return False
         owner = decoding_records.DecoderInputHold(job.request_key)
-        return self.primary_store.has_hold(owner)
+        store = self.store_of_stream(job.request_key.stream_id)
+        return store.has_hold(owner)
 
     def bind_input_hold(
         self,
         job: decoding_records.DecodeJob,
         previous_owner: decoding_records.WindowReads,
-        store: Optional[ports.RetainedRounds] = None,
+        store: ports.RetainedRounds,
     ) -> None:
         """Transfer the window's hold to its admitted request.
 
@@ -320,7 +390,6 @@ class RoundRetention:
         overlapping rounds stay upstream until their last consumer has
         them.
         """
-        store = self.store_for(store)
         boundary_window_keys = ()
         if job.window is not None:
             boundary_window_keys = tuple(job.window.deps)
@@ -358,21 +427,22 @@ class RoundRetention:
         self,
         stream_id: Any,  # an opaque identity
     ) -> None:
-        """Open the stream's rounds in the store its windows read.
+        """Open the stream's rounds in every entry store.
 
-        A run with no decoder has no such store and opens nothing.
+        Its own store takes its rounds, and any other may hold a copy a
+        window there reads. A run with no decoder has no such store and
+        opens nothing.
         """
-        primary_store = self.primary_store
-        if primary_store is None:
-            return
-        primary_store.open_stream(stream_id)
+        for store in self.entry_stores():
+            store.open_stream(stream_id)
 
     def has_stream_store(
         self,
         stream_id: Any,  # an opaque identity
     ) -> bool:
         """Whether the stream's syndrome RAM is still open."""
-        return self.primary_store.has_stream(stream_id)
+        store = self.store_of_stream(stream_id)
+        return store.has_stream(stream_id)
 
     def strong_window_input(
         self,
@@ -532,7 +602,7 @@ class RoundRetention:
                 self.release_hold_if_live(potential, store)
 
     def landing_stores(self) -> tuple:
-        """Each store a region lands in, once: every edge's, else the strong.
+        """Each store a region lands in, once.
 
         Pools that share a target share the store it reads.
         """
@@ -540,8 +610,6 @@ class RoundRetention:
         for edge in self.edge_by_source.values():
             if not _holds_store(stores, edge.landed_in):
                 stores.append(edge.landed_in)
-        if not stores and self.strong_store is not None:
-            stores.append(self.strong_store)
         return tuple(stores)
 
     def release_absorbed_strong_hold(
@@ -616,7 +684,8 @@ class RoundRetention:
         path reaches a released claim here: an invariant, not a check.
         """
         claim = decoding_records.PotentialRestart(restart_key)
-        assert self.weak_store.has_hold(claim), (
+        store = self.store_of_stream(restart_key[0])
+        assert store.has_hold(claim), (
             f"strong-region plan for {key}: restart window {restart_key}'s "
             f"potential restart hold is no longer live"
         )
@@ -668,8 +737,14 @@ class RoundRetention:
         purpose: str,
         store: Optional[ports.RetainedRounds] = None,
     ) -> None:
-        """Reject a new consumer if any already-arrived input was released."""
-        store = self.store_for(store)
+        """Reject a new consumer if any already-arrived input was released.
+
+        store None is the store of the stream the rounds belong to.
+        """
+        if not round_keys:
+            return
+        if store is None:
+            store = self.store_of_stream(round_keys[0][0])
         arrived_for = self._arrivals_counted_for(store)
         missing = []
         for round_key in round_keys:
@@ -718,12 +793,13 @@ class RoundRetention:
             for store in self._held_stores(edge):
                 _replace_if_live(store, potential, held)
 
+        store = self.store_of_stream(window.stream_id)
         reads = decoding_records.WindowReads(key)
-        if self.primary_store.has_hold(reads):
-            self.primary_store.replace_hold(reads, primary_reads)
+        if store.has_hold(reads):
+            store.replace_hold(reads, primary_reads)
         restart = decoding_records.PotentialRestart(key)
-        if self.weak_store is not None and self.weak_store.has_hold(restart):
-            self.weak_store.replace_hold(restart, primary_reads)
+        if store.has_hold(restart):
+            store.replace_hold(restart, primary_reads)
 
     def _strong_rounds_read_before(
         self,
@@ -822,12 +898,19 @@ class RoundRetention:
     def _arrivals_counted_for(self, store):
         """The arrival counter of a store.
 
-        The weak store counts the rounds published; a store a region
-        lands in counts its own.
+        An entry store the controller writes counts the rounds
+        published; a store the rounds land in counts its own.
         """
-        if store is self.weak_store:
+        if self._is_written_entry_store(store):
             return self.tracker.rounds_arrived
         return functools.partial(_stored_through, self.tracker, store)
+
+    def _is_written_entry_store(self, store) -> bool:
+        """Whether the controller writes the store for an entry pool."""
+        for side in self.router.sides():
+            if side.store is store and side.is_store_written:
+                return True
+        return False
 
     def _move_to_in_flight(self, store, job, in_flight) -> None:
         """One store's potential or pending hold becomes the input in flight."""
@@ -863,6 +946,21 @@ class RoundRetention:
         for store in self._held_stores(next_edge):
             _replace_or_register(store, potential, identities)
 
+    def _release_claimed_copies(
+        self, window: window_records.Window, store: ports.RetainedRounds
+    ) -> None:
+        """A reader window laid through a copy hold's span ends the hold.
+
+        The window's own read hold names the copies it reads, so the
+        copy hold of a span its windows have claimed has no reader left.
+        """
+        holds = self.copy_holds_by_stream.get(window.stream_id, [])
+        for holder in list(holds):
+            if holder.reader_last_round > window.commit_hi:
+                continue
+            store.release_hold(holder)
+            holds.remove(holder)
+
 
 class SharedInputHold:
     """One store hold released when the last job that reads it has landed.
@@ -891,6 +989,31 @@ def round_identities_of(payloads: list) -> tuple:
     for fragment in payloads:
         identities[(fragment.stream_id, fragment.round_index)] = None
     return tuple(identities)
+
+
+def _round_keys_of(span: window_records.RoundSpan) -> tuple:
+    """Every round of the span, in order."""
+    stop_round = span.last_round + 1
+    keys = []
+    for round_index in range(span.first_round, stop_round):
+        keys.append((span.stream_id, round_index))
+    return tuple(keys)
+
+
+def _refuse_a_copy_already_written(
+    writes: ports.RoundWrites, read_span: window_records.RoundSpan
+) -> None:
+    """A span's first round must not have left before its copy was asked."""
+    last_written = writes.last_round_written(read_span.stream_id)
+    if read_span.first_round > last_written:
+        return
+    raise RuntimeError(
+        f"a window reads rounds {read_span.first_round}-"
+        f"{read_span.last_round} of stream {read_span.stream_id} from "
+        f"another pool's store, but the controller wrote through round "
+        f"{last_written} before the read was known: a copy is made only "
+        "as a round is written"
+    )
 
 
 def _release_from_each(stores: tuple, owner) -> None:

@@ -26,6 +26,7 @@ import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.qpu.settings as qpu_settings
+import decsim.records.identity as identity_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
@@ -449,3 +450,49 @@ def test_a_group_of_patches_shares_a_pool_and_a_region_has_its_own_row(
     }
     assert decode_ticks[("weak#0", "algorithm")] == {weak_ticks}
     assert decode_ticks[("slow#0", "algorithm")] == {2 * weak_ticks}
+
+
+def test_a_store_per_pool_is_copied_exactly_the_rounds_its_merges_read(
+    tmp_path,
+):
+    """fpga_b reads the control patch's merge regions; weak reads nothing.
+
+    The router sits before the stores, so each pool reads its own: the
+    controller writes the control stream's rounds 1-7 (the T merge) and
+    20-26 (the conditional S merge) to fpga_b's store as well, since
+    fpga_b's merge windows read them, and the committed boundaries go
+    from fpga_b to weak as with one store (DecoNet 2504.11805 Sec. V-B.2:
+    raw syndromes routed at write, one boundary message per pair).
+    """
+    table = (((0, 0), "weak"), ((0, 1), "fpga_b"), ((1, 0), "fpga_b"))
+    path = tmp_path / "t_gate.lss"
+    path.write_text(patch_lives_test.T_GATE)
+    workload = lattice_surgery.read_schedule(path, DISTANCE)
+    _settings, graph = patch_stream_graph(workload, T_GATE_DECODE_MICROSECONDS)
+    rule = routers.ByPatch.Settings(pool_by_patch=table)
+    stored = machines.with_store_per_pool(graph, rule, (FPGA_B,))
+    machine = machine_module.Machine.build(stored, 0)
+
+    result = machine.run()
+
+    transfers = result.link_traffic["transfers"]
+    control = identity_records.stable_identity_json(CONTROL_STREAM)
+    copied = _copies_into(transfers, "fpga_b_buffer", control)
+    boundaries = [row for row in transfers if row["path"] == "fpga_b_to_weak"]
+    assert result.terminal_status == "complete"
+    assert copied == [*range(1, 8), *range(20, 27)]
+    assert _copies_into(transfers, "weak_buffer", control) == []
+    assert len(boundaries) == 2
+
+
+def _copies_into(transfers: list, store_name: str, stream_json) -> list:
+    """The rounds of one stream the controller copied into a store."""
+    rounds = []
+    for row in transfers:
+        relation = row["attribution"]["relation"]
+        if relation != {"copy_into": store_name}:
+            continue
+        (span,) = row["attribution"]["rounds_by_stream"]
+        if span["stream_id"] == stream_json:
+            rounds.append(span["round_lo"])
+    return rounds

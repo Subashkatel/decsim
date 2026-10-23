@@ -70,6 +70,7 @@ import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.decode_records as decode_records
 import decsim.observe.link_traffic as link_traffic
+import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.presets.clocks as clocks
 import decsim.presets.experiment_one as experiment_one
@@ -3180,3 +3181,31 @@ def _tier_columns(machine) -> dict:
         if field.name.startswith(("weak_", "strong_")):
             columns[field.name] = getattr(measured, field.name)
     return columns
+
+
+def _write_row(path: str, relation, delay_ticks: int) -> dict:
+    """A controller write's transfer row, as the link ledger writes one."""
+    return {
+        "path": path,
+        "attribution": {
+            "rounds_by_stream": [{"round_lo": 1}],
+            "relation": relation,
+        },
+        "total_delay_ticks": delay_ticks,
+    }
+
+
+def test_a_rounds_copy_is_not_counted_as_a_second_write_of_the_round():
+    own = _write_row("controller_to_weak_buffer", None, 1_000_000)
+    copy = _write_row(
+        "controller_to_fpga_b_buffer",
+        {"copy_into": "fpga_b_buffer"},
+        2_000_000,
+    )
+    hops = ("controller_to_weak_buffer", "controller_to_fpga_b_buffer")
+
+    delays = measure.controller_write_delays_us(
+        [own, copy], hops, observe_settings.ObservationSettings()
+    )
+
+    assert delays == [1.0]

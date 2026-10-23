@@ -136,14 +136,37 @@ class SyndromeRoundReceiver:
         announcement. A round of a closed operation never lands here:
         the window manager refuses a round its plan does not expect.
         """
+        finish = functools.partial(self._finish_write, on_published)
+        self._form_then_write(packed, finish)
+
+    def receive_copy(
+        self,
+        packed: round_records.PackedRound,
+        on_stored: Callable[[], None],
+    ) -> None:
+        """Form one written copy of another pool's round, then store it.
+
+        A window of this store's pool reads the round
+        (controller/round_destinations.py); its own store publishes it,
+        so here it only wakes the windows that read it, then on_stored.
+        """
+        finish = functools.partial(self._finish_copy, on_stored)
+        self._form_then_write(packed, finish)
+
+    def _form_then_write(
+        self,
+        packed: round_records.PackedRound,
+        finish: Callable[[round_records.PackedRound], None],
+    ) -> None:
+        """The formation cycles, when this seat forms the round; the write."""
         formation_cycles = self.detection_events.cycles_at(self.intake.seat, 1)
         if formation_cycles == 0:
-            self._write(packed, on_published)
+            self._write(packed, finish)
             return
         clock = self.detection_events.clock
         edge = clock.edge(formation_cycles, self.engine.now)
         delay = edge - self.engine.now
-        write = functools.partial(self._write, packed, on_published)
+        write = functools.partial(self._write, packed, finish)
         self.engine.schedule(delay, write, label="detection event formation")
 
     def send_memory_round(
@@ -244,29 +267,40 @@ class SyndromeRoundReceiver:
     def _write(
         self,
         landed: round_records.PackedRound,
-        on_published: Callable[[], None],
+        finish: Callable[[round_records.PackedRound], None],
     ) -> None:
         """Ask the store when the formed round's write completes."""
         packed = self._as_stored(landed)
         stored_bits = round_records.fragment_wire_bits(packed.packet.fragments)
         written_tick = self.store.book_write(packed.round_key, stored_bits)
         if written_tick == self.engine.now:
-            self._finish_write(packed, on_published)
+            finish(packed)
             return
         delay = written_tick - self.engine.now
-        finish = functools.partial(self._finish_write, packed, on_published)
-        self.engine.schedule(delay, finish, label="syndrome buffer write")
+        finish_later = functools.partial(finish, packed)
+        self.engine.schedule(delay, finish_later, label="syndrome buffer write")
 
     def _finish_write(
         self,
-        packed: round_records.PackedRound,
         on_published: Callable[[], None],
+        packed: round_records.PackedRound,
     ) -> None:
         self._give_back_reservation(packed)
         self._take_slot(packed, self.engine.now)
         self._fire_published(packed)
         self.windows.accept_window_input(packed.packet)
         on_published()
+
+    def _finish_copy(
+        self,
+        on_stored: Callable[[], None],
+        packed: round_records.PackedRound,
+    ) -> None:
+        """Store the copy and wake its readers; its own store publishes it."""
+        self._give_back_reservation(packed)
+        self._take_slot(packed, self.engine.now)
+        self.windows.accept_copied_round(self.store, packed.packet)
+        on_stored()
 
     def _send_memory_round_on(
         self,

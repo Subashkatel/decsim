@@ -560,9 +560,12 @@ class WindowPlanner:
         windows = self.windows_of(stream_id)
         return layout.close_tail(windows, stream_round_count)
 
-    def couple_segments(self, spans_by_block: dict, couplings: tuple) -> None:
-        """A joint measurement's segments begin and end regions, read across."""
-        self.layouts.couple_segments(spans_by_block, couplings)
+    def couple_segments(self, spans_by_block: dict, couplings: tuple) -> tuple:
+        """A joint measurement's segments begin and end regions, read across.
+
+        Returns each (reader span, read span) pair read across.
+        """
+        return self.layouts.couple_segments(spans_by_block, couplings)
 
     def relay_stream(
         self,

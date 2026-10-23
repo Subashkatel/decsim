@@ -142,7 +142,6 @@ class _Fixture:
             is_strong_context_retained=False,
             primary_tier=window_records.WEAK_POOL_ID,
         )
-        self.retention.weak_store = self.store
         self.retention.planner = self.planner
         self.retention.tracker = self.tracker
         link = _Link()
@@ -180,9 +179,11 @@ class _Fixture:
             clock=clock,
         )
         self.requester.tracker = self.tracker
-        self.requester.router = one_entry.router(
-            decode_queue=self.queue, store_output=store_output
+        router = one_entry.router(
+            decode_queue=self.queue, store_output=store_output, store=self.store
         )
+        self.requester.router = router
+        self.retention.router = router
         self.requester.retention = self.retention
         self.requester.builder = self.builder
         self.requester.verdict = verdict

@@ -357,7 +357,7 @@ def _log_index(machine, needle: str) -> int:
 
 
 def _claim(machine, window_index: int):
-    store = machine.windows.window_manager.retention.weak_store
+    store = machine.windows.window_manager.retention.store_of_stream(1)
     claim = decoding_records.PotentialRestart((1, window_index))
     if not store.has_hold(claim):
         return None

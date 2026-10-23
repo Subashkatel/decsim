@@ -125,9 +125,8 @@ class OperationResults:
             return
         self.deliveries.finished_operation_ids.add(operation.id)
         self._deliver_result(operation)
-        weak_store = self.retention.weak_store
-        if weak_store is not None:
-            weak_store.close_stream(operation.id)
+        for store in self.retention.entry_stores():
+            store.close_stream(operation.id)
         self._close_strong_store_stream(operation.id)
         self.finish_workload_if_ready()
 
@@ -295,10 +294,7 @@ class OperationResults:
         """Every window committed and final, no store holding, sealed."""
         if not self._are_windows_final(stream_id):
             return False
-        weak_store = self.retention.weak_store
-        if weak_store is not None and weak_store.has_live_stream_reference(
-            stream_id
-        ):
+        if self._entry_store_references(stream_id):
             return False
         if self._strong_store_references(stream_id):
             return False
@@ -467,6 +463,13 @@ class OperationResults:
             if not cursor.passes(window):
                 return
             cursor.passed += 1
+
+    def _entry_store_references(self, stream_id) -> bool:
+        """Whether a live hold in an entry store names it, a copy's too."""
+        for store in self.retention.entry_stores():
+            if store.has_live_stream_reference(stream_id):
+                return True
+        return False
 
     def _strong_store_references(self, stream_id) -> bool:
         """Whether a live hold in a store a region lands in names it."""

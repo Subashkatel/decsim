@@ -99,11 +99,11 @@ def layout_of(machine: graph.Machine) -> layout_module.Layout:
     for pool in shape.pools:
         pool_plan = _pool_plan(pool, shape, frame_name)
         pools.append(pool_plan)
-        if pool in shape.entries[1:]:
+        if not _is_first_reader(shape, pool):
             continue
         store_plan = _store_plan(shape, pool)
+        store_plan = _with_other_readers(store_plan, shape)
         stores.append(store_plan)
-    stores[0] = _with_other_readers(stores[0], shape)
     edges = []
     for edge in shape.edges:
         carried_from = shape.store_by_pool[edge.source.name]
@@ -158,11 +158,6 @@ class _Shape:
         if self.router is None:
             return None
         return self.router.settings
-
-    def entry_store(self) -> graph.Part:
-        """The store the entry pool reads."""
-        entry = self.entry
-        return self.store_by_pool[entry.name]
 
 
 def _shape(machine: graph.Machine) -> _Shape:
@@ -271,14 +266,52 @@ def _routed_entries(
 
 
 def _routed_pools(machine: graph.Machine, router: graph.Part) -> tuple:
-    """The pools the router's windows port reaches, in wire order."""
+    """The pools the router's windows port reaches, in wire order.
+
+    A router after a store feeds the pools, which all read that store; a
+    router before the stores feeds a store per pool, each read by its
+    pool, as DecoNet's router routes "measurement data to the
+    appropriate decoder instances" (2504.11805 Sec. VI-B.2).
+    """
     windows = f"{router.name}.windows"
     routed = []
+    fed_kinds = set()
     for wire in machine.wires:
-        if wire.source == windows:
-            pool = _part_at(machine, wire.target)
-            routed.append(pool)
+        if wire.source != windows:
+            continue
+        fed = _part_at(machine, wire.target)
+        fed_kinds.add(fed.kind.name)
+        pool = _pool_fed_through(machine, fed)
+        routed.append(pool)
+    _refuse_a_router_feeding_stores_and_pools(router, fed_kinds)
     return tuple(routed)
+
+
+def _pool_fed_through(machine: graph.Machine, fed: graph.Part) -> graph.Part:
+    """The pool a router's wire reaches: the pool, or the store's reader."""
+    if fed.kind.name == _POOL_KIND:
+        return fed
+    reads = f"{fed.name}.reads"
+    for wire in machine.wires:
+        if wire.source == reads:
+            return _part_at(machine, wire.target)
+    raise graph.GraphError(
+        f"the router feeds the store {fed.name}, which no pool reads: a "
+        "router before the stores feeds one store per entry pool"
+    )
+
+
+def _refuse_a_router_feeding_stores_and_pools(
+    router: graph.Part, fed_kinds: set
+) -> None:
+    """A router feeds pools after one store, or stores; never both."""
+    if len(fed_kinds) < 2:
+        return
+    raise graph.GraphError(
+        f"{router.name}.windows reaches both stores and pools: a router "
+        "sits after the one store its pools read, or before a store per "
+        "pool"
+    )
 
 
 def _refuse_entries_the_router_misses(entries: list, routed: tuple) -> None:
@@ -403,17 +436,33 @@ def _hop(source_name: str, target_name: str) -> str:
 def _intake_shape(shape: _Shape, pool: graph.Part) -> str:
     """How a pool's store takes its rounds.
 
-    The controller writes the entry store, unless the first entry pool
-    sits away from the controller, where it reads a store the rounds
-    land in; an edge's target store takes its rounds as they land.
+    The controller writes an entry store, unless the store's first
+    reader sits away from the controller, where it reads a store the
+    rounds land in; an edge's target store takes its rounds as they
+    land.
     """
     if pool not in shape.entries:
         return receiver_module.LANDED
-    pool = shape.entry
+    store = shape.store_by_pool[pool.name]
+    reader = _first_reader_of(shape, store)
     controller_site = _held_site(shape.machine, "controller")
-    if _site(pool) != controller_site:
+    if _site(reader) != controller_site:
         return receiver_module.LANDED
     return receiver_module.WRITTEN
+
+
+def _first_reader_of(shape: _Shape, store: graph.Part) -> graph.Part:
+    """The first pool laid out that reads the store, whose plan it is."""
+    for pool in shape.pools:
+        if shape.store_by_pool[pool.name] is store:
+            return pool
+    raise RuntimeError(f"no pool reads the store {store.name}")
+
+
+def _is_first_reader(shape: _Shape, pool: graph.Part) -> bool:
+    """Whether no pool laid out before this one reads its store."""
+    store = shape.store_by_pool[pool.name]
+    return _first_reader_of(shape, store) is pool
 
 
 def _controller_name(machine: graph.Machine) -> str:
@@ -510,13 +559,16 @@ def _store_plan(shape: _Shape, pool: graph.Part) -> layout_module.StorePlan:
 
 
 def _with_other_readers(
-    entry_store: layout_module.StorePlan, shape: _Shape
+    store_plan: layout_module.StorePlan, shape: _Shape
 ) -> layout_module.StorePlan:
-    """The entry store, read by each entry pool past the first too."""
+    """The store, read by every other entry pool a router feeds from it."""
     readers = []
-    for pool in shape.entries[1:]:
+    for pool in shape.entries:
+        store = shape.store_by_pool[pool.name]
+        if store.name != store_plan.name or pool.name == store_plan.reader:
+            continue
         pool_id = window_records.PoolId(pool.name)
-        read_hop = _hop(entry_store.name, pool.name)
+        read_hop = _hop(store_plan.name, pool.name)
         reader = layout_module.StoreReader(
             pool=pool_id,
             read_hop=read_hop,
@@ -524,7 +576,7 @@ def _with_other_readers(
             reads_in_place=not pool.settings.copies_input,
         )
         readers.append(reader)
-    return dataclasses.replace(entry_store, other_readers=tuple(readers))
+    return dataclasses.replace(store_plan, other_readers=tuple(readers))
 
 
 def _edge_plan(
@@ -623,8 +675,9 @@ def _pool_routes(
     same_pool = _route(
         (pool.name, pool.name), (pool_site, pool_site), same_pool_role
     )
-    if pool in shape.entries[1:]:
-        # the entry store is written once, on the first entry's route
+    if not _is_first_reader(shape, pool):
+        # a store several pools read is written once, on its first
+        # reader's route
         return (read, answer, same_pool)
     write_role = route_records.HopRole(route_records.WRITE, intake_shape)
     controller_site = _held_site(shape.machine, "controller")
@@ -711,7 +764,8 @@ def _wire_links(shape: _Shape) -> dict:
 
     A wire between parts held once prices its shared hop; a wire to or
     from a switching part prices its edge's forward hop, and one from a
-    router the read of the store that feeds it.
+    router the hop from what feeds it: the read of the store before it,
+    or the controller's write into each store after it.
     """
     machine = shape.machine
     target_by_switching = {}
@@ -720,9 +774,8 @@ def _wire_links(shape: _Shape) -> dict:
         target_by_switching[edge.part.name] = edge.target.name
         source_by_switching[edge.part.name] = edge.source.name
     if shape.router is not None:
-        # a wire from the router prices the entry store's read
-        entry_store = shape.entry_store()
-        source_by_switching[shape.router.name] = entry_store.name
+        feed = _router_feed(machine, shape.router)
+        source_by_switching[shape.router.name] = feed.name
     links = {}
     for wire in machine.wires:
         if wire.link is None:
@@ -734,6 +787,15 @@ def _wire_links(shape: _Shape) -> dict:
         hop = _wire_hop(source, target, source_name, target_name)
         links[hop] = wire.link
     return links
+
+
+def _router_feed(machine: graph.Machine, router: graph.Part) -> graph.Part:
+    """The part whose wire reaches the router's rounds port."""
+    rounds = f"{router.name}.rounds"
+    for wire in machine.wires:
+        if wire.target == rounds:
+            return _part_at(machine, wire.source)
+    raise RuntimeError(f"{rounds} has no wire past the unbound-port check")
 
 
 def _wire_hop(

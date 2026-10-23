@@ -29,6 +29,7 @@ profile.
 
 import dataclasses
 
+import decsim.controller.round_destinations as round_destinations
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
@@ -82,7 +83,8 @@ class RecordingTransmitter:
         self.engine = engine
         self.sent = []
 
-    def send(self, round):
+    def send(self, round, side, is_copy):
+        del side, is_copy
         self.sent.append(round.packet.round_index)
 
 
@@ -144,14 +146,25 @@ def sender_with(
     weak_receiver.store = weak_store
     weak_receiver.windows = windows
     weak_receiver.detection_events = formed_at_the_controller()
-    landing_path = None
-    receiver = weak_receiver
+    side = round_destinations.StoreSide(
+        "weak_buffer",
+        weak_store,
+        weak_receiver,
+        weak_store_plan.intake.controller_write.path_name,
+        False,
+    )
     if publishes_from_strong_store:
-        landing_path = "controller_to_strong_buffer"
-        receiver = strong_receiver
-    sender = syndrome_round_sender.SyndromeRoundSender(engine, landing_path)
+        side = round_destinations.StoreSide(
+            "strong_buffer",
+            None,
+            strong_receiver,
+            "controller_to_strong_buffer",
+            True,
+        )
+    destinations = round_destinations.RoundDestinations({"entry": side})
+    sender = syndrome_round_sender.SyndromeRoundSender(engine)
     sender.link = links
-    sender.receiver = receiver
+    sender.destinations = destinations
     sender.held_rounds = held
     sender.packing_line = syndrome_round_sender.HeldRounds(engine)
     sender.transmitter = transmitter

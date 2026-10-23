@@ -99,9 +99,36 @@ Every hop from `fridge` into `gpu0` then queues on one channel,
 the device share its links, not its compute: each pool keeps its own
 units.
 
+## 7. Give each pool its own store
+
+Put the router before the stores instead of after the entry store:
+
+```python
+stored = machines.with_store_per_pool(base, rule, (("fpga_b", weak),))
+```
+
+The controller's rounds reach the router, which feeds `weak_buffer` and
+a store per added pool, `fpga_b_buffer`, each read by its pool. Each
+round is written to the store of the pool that decodes its stream, as
+DecoNet's router routes "measurement data to the appropriate decoder
+instances" (2504.11805 Sec. VI-B.2). A round another pool's window
+reads, a merge's partner region or a successor's first rounds, is also
+copied to that pool's store as it is written; the copy rides the
+controller's hop into that store, `controller_to_fpga_b_buffer`, and
+its transfer row says `{"copy_into": "fpga_b_buffer"}`. Committed
+boundaries still go pool to pool, one message per pair. No source has
+a decoder fetch a neighbour's raw syndromes when it decodes, so decsim
+does not either (`specs/decoder-resources/data-landing.md`).
+
+A round leaves only when every store it goes to has room, so a full
+store holds back the rounds bound for it. A window's read of another
+pool's round must be known before the round is written: a merge
+couples its patches as its body starts, before its rounds are
+measured, and a read asked later stops the run with the round, the
+store and the stream named. `tests/controller/test_patch_streams.py`
+runs the T gate this way and checks the copied rounds.
+
 ## What a router does not do yet
 
 An absorbing strong window (`double_window`) is refused beside a
 router, "not implemented yet" ([the refusals](build_each_switching_pattern.md#what-is-refused-for-now)).
-Every routed pool reads the one entry store; a store per pool is
-designed, not built.

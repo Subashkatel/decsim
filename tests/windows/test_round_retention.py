@@ -30,6 +30,7 @@ import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.round_retention as round_retention
+import tests.one_entry as one_entry
 
 
 def _store() -> syndrome_buffer_module.SyndromeBuffer:
@@ -53,7 +54,9 @@ def _retention(store, round_counts: dict, successors: dict):
         is_strong_context_retained=False,
         primary_tier=window_records.WEAK_POOL_ID,
     )
-    retention.weak_store = store
+    retention.router = one_entry.stores_router(
+        {window_records.WEAK_POOL_ID: store}, _all_to_weak
+    )
     retention.planner = planner
     retention.tracker = tracker
     return retention
@@ -84,10 +87,13 @@ def _all_to_weak(_stream_id) -> window_records.PoolId:
     return window_records.WEAK_POOL_ID
 
 
-def _strong_retention(strong_store, rounds_arrived: int, entry_of=_all_to_weak):
+def _strong_retention(
+    strong_store, rounds_arrived: int, entry_of=_all_to_weak, other_entries=()
+):
     """A retention whose strong syndrome buffer is the one under test.
 
-    entry_of names each stream's entry pool, the router's answer.
+    entry_of names each stream's entry pool, the router's answer;
+    other_entries are (pool, store) pairs of entry pools past weak.
     """
     planner = types.SimpleNamespace(successors_by_stream={1: []})
     tracker = types.SimpleNamespace(
@@ -100,11 +106,11 @@ def _strong_retention(strong_store, rounds_arrived: int, entry_of=_all_to_weak):
         is_strong_context_retained=True,
         primary_tier=window_records.WEAK_POOL_ID,
     )
-    retention.weak_store = weak_store
-    retention.strong_store = strong_store
+    store_by_pool = {window_records.WEAK_POOL_ID: weak_store}
+    store_by_pool.update(other_entries)
     retention.planner = planner
     retention.tracker = tracker
-    retention.router = types.SimpleNamespace(pool_of_stream=entry_of)
+    retention.router = one_entry.stores_router(store_by_pool, entry_of)
     retention.add_edge(
         window_records.WEAK_POOL_ID,
         window_records.STRONG_POOL_ID,
@@ -112,6 +118,12 @@ def _strong_retention(strong_store, rounds_arrived: int, entry_of=_all_to_weak):
         strong_store,
     )
     return retention
+
+
+def _weak_store_of(retention):
+    """The store the weak entry pool reads, as the router's side names it."""
+    side = retention.router.side(window_records.WEAK_POOL_ID)
+    return side.store
 
 
 class _OneTable:
@@ -325,7 +337,7 @@ def test_the_hold_moves_to_the_request_and_releases_when_the_input_lands():
         stream_id=1, window_id=0, round_count=5, request_key=request_key
     )
     reads = decoding_records.WindowReads((1, 0))
-    retention.bind_input_hold(job, reads)
+    retention.bind_input_hold(job, reads, store)
     assert not store.has_hold(reads)
     input_hold = decoding_records.DecoderInputHold(request_key)
     assert store.has_hold(input_hold)
@@ -340,7 +352,7 @@ def test_an_unheld_round_is_freed_on_arrival():
     retention = _retention(store, {1: 6}, {1: []})
     packet = _packet(1, 6)
     store.accept_packed_round(packet, publication_tick=6)
-    retention.release_round_if_unheld((1, 6))
+    retention.release_round_if_unheld(store, (1, 6))
     assert store.occupancy == 0
 
 
@@ -387,7 +399,7 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
         stream_id=1, window_id=1, round_count=6, request_key=request_key
     )
     reads = decoding_records.WindowReads((1, 1))
-    retention.bind_input_hold(job, reads)
+    retention.bind_input_hold(job, reads, store)
     job.input_hold()  # the input landed: the request's hold ends
     assert not store.has_hold(reads)
     assert store.retained_fragments((1, 4)) is not None
@@ -417,7 +429,8 @@ def _absorbing_retention(absorbed_rounds, request_rounds, restart_rounds):
     for holder, rounds in holds:
         round_keys = _round_keys(rounds)
         store.register_hold(holder, round_keys)
-        retention.weak_store.register_hold(holder, round_keys)
+        weak_store = _weak_store_of(retention)
+        weak_store.register_hold(holder, round_keys)
     return retention, store, request
 
 
@@ -465,7 +478,7 @@ def _chain_retention():
     strong = _store()
     deep = _store()
     retention = _strong_retention(strong, rounds_arrived=9)
-    weak = retention.weak_store
+    weak = _weak_store_of(retention)
     retention.add_edge(window_records.STRONG_POOL_ID, DEEP_POOL, strong, deep)
     return retention, (weak, strong, deep)
 
@@ -513,9 +526,12 @@ def _shared_target_retention():
     fpga = _store()
     entry_by_stream = {1: window_records.WEAK_POOL_ID, 2: FPGA_POOL}
     retention = _strong_retention(
-        strong, rounds_arrived=9, entry_of=entry_by_stream.get
+        strong,
+        rounds_arrived=9,
+        entry_of=entry_by_stream.get,
+        other_entries=((FPGA_POOL, fpga),),
     )
-    weak = retention.weak_store
+    weak = _weak_store_of(retention)
     retention.add_edge(FPGA_POOL, window_records.STRONG_POOL_ID, fpga, strong)
     retention.add_edge(window_records.STRONG_POOL_ID, DEEP_POOL, strong, deep)
     return retention, (weak, fpga, strong, deep)
@@ -613,3 +629,47 @@ def test_a_deep_edge_carries_its_rounds_from_the_middle_store():
     packets = retention.escalated_rounds(1, [(1, 2)], DEEP_POOL)
 
     assert packets == (packet,)
+
+
+def _two_store_retention(last_written: int):
+    """Stream 1 enters at weak, stream 2 at fpga_b, each its own store."""
+    weak = _store()
+    fpga = _store()
+    entry_by_stream = {1: window_records.WEAK_POOL_ID, 2: FPGA_POOL}
+    store_by_pool = {window_records.WEAK_POOL_ID: weak, FPGA_POOL: fpga}
+    retention = round_retention.RoundRetention(
+        is_strong_context_retained=False,
+        primary_tier=window_records.WEAK_POOL_ID,
+    )
+    retention.router = one_entry.stores_router(
+        store_by_pool, entry_by_stream.get
+    )
+    retention.writes = types.SimpleNamespace(
+        last_round_written=lambda _stream_id: last_written
+    )
+    retention.open_stream_store(1)
+    retention.open_stream_store(2)
+    return retention, weak, fpga
+
+
+def test_a_merge_read_of_another_pools_stream_is_held_in_the_readers_store():
+    """The hold is what makes the controller copy each round there."""
+    retention, weak, fpga = _two_store_retention(last_written=0)
+    reader = window_records.RoundSpan(2, 1, 7)
+    read = window_records.RoundSpan(1, 1, 7)
+
+    retention.hold_copied_span(reader, read)
+
+    assert fpga.is_round_held((1, 1))
+    assert fpga.is_round_held((1, 7))
+    assert not weak.is_round_held((1, 1))
+
+
+def test_a_copy_asked_after_its_round_was_written_is_refused():
+    """A round already gone has no copy coming, so no window could read it."""
+    retention, _weak, _fpga = _two_store_retention(last_written=3)
+    reader = window_records.RoundSpan(2, 1, 7)
+    read = window_records.RoundSpan(1, 1, 7)
+
+    with pytest.raises(RuntimeError, match="wrote through round 3"):
+        retention.hold_copied_span(reader, read)

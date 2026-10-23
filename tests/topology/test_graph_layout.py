@@ -294,3 +294,38 @@ def _pool_seeds(layout) -> list:
 
 def _policy_seeds(layout) -> list:
     return [plan.policy_seed for plan in layout.edges]
+
+
+def _store_per_pool_chain() -> graph.Machine:
+    """The chain whose router feeds weak's store and fpga_b's own."""
+    chain = chain_machine()
+    weak = chain.part(machines.WEAK_POOL)
+    return machines.with_store_per_pool(
+        chain, _ROUTED_BY_PATCH, ((_ROUTED_POOL, weak.settings),)
+    )
+
+
+def test_a_router_before_the_stores_gives_each_entry_pool_a_written_store():
+    layout = laid_out(_store_per_pool_chain())
+    routed = layout.pool(window_records.PoolId(_ROUTED_POOL))
+    routed_store = layout.store(routed.store)
+    entry_stores = layout.entry_stores()
+
+    assert entry_stores == (machines.WEAK_STORE, "fpga_b_buffer")
+    assert routed_store.intake.shape == receiver_module.WRITTEN
+    assert routed_store.other_readers == ()
+    assert routed_store.intake.controller_write.path_name == (
+        "controller_to_fpga_b_buffer"
+    )
+
+
+def test_a_router_that_feeds_both_a_store_and_a_pool_is_refused():
+    stored = _store_per_pool_chain()
+    loose = graph.Part("loose", stored.part(machines.WEAK_POOL).settings)
+    grown = stored.with_part(loose)
+    mixed = grown.with_wires(
+        graph.Wire(f"{machines.ROUTER}.windows", "loose.rounds")
+    )
+
+    with pytest.raises(graph.GraphError, match="both stores and pools"):
+        laid_out(mixed)

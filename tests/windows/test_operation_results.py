@@ -92,7 +92,7 @@ class _Fixture:
         )
         self.store = _Store()
         retention = types.SimpleNamespace(
-            weak_store=self.store,
+            entry_stores=lambda: (self.store,),
             release_hold_if_live=lambda _owner, _store: None,
             release_potential_strong=lambda _key: None,
             landing_stores=tuple,

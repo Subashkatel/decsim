@@ -13,13 +13,13 @@ block_individual). Nothing is reordered and nothing is dropped.
 import dataclasses
 import functools
 from collections.abc import Callable
-from typing import Optional, Protocol
+from typing import Protocol
 
+import decsim.controller.round_destinations as round_destinations
 import decsim.controller.round_transmission as round_transmission
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.rounds as round_records
-import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
 
 
@@ -110,37 +110,35 @@ class HeldRounds:
 
 
 class SyndromeRoundSender:
-    """Sends a finished round to the store its first pool reads, or holds it.
+    """Sends a finished round to its stores, or holds it until all have room.
 
-    A round goes to that one store; what a pool escalated to needs goes up
-    with the escalation, never as a second copy (Battistel 2303.00054: a
-    cold first stage keeps rounds off the cryostat I/O). A store that takes
-    its rounds written hears them through the transmitter; one that takes
-    them landed is sent each round over landing_path directly. The sender
-    reserves room; the slot and the copy are the receiving end's, at the
-    landing.
+    A round goes to the store of the pool that decodes its stream, and a
+    copy to each other entry store a window reads it from
+    (round_destinations.py); what a pool escalated to needs goes up with
+    the escalation, never as a second copy (Battistel 2303.00054: a cold
+    first stage keeps rounds off the cryostat I/O). A store that takes
+    its rounds written hears them through the transmitter; one that
+    takes them landed is sent each round over its controller hop
+    directly. The sender reserves room in every store first, as a gem5
+    packet reserves before it leaves (pktfifo.hh reserve); the slot and
+    the copy are the receiving end's, at the landing. A round counts in
+    flight until its own store publishes it, which is when the windows
+    hear of it; a copy rides beside it uncounted.
     """
 
     # the controller's own fabric: it executes a landed store's crossing
     link = ports.Port(ports.Link)
-    # the store's own end: its room, and the landing that takes the slot;
-    # absent on a run with no decoder, whose rounds go nowhere
-    receiver = ports.Port(ports.SyndromeRoundReceiver, optional=True)
+    # each round's stores; absent on a run with no decoder, whose rounds
+    # go nowhere
+    destinations = ports.Port(ports.RoundDestinations, optional=True)
     held_rounds = ports.Port(ports.HeldRounds)
     # the line in front of the packing stage, which a landed round's
     # place in the stage frees
     packing_line = ports.Port(ports.HeldRounds)
     transmitter = ports.Port(round_transmission.RoundTransmitter)
 
-    def __init__(
-        self,
-        engine: engine_module.Engine,
-        landing_path: Optional[transfer_records.LinkPath] = None,
-    ) -> None:
+    def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
-        # the hop each round crosses to a store that takes it landed; None
-        # when the store takes it written, through the transmitter
-        self.landing_path = landing_path
         # rounds sent to a landed store and not yet landed there; the
         # packing stage's bound reads it (RoundsInFlight), as it reads the
         # transmitter's in_flight
@@ -167,51 +165,77 @@ class SyndromeRoundSender:
             )
 
     def _write(self, packed: round_records.PackedRound) -> bool:
-        """Write the round if its store has room; False when it has none.
+        """Write the round if all its stores have room; False when one has none.
 
         A run with no decoder has no store, so its round is sent nowhere.
         """
-        if self.receiver is None:
+        if self.destinations is None:
             return True
-        if not self.receiver.has_room(packed):
+        sides = self.destinations.stores_for(packed)
+        if not _have_room(sides, packed):
             return self.held_rounds.refuse(packed, self._write)
-        if self.landing_path is not None:
-            self._write_landed(packed)
-            return True
-        # the round takes its slot when its bits are there: the room is
-        # reserved here, and the landing stores and publishes it
-        self.receiver.reserve_write(packed)
-        self.transmitter.send(packed)
+        self.destinations.note_written(packed)
+        own, *copies = sides
+        self._send(packed, own, False)
+        for side in copies:
+            self._send(packed, side, True)
         return True
 
-    def _write_landed(self, packed: round_records.PackedRound) -> None:
+    def _send(
+        self,
+        packed: round_records.PackedRound,
+        side: round_destinations.StoreSide,
+        is_copy: bool,
+    ) -> None:
+        """Reserve the round's room in one store, then send it there.
+
+        The round takes its slot when its bits are there: the room is
+        reserved here, and the landing stores and publishes it.
+        """
+        side.receiver.reserve_write(packed)
+        if side.is_landed:
+            self._write_landed(packed, side, is_copy)
+            return
+        self.transmitter.send(packed, side, is_copy)
+
+    def _write_landed(
+        self,
+        packed: round_records.PackedRound,
+        side: round_destinations.StoreSide,
+        is_copy: bool,
+    ) -> None:
         """Carry the round over its link to a store that takes it landed.
 
         The controller is the end the round leaves by, so it executes the send
-        (OMNeT++ csimplemodule.cc:333-334; gem5 coherent_xbar.cc:354-357). The
-        room is reserved before the round leaves (gem5 pktfifo.hh reserve).
+        (OMNeT++ csimplemodule.cc:333-334; gem5 coherent_xbar.cc:354-357).
         """
-        attribution = transfer_records.TransferAttribution.for_packet(
-            packed.packet
-        )
-        self.receiver.reserve_write(packed)
-        self.crossing_count += 1
-        landed = functools.partial(self._land, packed)
+        attribution = round_transmission.attribution_of(packed, side, is_copy)
+        if not is_copy:
+            self.crossing_count += 1
+        landed = functools.partial(self._land, packed, side, is_copy)
         self.link.send(
-            self.landing_path,
+            side.write_path,
             packed.wire_bits,
             self.engine.now,
             attribution,
             landed,
         )
 
-    def _land(self, packed: round_records.PackedRound, _transfer) -> None:
+    def _land(
+        self,
+        packed: round_records.PackedRound,
+        side: round_destinations.StoreSide,
+        is_copy: bool,
+        _transfer,
+    ) -> None:
         """Hand the round to the store's landing.
 
         The round stops counting in flight one event later, as a written
         round does, so a fragment landing at this tick still counts it.
         """
-        self.receiver.receive_landed(packed)
+        side.receiver.receive_landed(packed)
+        if is_copy:
+            return
         self.engine.schedule(
             0, self._leave_crossing, label="strong round landed"
         )
@@ -220,6 +244,14 @@ class SyndromeRoundSender:
         """The round left the packing stage, so a waiting round may enter."""
         self.crossing_count -= 1
         self.packing_line.retry()
+
+
+def _have_room(sides: tuple, packed: round_records.PackedRound) -> bool:
+    """Whether every store the round goes to has room for it."""
+    for side in sides:
+        if not side.receiver.has_room(packed):
+            return False
+    return True
 
 
 @dataclasses.dataclass(frozen=True)

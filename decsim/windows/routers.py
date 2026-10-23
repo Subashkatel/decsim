@@ -118,15 +118,20 @@ class OnePool:
 class EntrySide:
     """What one entry pool's windows are asked through.
 
-    decode_queue is the pool's manager, store_output the end of the
-    store it reads that sends to it, and gap_join the join of its
-    solves, None when it computes no confidence.
+    decode_queue is the pool's manager; store the store it reads, where
+    its windows' reads are held, and store_output that store's end that
+    sends to it; is_store_written whether the controller writes the
+    store, so its arrivals are the rounds published to the windows;
+    gap_join the join of its solves, None when it computes no
+    confidence. A run with no decoder reads no store.
     """
 
     pool: window_records.PoolId
     decode_queue: Any
     store_output: Any
     gap_join: Optional[Any] = None
+    store: Optional[Any] = None
+    is_store_written: bool = True
 
 
 class Router:

@@ -119,14 +119,16 @@ class RegionStreamLayouts:
         self.stream_by_id[stream_id] = stream
         return stream
 
-    def couple_segments(self, spans_by_block: dict, couplings: tuple) -> None:
+    def couple_segments(self, spans_by_block: dict, couplings: tuple) -> tuple:
         """Each segment begins and ends regions; each coupling is read across.
 
         A coupling the order orients neither way is read by neither side.
+        Returns each (reader span, read span) pair read across.
         """
         for span in spans_by_block.values():
             stream = self.stream_by_id[span.stream_id]
             stream.cut_segment(span)
+        pairs = []
         for blocks in couplings:
             oriented = self.coupling_order.orient(blocks)
             if oriented is None:
@@ -135,6 +137,8 @@ class RegionStreamLayouts:
             reader_span = spans_by_block[reader]
             read_span = spans_by_block[read]
             self.regions.couple(reader_span, read_span)
+            pairs.append((reader_span, read_span))
+        return tuple(pairs)
 
     def window_keys(self, regions: tuple) -> list:
         """The key of the window on each region; None for one not begun."""

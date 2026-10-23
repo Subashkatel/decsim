@@ -406,7 +406,62 @@ def with_router(
         # a pool corrects the frame when the machine has one, as with_pool
         if frames:
             corrections = f"{frames[0].name}.corrections"
-            wires.append(graph.Wire(f"{name}.corrections", corrections))
+            correction_wire = graph.Wire(f"{name}.corrections", corrections)
+            wires.append(correction_wire)
+    return grown.with_wires(*wires)
+
+
+def with_store_per_pool(
+    machine: graph.Machine,
+    rule: Any,
+    pools: tuple,
+    entry_store: str = WEAK_STORE,
+    entry_pool: str = WEAK_POOL,
+    site: str = fabrics.FRIDGE,
+    factory_pool: Optional[str] = None,
+) -> graph.Machine:
+    """The machine whose router sits before the stores, one per entry pool.
+
+    The controller's rounds reach the router, named router, which feeds
+    the machine's entry store and a store of its own per added pool,
+    name_buffer, each read by its pool: DecoNet's leaf router routes
+    "measurement data to the appropriate decoder instances" (2504.11805
+    Sec. VI-B.2). Each pool, (name, DecoderPoolSettings) at site with
+    its store, answers the frame. A round a pool's window reads of
+    another pool's stream is copied into its store as it is written
+    (controller/round_destinations.py). The factory's decodes go to
+    factory_pool, the machine's entry pool unless named.
+    """
+    if factory_pool is None:
+        factory_pool = entry_pool
+    router_settings = routers.Router.Settings(rule, factory_pool)
+    router_part = graph.Part(ROUTER, router_settings)
+    controllers = machine.parts_of("controller")
+    controller = controllers[0]
+    rewired = machine.without_wire(
+        f"{controller.name}.rounds", f"{entry_store}.rounds"
+    )
+    grown = rewired.with_part(router_part)
+    wires = [
+        graph.Wire(f"{controller.name}.rounds", f"{ROUTER}.rounds"),
+        graph.Wire(f"{ROUTER}.windows", f"{entry_store}.rounds"),
+    ]
+    frames = machine.parts_of("pauli_frame")
+    for name, pool in pools:
+        store_name = f"{name}{STORE_SUFFIX}"
+        store_settings = syndrome_buffer_module.SyndromeBufferSettings()
+        store_part = graph.Part(store_name, store_settings, site)
+        pool_part = graph.Part(name, pool, site)
+        grown = grown.with_part(store_part)
+        grown = grown.with_part(pool_part)
+        windows = graph.Wire(f"{ROUTER}.windows", f"{store_name}.rounds")
+        reads = graph.Wire(f"{store_name}.reads", f"{name}.rounds")
+        wires.extend((windows, reads))
+        # a pool corrects the frame when the machine has one, as with_pool
+        if frames:
+            corrections = f"{frames[0].name}.corrections"
+            correction_wire = graph.Wire(f"{name}.corrections", corrections)
+            wires.append(correction_wire)
     return grown.with_wires(*wires)
 
 

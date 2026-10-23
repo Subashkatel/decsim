@@ -482,18 +482,22 @@ def input_hop_by_request(transfers: list) -> dict:
 
 def controller_write_delays_us(
     transfers: list,
-    write_hop: Optional[str],
+    write_hops: tuple,
     observation_settings: observe_settings.ObservationSettings,
 ) -> list:
-    """Every recorded round's delay into the written store, in us.
+    """Every recorded round's delay into its own written store, in us.
 
-    write_hop is the controller's write into it (Layout.controller_write_hop),
-    None for a run with no written store. A packed transfer is recorded
-    by its first round.
+    write_hops are the controller's writes into the written stores
+    (Layout.controller_write_hops), none for a run with no written
+    store. A copy into another pool's store is the same round's, so it
+    is not counted again. A packed transfer is recorded by its first
+    round.
     """
     delays = []
     for row in transfers:
-        if row["path"] != write_hop:
+        if row["path"] not in write_hops:
+            continue
+        if _is_copy(row):
             continue
         first_rounds = row["attribution"]["rounds_by_stream"][0]
         if not observation_settings.records_round(first_rounds["round_lo"]):
@@ -757,7 +761,7 @@ def collect_samples(
     routes = layout.routes()
     input_hops = layout.input_hop_by_pool()
     escalation_hops = layout.entry_escalation_hops()
-    write_hop = layout.controller_write_hop()
+    write_hops = layout.controller_write_hops()
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
     answer_hops = routes.name_bits_by_answer_hop
@@ -769,7 +773,7 @@ def collect_samples(
         samples[name] = []
     window_tiers = []
     samples["cwb_per_round"] = controller_write_delays_us(
-        transfers, write_hop, observation_settings
+        transfers, write_hops, observation_settings
     )
     round_events = observation.round_events
     waits = round_stall_ticks(round_events.events)
@@ -2246,3 +2250,9 @@ def _write_trace(shot, run_dir, label: str, only_traced_shot: bool) -> None:
     if observation.trace_path is not None and not only_traced_shot:
         path = trace_path_for_shot(path, label)
     writer.write(str(path))
+
+
+def _is_copy(row: dict) -> bool:
+    """Whether a transfer row is a round's copy (RoundCopyRelation)."""
+    relation = row["attribution"]["relation"]
+    return relation is not None and "copy_into" in relation

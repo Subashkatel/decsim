@@ -327,10 +327,26 @@ class WindowManager:
         self._wake_windows(operation)
         self._wake_readers(operation.id, arrived_before)
         # a round whose every consumer already resolved (an absorbed window's
-        # tail) frees its weak syndrome buffer slot on arrival, the same
-        # drop-on-arrival rule the strong syndrome buffer applies
+        # tail) frees its slot on arrival, the same drop-on-arrival rule
+        # a store rounds land in applies
         round_key = (packet.stream_id, packet.round_index)
-        self.retention.release_round_if_unheld(round_key)
+        store = self.retention.store_of_stream(packet.stream_id)
+        self.retention.release_round_if_unheld(store, round_key)
+
+    def accept_copied_round(
+        self,
+        store: ports.SyndromeBuffer,
+        packet: round_records.SyndromeRoundPacket,
+    ) -> None:
+        """A copy of another pool's round is where a window reads it.
+
+        Its own store published it, so only the windows that read it
+        here are checked: a merge's readers of its region, and the
+        windows of the streams it succeeds.
+        """
+        self._wake_copy_readers(packet.stream_id, packet.round_index)
+        round_key = (packet.stream_id, packet.round_index)
+        self.retention.release_round_if_unheld(store, round_key)
 
     def _refuse_unplanned_round(
         self,
@@ -366,14 +382,17 @@ class WindowManager:
         stream_id: Any,  # an opaque identity
         round_index: int,
     ) -> None:
-        """A store a region lands in stored a round.
+        """A store rounds land in stored a round.
 
-        Wake every edge's listeners, and drive readiness when the store
-        is the one the primary tier reads.
+        Wake every edge's listeners. The stream's own entry store drives
+        readiness; another entry store holds a copy its windows read.
         """
         self.tracker.note_room_round(store, stream_id, round_index)
         self._wake_strong_tier(stream_id)
-        if self.retention.primary_store is not store:
+        if store not in self.retention.entry_stores():
+            return
+        if self.retention.store_of_stream(stream_id) is not store:
+            self._wake_copy_readers(stream_id, round_index)
             return
         operation = self.tracker.operation_by_id[stream_id]
         stored_through = self.tracker.strong_rounds_arrived(stream_id, store)
@@ -401,6 +420,14 @@ class WindowManager:
 
     def _wake_windows(self, operation: program_records.Operation) -> None:
         self.check_windows_of_stream(operation.id)
+        for predecessor_id in operation.decoder_boundary_predecessors:
+            self.check_windows_of_stream(predecessor_id)
+
+    def _wake_copy_readers(self, stream_id, round_index: int) -> None:
+        """Check the windows reading a copied round: across, or past an end."""
+        for key in self.planner.reader_keys_at(stream_id, round_index):
+            self.check_window(key)
+        operation = self.tracker.operation_by_id[stream_id]
         for predecessor_id in operation.decoder_boundary_predecessors:
             self.check_windows_of_stream(predecessor_id)
 
@@ -536,10 +563,6 @@ class WindowManager:
         """
         return []
 
-    def reads_windows_from(self, store: Optional[ports.SyndromeBuffer]) -> bool:
-        """Whether the primary tier's window reads come from this store."""
-        return self.retention.primary_store is store
-
     # ---- what the feedback streams ask
 
     def bind_stream_operation(
@@ -565,10 +588,15 @@ class WindowManager:
     def couple_segments(self, spans_by_block: dict, couplings: tuple) -> None:
         """A joint measurement's segments start and end regions, read across.
 
-        A cut can end the last region begun early, and with it the
+        A reader decoded on another pool than the region it reads has
+        the region copied to its store as the rounds are written, so the
+        copies are asked for here, before the body's first round. A cut
+        can end the last region begun early, and with it the
         buffer of the window before, so its stream's windows are checked.
         """
-        self.planner.couple_segments(spans_by_block, couplings)
+        pairs = self.planner.couple_segments(spans_by_block, couplings)
+        for reader_span, read_span in pairs:
+            self.retention.hold_copied_span(reader_span, read_span)
         for span in spans_by_block.values():
             moved = self.planner.relay_stream(span.stream_id)
             self._replace_reads_of(moved)

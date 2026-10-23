@@ -74,8 +74,8 @@ class StorePlan:
     pool's units read the rounds where the store keeps them.
     takes_machine_clock is a store whose writes and reads are priced
     on the machine's clock when it names none of its own. other_readers
-    are the entry pools past the first that a router feeds from the
-    entry store, each a StoreReader.
+    are the other entry pools a router after this store feeds from it,
+    each a StoreReader.
     """
 
     name: str
@@ -93,8 +93,8 @@ class StorePlan:
 class StoreReader:
     """One more pool reading a store: its pool, hop, seat and read.
 
-    A router's entry pools share the entry store, each reading it over
-    a hop of its own, as VQD's decoders each take their syndromes from
+    A router after a store has its entry pools share it, each reading it
+    over a hop of its own, as VQD's decoders each take their syndromes from
     the Arbiter (Maurya and Tannu 2406.17995v2 Sec. 5).
     """
 
@@ -124,10 +124,11 @@ class EdgePlan:
 class Layout:
     """A machine's pools, stores and edges, each entry first.
 
-    The entry pool decodes the planner's windows and reads the entry
-    store, the one the controller writes. router, None for most
-    machines, sends each window to one of entry_count entry pools, the
-    first pools laid out (windows/routers.py). card prices every hop the
+    The entry pools decode the planner's windows, each from the store
+    it reads: one store they share, or one each the controller writes.
+    router, None for most machines, sends each window to one of
+    entry_count entry pools, the first pools laid out
+    (windows/routers.py). card prices every hop the
     machine rides. frame_site is where the Pauli frame sits, which a
     message to it crosses the wall to reach from any other site.
     """
@@ -196,21 +197,6 @@ class Layout:
         entry_edge = self.edges[0]
         return (entry.pool, entry_edge.hops.target)
 
-    def entry_edge_stores(self) -> tuple:
-        """The stores the weak and the strong tier read, None for none.
-
-        The retention calls them weak and strong (tier_pools); the strong
-        store counts its arrivals as it stores them.
-        """
-        stores = []
-        for pool in self.tier_pools():
-            if pool is None:
-                stores.append(None)
-            else:
-                pool_plan = self.pool(pool)
-                stores.append(pool_plan.store)
-        return tuple(stores)
-
     def input_hop_by_pool(self) -> dict:
         """The hop each pool's input rides: its store's read hop.
 
@@ -240,13 +226,22 @@ class Layout:
                 seats.append(plan.names.seat)
         return tuple(seats)
 
-    def controller_write_hop(self) -> Optional[str]:
-        """The hop the controller writes the written store over, if one is."""
+    def controller_write_hops(self) -> tuple:
+        """The hop the controller writes each written store over."""
+        hops = []
         for store in self.stores:
             intake = store.intake
             if intake.shape == receiver_module.WRITTEN:
-                return intake.controller_write.path_name
-        return None
+                hops.append(intake.controller_write.path_name)
+        return tuple(hops)
+
+    def entry_stores(self) -> tuple:
+        """Each store an entry pool reads, once, the first entry's first."""
+        names = []
+        for entry in self.entry_pools:
+            if entry.store not in names:
+                names.append(entry.store)
+        return tuple(names)
 
     def entry_switching(
         self,
@@ -325,7 +320,7 @@ class Layout:
     def formation_paths(self) -> tuple:
         """The seats a round passes from the controller to each pool.
 
-        Each entry pool reads the store the controller writes; an edge's
+        Each entry pool reads a store the controller writes; an edge's
         target reads its own store, which takes an escalated window's
         rounds from the store the edge carries them from, so a round
         reaches a pool down its entry pool's chain through every store

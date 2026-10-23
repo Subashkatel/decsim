@@ -381,6 +381,8 @@ def _rounds_json(round_keys: tuple) -> list:
 def _relation_json(relation) -> Optional[dict]:
     if relation is None:
         return None
+    if type(relation) is transfer_records.RoundCopyRelation:
+        return {"copy_into": relation.store_name}
     is_boundary = type(relation) is transfer_records.BoundaryTransferRelation
     if is_boundary:
         key = relation.source_request_key

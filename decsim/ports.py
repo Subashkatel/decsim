@@ -367,6 +367,17 @@ class SyndromeRoundReceiver(Protocol):
     ) -> None:
         """Write one timing-only round, then send it to the decoder."""
 
+    def receive_copy(
+        self,
+        packed: round_records.PackedRound,
+        on_stored: Callable[[], None],
+    ) -> None:
+        """Take one written copy of another pool's round a window here reads.
+
+        Its own store publishes it; here it is stored and its readers
+        woken, then on_stored.
+        """
+
     def receive_landed(self, packed: round_records.PackedRound) -> None:
         """Store a landed round and deliver it on its canonical route."""
 
@@ -387,6 +398,44 @@ class SyndromeRoundReceiver(Protocol):
         on_stored is called once the store holds every round, which is
         later than the landing when this seat forms the rounds first.
         """
+
+
+@runtime_checkable
+class StreamRouting(Protocol):
+    """Which entry pool decodes a stream (windows/routers.py Router)."""
+
+    def pool_of_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> window_records.PoolId:
+        """The entry pool that decodes every window of the stream."""
+
+
+@runtime_checkable
+class RoundWrites(Protocol):
+    """How far the controller has written each stream's rounds.
+
+    A window that reads another pool's round asks for its copy before
+    the round is written; one asked after would never come
+    (controller/round_destinations.py).
+    """
+
+    def last_round_written(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> int:
+        """The stream's highest round written to any store; 0 for none."""
+
+
+@runtime_checkable
+class RoundDestinations(RoundWrites, Protocol):
+    """Where the controller writes each round: its own store, then copies."""
+
+    def stores_for(self, packed: round_records.PackedRound) -> tuple:
+        """The round's own store side first, then each copy's."""
+
+    def note_written(self, packed: round_records.PackedRound) -> None:
+        """The round left for every store stores_for named."""
 
 
 @runtime_checkable
@@ -534,13 +583,17 @@ class WindowInput(Protocol):
         stream_id: Any,  # an opaque identity
         round_index: int,
     ) -> None:
-        """Record a round that landed in a store a region lands in."""
+        """Record a round that landed in a store rounds land in."""
+
+    def accept_copied_round(
+        self,
+        store: "SyndromeBuffer",
+        packet: round_records.SyndromeRoundPacket,
+    ) -> None:
+        """A copy of another pool's round is stored where a window reads it."""
 
     def accept_boundary(self, window_key: tuple, is_unblocked: bool) -> None:
         """A boundary landed in the window; True when it owed no other."""
-
-    def reads_windows_from(self, store: Optional[SyndromeBuffer]) -> bool:
-        """Whether the primary tier's window reads come from this store."""
 
 
 @runtime_checkable
@@ -692,7 +745,10 @@ class WindowRetention(Protocol):
         owner: decoding_records.Hold,
         store: Optional[RetainedRounds] = None,
     ) -> None:
-        """Drop a hold that is still live; nothing for one already gone."""
+        """Drop a hold that is still live; nothing for one already gone.
+
+        store None is the store of the window the hold serves.
+        """
 
     def release_strong_hold_if_live(
         self,

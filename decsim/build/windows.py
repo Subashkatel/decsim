@@ -107,7 +107,8 @@ class Windows:
             copies = _copies_the_boundary_fold(pool_plan.settings)
             copies_fold_by_pool[pool_plan.pool] = copies
         gate = decode_requests.WindowInputGate(copies_fold_by_pool)
-        router = _router(layout, _routed_operations(plan))
+        routed_operations = _routed_operations(plan)
+        router = _router(layout, routed_operations)
         builder = decode_requests.DecodeRequestBuilder(engine)
         ledger = committed_rounds.LogicalLedger()
         results = operation_results.OperationResults()
@@ -156,8 +157,7 @@ class Windows:
 
     def connect(
         self,
-        weak_store: Optional[ports.SyndromeBuffer],
-        strong_store: Optional[ports.SyndromeBuffer],
+        writes: ports.RoundWrites,
         primary_decoder: Optional[ports.Decoder],
         target_decoders: tuple,
         edges: escalate_edges.EscalateEdges,
@@ -171,13 +171,13 @@ class Windows:
         """Read from the stores, decode on the managers, commit to the frame.
 
         entry_sides are every entry pool's routers.EntrySide, which the
-        router hands each window it sends there.
+        router hands each window it sends there, its store among them;
+        writes is how far the controller wrote each stream.
         """
         self.models.decoder = primary_decoder
         for target_decoder in target_decoders:
             self.models.escalates_to(target_decoder)
-        self.retention.weak_store = weak_store
-        self.retention.strong_store = strong_store
+        self.retention.writes = writes
         self.retention.detection_events = detection_events
         self.gate.input_fold = input_fold
         self.requester.edges = edges

@@ -62,6 +62,18 @@ class BoundaryTransferRelation:
 
 
 @dataclass(frozen=True)
+class RoundCopyRelation:
+    """Provenance of a round's copy into another pool's store.
+
+    A window of that pool reads the round, so the controller writes it
+    there too (windows/round_retention.py CopiedReads); a per-round
+    measure counts each round's own write once and skips its copies.
+    """
+
+    store_name: str
+
+
+@dataclass(frozen=True)
 class TransferAttribution:
     """Whose transfer this is.
 
@@ -80,7 +92,11 @@ class TransferAttribution:
     first_round: Optional[int]
     last_round: Optional[int]
     relation: Optional[
-        Union[RequestTransferRelation, BoundaryTransferRelation]
+        Union[
+            RequestTransferRelation,
+            BoundaryTransferRelation,
+            RoundCopyRelation,
+        ]
     ] = None
     round_keys: tuple = ()
 

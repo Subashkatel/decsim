@@ -391,9 +391,11 @@ class DecodeRequester:
         if window.t_first_round is None and self.tracker.has_first_round(
             window
         ):
-            store = self.retention.store_for(None)
+            store = self.retention.store_of_stream(window.stream_id)
             self.builder.stamp_first_round(window, store)
         if not self.tracker.is_data_complete(window):
+            return
+        if not self.retention.copied_reads_landed(window):
             return
         operation = self.tracker.operation_by_id[window.stream_id]
         read_keys = self.retention.read_keys_for_bounds(
@@ -421,7 +423,7 @@ class DecodeRequester:
         when the decision ends. The store is read at dispatch
         (syndrome_buffer/round_output.py).
         """
-        store = self.retention.primary_store
+        store = self.retention.store_of_stream(window.stream_id)
         self.builder.stamp_first_round(window, store)
         entry_pool = self._pool_for(window)
         forced_classes = self._forced_logical_classes(entry_pool)
@@ -547,7 +549,7 @@ class DecodeRequester:
         first = primary_jobs[0]
         if first.submitted or self.retention.holds_input(first):
             return True
-        store = self.retention.primary_store
+        store = self.retention.store_of_stream(first.request_key.stream_id)
         self.retention.bind_input_hold(first, window_reads, store)
         reader_count = len(primary_jobs)
         if reader_count == 1:

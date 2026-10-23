@@ -31,10 +31,11 @@ ENDS_OF_PATH = {
 # window side's at both decoders.
 BOUNDARY_ROUTE = "BOUNDARY_ROUTE"
 BOUNDARY_SEND = "send_boundary"
-# The controller's write into the written store is the layout's hop
-# (build/layout.py Layout.controller_write_hop), which the transmitter
-# holds as write_path; a send on it is read as that hop, from the
-# controller to a store.
+# The controller's write into a store is the layout's hop
+# (build/layout.py Layout.controller_write_hops), which each store side
+# the controller writes holds as write_path
+# (controller/round_destinations.py StoreSide); a send on it is read as
+# that hop, from the controller to a store.
 WRITE_PATH = "WRITE_PATH"
 WRITE_PATH_ATTRIBUTE = "write_path"
 ENDS_OF_SEND = {
@@ -141,8 +142,10 @@ DELIVERY_CALLBACKS = {
     ("controller/instruction_output.py", "CONTROLLER_TO_QPU"): ("delivered",),
     ("controller/round_transmission.py", WRITE_PATH): (
         "_publish",
+        "_store_copy",
         "_write_feedback_memory",
     ),
+    ("controller/syndrome_round_sender.py", WRITE_PATH): ("_land",),
     ("pauli_frame/decision_dispatch.py", "FRAME_TO_CONTROLLER"): (
         "_at_the_controller",
     ),
@@ -307,11 +310,11 @@ def _is_boundary_send(node: ast.Call) -> bool:
 
 
 def _is_write_path(argument) -> bool:
-    """Whether the expression reads the transmitter's own write hop."""
+    """Whether the expression reads a store side's write hop."""
     if not isinstance(argument, ast.Attribute):
         return False
     inner = argument.value
-    if not isinstance(inner, ast.Name) or inner.id != "self":
+    if not isinstance(inner, ast.Name) or inner.id != "side":
         return False
     return argument.attr == WRITE_PATH_ATTRIBUTE
 

@@ -204,6 +204,38 @@ class LaterStreamReads:
 
 
 @dataclass(frozen=True)
+class CopiedReads:
+    """A hold: another pool's rounds a stream's windows read, copied in.
+
+    A merge couples two patches as its body starts, before the body's
+    rounds are measured, and the reader's windows are laid only as its
+    own rounds arrive; so the store the reader's pool reads keeps the
+    copies of the read span until the reader's windows through
+    reader_last_round have claimed them (windows/round_retention.py).
+    """
+
+    reader_stream_id: Any  # an opaque identity
+    read_span: window_records.RoundSpan
+    reader_last_round: int
+
+    def referenced_stream_ids(self) -> tuple:
+        """The reader's stream, whose windows the copies wait for."""
+        return (self.reader_stream_id,)
+
+    def stream_ids_read_at_once(self) -> tuple:
+        """None: the hold ends as the reader's windows claim the rounds."""
+        return ()
+
+    def served_window_key(self) -> Optional[tuple]:
+        """None: it serves the reader's windows still to come."""
+        return None
+
+    def holders_waited_for(self) -> tuple:
+        """None: the hold ends as the reader's windows claim the rounds."""
+        return ()
+
+
+@dataclass(frozen=True)
 class PendingStrong:
     """A hold: rounds for an admitted, not yet served strong request.
 
@@ -320,6 +352,7 @@ Hold = Union[
     PotentialStrong,
     PotentialRestart,
     LaterStreamReads,
+    CopiedReads,
     PendingStrong,
     StrongInputInFlight,
     DecoderInputHold,

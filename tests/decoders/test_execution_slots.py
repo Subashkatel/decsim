@@ -108,3 +108,10 @@ def test_a_run_ending_with_a_decode_waiting_for_a_slot_is_a_contract_break():
 def test_a_device_with_no_slots_is_refused():
     with pytest.raises(ValueError, match="slot_count is 0"):
         execution_slots.ExecutionSlots.Settings(0)
+
+
+@pytest.mark.parametrize("slot_count", [1.5, float("nan"), True])
+def test_a_slot_count_that_is_no_whole_number_is_refused(slot_count):
+    """1.5 would grant two slots, NaN none, and True stands for no count."""
+    with pytest.raises(ValueError, match="a whole number of decodes"):
+        execution_slots.ExecutionSlots.Settings(slot_count)

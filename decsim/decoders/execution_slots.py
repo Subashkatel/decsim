@@ -30,6 +30,7 @@ import dataclasses
 from collections.abc import Callable
 from typing import Optional
 
+import decsim.config as config
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.statistics.kinds as statistic_kinds
@@ -51,11 +52,14 @@ class ExecutionSlots:
         name = "execution_slots"
 
         def __post_init__(self) -> None:
-            if self.slot_count < 1:
-                raise ValueError(
-                    f"device.slot_count is {self.slot_count}; a device runs "
-                    "at least one decode at a time"
-                )
+            # 1.5 would grant two slots and NaN none, so only a whole
+            # count, as a pool's unit_count, sizes the device
+            if config.is_whole_count(self.slot_count):
+                return
+            raise ValueError(
+                f"device.slot_count is {self.slot_count!r}; a device runs "
+                "a whole number of decodes at a time, at least one"
+            )
 
         def build(self, engine: engine_module.Engine) -> "ExecutionSlots":
             """A fresh device on these settings."""

@@ -1,7 +1,8 @@
-"""When a round copied to several stores leaves the seats.
+"""Which stores a round goes to, and when a copied one leaves the seats.
 
 A round goes to its own store and to each store whose windows read it
-(controller/round_destinations.py); each store lets it go when its own
+(controller/round_destinations.py); a feedback-memory round's own store
+is that of the stream it times. Each store lets a round go when its own
 readers are done. The seats may form its events until the last store
 lets it go, so they hear it once, then.
 """
@@ -9,6 +10,7 @@ lets it go, so they hear it once, then.
 import pytest
 
 import decsim.controller.round_destinations as round_destinations
+import decsim.records.rounds as round_records
 import tests.controller.test_syndrome_round_sender as sender_tests
 
 
@@ -63,3 +65,45 @@ def test_a_round_leaving_a_store_it_was_never_written_to_is_a_contract_break():
 
     with pytest.raises(RuntimeError, match="never written to"):
         destinations.retire_round((1, 5))
+
+
+class _HeldNowhere:
+    """A store none of whose pool's windows read another pool's rounds."""
+
+    def is_round_held(self, round_key) -> bool:
+        del round_key
+        return False
+
+
+class _ByStream:
+    """A router sending each stream to the pool its table names."""
+
+    def __init__(self, pool_by_stream: dict) -> None:
+        self.pool_by_stream = pool_by_stream
+
+    def pool_of_stream(self, stream_id) -> str:
+        return self.pool_by_stream[stream_id]
+
+
+def test_a_feedback_memory_round_goes_to_the_store_of_the_stream_it_times():
+    """Stream 1's idle round stands in for stream 5, which fpga_b decodes.
+
+    It times stream 5's windows, so it is written where they read.
+    """
+    held_nowhere = _HeldNowhere()
+    weak = round_destinations.StoreSide(
+        "weak_buffer", held_nowhere, None, "to_weak_buffer", False
+    )
+    fpga_b = round_destinations.StoreSide(
+        "b_buffer", held_nowhere, None, "to_b_buffer", False
+    )
+    destinations = round_destinations.RoundDestinations(
+        {"weak": weak, "fpga_b": fpga_b}
+    )
+    destinations.router = _ByStream({1: "weak", 5: "fpga_b"})
+    route = round_records.SyndromePacketRoute.feedback_memory_round(5)
+    memory_round = sender_tests.packed(2, route)
+
+    stores = destinations.stores_for(memory_round)
+
+    assert stores == (fpga_b,)

@@ -67,6 +67,20 @@ def test_waiting_decodes_start_oldest_first_whichever_pool_asked():
     assert starts.started == [("fpga_b_second", 3), ("weak_third", 5)]
 
 
+def test_a_decode_that_started_second_gives_back_its_own_slot():
+    """Units free in any order, so a slot is found by its decode."""
+    engine, slots, starts = _device(2)
+    slots.take("first", starts.start)
+    slots.take("second", starts.start)
+    slots.take("waiting", starts.start)
+    engine.schedule(4, lambda: slots.give_back("second"))
+
+    engine.run()
+
+    assert starts.started == [("waiting", 4)]
+    assert slots.running == ["first", "waiting"]
+
+
 def test_a_withdrawn_decode_never_starts():
     engine, slots, starts = _device(1)
     slots.take("first", starts.start)

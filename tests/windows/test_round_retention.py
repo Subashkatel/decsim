@@ -681,6 +681,12 @@ def _two_store_retention(last_written: int):
     retention.writes = types.SimpleNamespace(
         last_round_written=lambda _stream_id: last_written
     )
+    retention.planner = types.SimpleNamespace(
+        successors_by_stream={1: [], 2: []}
+    )
+    retention.tracker = types.SimpleNamespace(
+        effective_round_count_for_window=lambda _stream_id, _window: 7
+    )
     retention.open_stream_store(1)
     retention.open_stream_store(2)
     return retention, weak, fpga
@@ -707,3 +713,64 @@ def test_a_copy_asked_after_its_round_was_written_is_refused():
 
     with pytest.raises(RuntimeError, match="wrote through round 3"):
         retention.hold_copied_span(reader, read)
+
+
+def _reader_window(window_index: int, commit_lo: int, commit_hi: int):
+    """A window of stream 2 that reads stream 1's rounds 1-7 across."""
+    read = window_records.RoundSpan(1, 1, 7)
+    return window_records.Window(
+        stream_id=2,
+        window_index=window_index,
+        commit_lo=commit_lo,
+        commit_hi=commit_hi,
+        buffer_hi=commit_hi,
+        round_count=7,
+        spatial_reads=(read,),
+    )
+
+
+def test_a_copy_hold_stays_until_the_window_committing_its_last_round():
+    """The reader's span is rounds 1-7; its first window commits 1-3.
+
+    The copies stay held for the windows still to come, and the window
+    that commits round 7 claims them in its own read, ending the hold.
+    """
+    retention, _weak, fpga = _two_store_retention(last_written=0)
+    reader = window_records.RoundSpan(2, 1, 7)
+    read = window_records.RoundSpan(1, 1, 7)
+    retention.hold_copied_span(reader, read)
+    (copy_hold,) = retention.copy_holds_by_stream[2]
+    first = _reader_window(0, 1, 3)
+    last = _reader_window(1, 4, 7)
+
+    retention.register_window((2, 0), first)
+    held_after_the_first = fpga.has_hold(copy_hold)
+    retention.register_window((2, 1), last)
+
+    assert held_after_the_first
+    assert not fpga.has_hold(copy_hold)
+    assert retention.copy_holds_by_stream[2] == []
+
+
+def test_a_stream_whose_entry_pool_escalates_nowhere_has_no_strong_hold():
+    """Weak escalates to strong; fpga_b, stream 2's pool, escalates nowhere.
+
+    A router may give one region a switching pair and another a lone
+    decoder (Tour de gross 2506.03094), so stream 2 has no edge whose
+    stores could keep a strong hold, and ending one ends nothing.
+    """
+    strong = _store()
+    fpga = _store()
+    entry_by_stream = {1: window_records.WEAK_POOL_ID, 2: FPGA_POOL}
+    retention = _strong_retention(
+        strong,
+        rounds_arrived=9,
+        entry_of=entry_by_stream.get,
+        other_entries=((FPGA_POOL, fpga),),
+    )
+    later_reads = decoding_records.LaterStreamReads(2)
+
+    retention.release_strong_hold_if_live(later_reads, 2)
+
+    assert not strong.has_hold(later_reads)
+    assert not fpga.has_hold(later_reads)

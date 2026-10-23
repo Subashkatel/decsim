@@ -277,6 +277,23 @@ def test_an_edge_past_the_entry_builds_on_one_solve():
     assert edges == ["switching", layout_tests.DEEP_SWITCHING]
 
 
+def test_a_learned_threshold_over_a_chain_is_its_entry_edges_alone():
+    """One entry edge, so the task's calibrator is not refused.
+
+    The edge past the entry decides on its own fixed threshold.
+    """
+    chain = layout_tests.chain_machine()
+    layout = layout_tests.laid_out(chain)
+    engine = engine_module.Engine()
+    # the build reads only that the task learns a threshold
+    calibrator = object()
+
+    entry, deep = escalation_build.build_switching(layout, engine, calibrator)
+
+    assert entry.policy.threshold is calibrator
+    assert deep.policy.threshold is not calibrator
+
+
 def test_an_edge_past_a_double_window_may_start_beside_its_source():
     """Each edge checks the run with its own window row.
 

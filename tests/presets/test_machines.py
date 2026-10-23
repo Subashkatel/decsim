@@ -275,6 +275,20 @@ def test_a_patch_table_naming_only_the_entry_pool_runs_as_no_router(tmp_path):
     assert stored_digest == plain_digest
 
 
+def test_a_store_per_pool_sends_the_factorys_decodes_to_the_pool_named():
+    plain = machines.weak_baseline(3, 0.001, 1.0)
+    rule = routers.OnePool.Settings("weak")
+    weak = plain.part(machines.WEAK_POOL)
+    fpga_b = weak.settings
+
+    stored = machines.with_store_per_pool(
+        plain, rule, (("fpga_b", fpga_b),), factory_pool="fpga_b"
+    )
+
+    router = stored.part(machines.ROUTER)
+    assert router.settings.factory_pool == "fpga_b"
+
+
 def _routed(shape):
     machine = shape()
     return machines.with_router(machine, ONE_POOL, ())

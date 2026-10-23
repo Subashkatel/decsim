@@ -489,6 +489,59 @@ def test_a_store_per_pool_is_copied_exactly_the_rounds_its_merges_read(
     assert len(boundaries) == 2
 
 
+def test_a_merge_window_on_a_host_store_is_sent_as_its_last_copy_lands(
+    tmp_path,
+):
+    """fpga_b's store is on the host, so every copy lands over a link.
+
+    The T merge window on fpga_b reads the control patch's rounds 1-7,
+    copied there; the landing of round 7's copy is what wakes it, as a
+    round of its own stream would (window_manager.py accept_room_round).
+    """
+    path = tmp_path / "t_gate.lss"
+    path.write_text(patch_lives_test.T_GATE)
+    workload = lattice_surgery.read_schedule(path, DISTANCE)
+    _settings, graph = patch_stream_graph(workload, T_GATE_DECODE_MICROSECONDS)
+    rule = routers.ByPatch.Settings(pool_by_patch=PER_PATCH)
+    stored = machines.with_store_per_pool(
+        graph, rule, (FPGA_B,), site=fabrics.HOST
+    )
+    machine = machine_module.Machine.build(stored, 0)
+
+    result = machine.run()
+
+    transfers = result.link_traffic["transfers"]
+    control = identity_records.stable_identity_json(CONTROL_STREAM)
+    landings = _copy_landings(transfers, "fpga_b_buffer", control)
+    fetches = _fetches(machine)
+    t_merge = fetches[(T_STREAM, 0)]
+    assert result.terminal_status == "complete"
+    assert sorted(landings) == [*range(1, 8), *range(20, 27)]
+    assert t_merge.dispatch_ticks == landings[7]
+
+
+def _copy_landings(transfers: list, store_name: str, stream_json) -> dict:
+    """When each copied round of one stream landed in a store."""
+    landings = {}
+    for row in transfers:
+        relation = row["attribution"]["relation"]
+        if relation != {"copy_into": store_name}:
+            continue
+        (span,) = row["attribution"]["rounds_by_stream"]
+        if span["stream_id"] == stream_json:
+            landings[span["round_lo"]] = row["delivery_ticks"]
+    return landings
+
+
+def _fetches(machine) -> dict:
+    """Each window's fetch stage, by (stream, window)."""
+    fetches = {}
+    for record in machine.observation.stages.records:
+        if record.stage == "fetch":
+            fetches[(record.stream_id, record.window_id)] = record
+    return fetches
+
+
 def _copies_into(transfers: list, store_name: str, stream_json) -> list:
     """The rounds of one stream the controller copied into a store."""
     rounds = []

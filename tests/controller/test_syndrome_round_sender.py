@@ -119,6 +119,22 @@ class RecordingStrongReceiver:
         self.written.append(packed.packet.round_index)
 
 
+class _HoldsEveryRound:
+    """A store whose pool's windows read every round of another pool."""
+
+    def is_round_held(self, round_key) -> bool:
+        del round_key
+        return True
+
+
+class _ToWeak:
+    """A router sending every stream to the weak pool."""
+
+    def pool_of_stream(self, stream_id) -> str:
+        del stream_id
+        return "weak"
+
+
 def no_sender_counts_it() -> None:
     """The publication callback of a round no transmitter counts here."""
 
@@ -128,7 +144,13 @@ def sender_with(
     weak_bits=None,
     strong_receiver=None,
     publishes_from_strong_store=False,
+    copy_receiver=None,
 ):
+    """A sender writing to one store, or also copying to copy_receiver's.
+
+    copy_receiver, when given, is the receiving end of a store on the
+    host that holds every round, so each round is copied there landed.
+    """
     recorder = round_events.RoundEventRecorder(engine)
     held = syndrome_round_sender.HeldRounds(engine)
     held.trace.round_event.connect(recorder.record)
@@ -161,7 +183,18 @@ def sender_with(
             "controller_to_strong_buffer",
             True,
         )
-    destinations = round_destinations.RoundDestinations({"entry": side})
+    side_by_pool = {"weak": side}
+    if copy_receiver is not None:
+        holds_every_round = _HoldsEveryRound()
+        side_by_pool["fpga_b"] = round_destinations.StoreSide(
+            "fpga_b_buffer",
+            holds_every_round,
+            copy_receiver,
+            "controller_to_strong_buffer",
+            True,
+        )
+    destinations = round_destinations.RoundDestinations(side_by_pool)
+    destinations.router = _ToWeak()
     sender = syndrome_round_sender.SyndromeRoundSender(engine)
     sender.link = links
     sender.destinations = destinations
@@ -263,3 +296,31 @@ def test_a_strong_primary_round_with_no_room_on_the_room_side_is_held():
     assert weak_receiver.reserved_bits_by_round == {}
     assert transmitter.sent == []
     assert sender.held_rounds.count == 1
+
+
+def test_a_copy_to_a_host_store_lands_there_and_never_counts_crossing():
+    """The own round goes through the transmitter; its copy over a link.
+
+    Only the round's own store bounds the packing stage, so a copy to a
+    store that takes rounds landed never counts as crossing and frees
+    nothing when it lands.
+    """
+    engine = engine_module.Engine()
+    copy_receiver = RecordingStrongReceiver()
+    sender, _weak_receiver, transmitter, _recorder = sender_with(
+        engine, copy_receiver=copy_receiver
+    )
+    retried_counts = []
+    sender.packing_line.retry = lambda: retried_counts.append(
+        sender.crossing_count
+    )
+
+    first = packed(1)
+    sender.admit(first)
+    count_while_crossing = sender.crossing_count
+    engine.run()
+
+    assert transmitter.sent == [1]
+    assert copy_receiver.written == [1]
+    assert count_while_crossing == 0
+    assert retried_counts == []

@@ -13,7 +13,9 @@ import pytest
 
 import decsim.build.windows as windows_part
 import decsim.confidence.cluster as cluster
+import decsim.machine as machine_module
 import decsim.presets.machines as machines
+import decsim.records.program as program_records
 import decsim.windows.routers as routers
 import tests.declared_run as declared_run
 import tests.escalation.test_switching_mode as switching_tests
@@ -73,3 +75,25 @@ def _with_recorded_confidence(graph, confidence):
     windows = graph.held("windows")
     recorded = dataclasses.replace(windows, recorded_confidence=confidence)
     return graph.with_held("windows", recorded)
+
+
+def test_a_router_leaves_an_operation_with_no_patch_and_no_rounds_alone():
+    """A classical step after the memory holds no patch and sends nothing.
+
+    The router routes rounds and idle decodes, so it has nothing of this
+    operation's to route, and its table need not name it.
+    """
+    classical = program_records.Operation(
+        2, "classical", (), predecessors=(1,), emits_detector_data=False
+    )
+    operations = [declared_run.memory_operation(1), classical]
+    graph = declared_run.weak_only_graph(rounds=6, operations=operations)
+    rule = routers.ByPatch.Settings(pool_by_patch=((1, "weak"),))
+    routed = machines.with_router(graph, rule, ())
+    machine = machine_module.Machine.build(routed, 0)
+
+    result = machine.run()
+
+    stamps = machine.observation.runtime_stamps
+    assert result.terminal_status == "complete"
+    assert set(stamps.body_done) == {1, 2}

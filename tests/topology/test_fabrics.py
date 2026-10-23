@@ -369,3 +369,55 @@ def test_a_timed_link_on_one_role_moves_that_hop_alone():
     assert decision.channel.propagation_latency_ticks == 500_000
     command = links.path_settings("controller_to_qpu")
     assert command == reference.path_settings("controller_to_qpu")
+
+
+GPU_SITE = "gpu0"
+CABLE = fabrics.TimedLink(1.0, 100_000.0)
+FORWARD = route_records.HopRole(route_records.FORWARD)
+
+
+def _priced_channel(rule, route) -> str:
+    """The channel the rule's link puts the route on."""
+    reference = link_profiles.reference_path(route.role, route.path)
+    link = rule.link_for(route)
+    priced = link.priced(route.path, reference, FRIDGE)
+    return priced.channel.name
+
+
+def test_a_site_link_prices_every_route_between_its_two_sites():
+    rule = fabrics.SiteLinks(
+        (fabrics.SiteLink((fabrics.FRIDGE, GPU_SITE), CABLE),)
+    )
+    up = fabrics.Route("weak_to_strong", fabrics.FRIDGE, GPU_SITE, FORWARD)
+    inside = fabrics.Route(
+        "weak_to_weak", fabrics.FRIDGE, fabrics.FRIDGE, FORWARD
+    )
+
+    assert rule.link_for(up) is CABLE
+    assert rule.link_for(inside) is None
+
+
+def test_a_shared_site_link_puts_each_way_on_one_channel():
+    """Two pools' hops into the GPU wait for one another; replies apart."""
+    shared = fabrics.SiteLink((fabrics.FRIDGE, GPU_SITE), CABLE, shared=True)
+    rule = fabrics.SiteLinks((shared,))
+    weak_up = fabrics.Route("weak_to_strong", fabrics.FRIDGE, GPU_SITE, FORWARD)
+    other_up = fabrics.Route(
+        "fpga_to_strong", fabrics.FRIDGE, GPU_SITE, FORWARD
+    )
+    down = fabrics.Route("strong_to_weak", GPU_SITE, fabrics.FRIDGE, FORWARD)
+
+    channels = [
+        _priced_channel(rule, weak_up),
+        _priced_channel(rule, other_up),
+        _priced_channel(rule, down),
+    ]
+    assert channels == ["fridge_to_gpu0", "fridge_to_gpu0", "gpu0_to_fridge"]
+
+
+def test_two_site_links_for_one_pair_of_sites_are_refused():
+    first = fabrics.SiteLink((fabrics.FRIDGE, GPU_SITE), CABLE)
+    second = fabrics.SiteLink((GPU_SITE, fabrics.FRIDGE), CABLE)
+
+    with pytest.raises(ValueError, match="two site links join"):
+        fabrics.SiteLinks((first, second))

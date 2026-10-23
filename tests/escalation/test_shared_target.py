@@ -18,16 +18,23 @@ import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.records.windows as window_records
+import decsim.topology.fabrics as fabrics
 import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.escalation.test_switching_mode as switching_mode
 
 
-def _shared_strong(answer_route: str, factory_pool="weak"):
+def _shared_strong(
+    answer_route: str,
+    factory_pool="weak",
+    strong_site=fabrics.HOST,
+    fabric=None,
+):
     """Two chip pools, by patch, each escalating every window to strong.
 
-    The magic-state factory's decodes go to factory_pool.
+    The magic-state factory's decodes go to factory_pool; strong sits at
+    strong_site, and fabric, when given, prices the hops.
     """
     weak, strong = declared_run.switching_decoders(True)
     engine = declared_run.DECLARED_ENGINE
@@ -60,7 +67,17 @@ def _shared_strong(answer_route: str, factory_pool="weak"):
         fabric=declared_run.declared_fabric(),
     )
     machine = machines.with_pool(machine, weak_pool)
-    machine = machines.with_strong_tier(machine, strong_pool, switching)
+    machine = machines.with_escalation(
+        machine,
+        machines.WEAK_POOL,
+        machines.STRONG_POOL,
+        strong_pool,
+        switching,
+        site=strong_site,
+        switching_name=machines.SWITCHING,
+    )
+    if fabric is not None:
+        machine = dataclasses.replace(machine, fabric=fabric)
     by_patch = routers.ByPatch.Settings(
         pool_by_patch=((1, "weak"), (2, "fpga_b"))
     )
@@ -142,3 +159,28 @@ def test_two_entry_pools_with_no_factory_pool_are_refused():
 
     with pytest.raises(ValueError, match="router.factory_pool names no pool"):
         machine_module.Machine.build(unnamed_graph, 0)
+
+
+def test_a_strong_pool_on_its_own_site_shares_its_link_with_both_chips():
+    """A GPU at site gpu0 behind one link: both chips' escalations queue on it.
+
+    Any site name works; the shared site link puts every hop from the
+    fridge into gpu0 on one channel, and every hop back on another.
+    """
+    cable = fabrics.TimedLink(1.0, 100_000.0)
+    shared = fabrics.SiteLink((fabrics.FRIDGE, "gpu0"), cable, shared=True)
+    fabric = fabrics.SiteLinks((shared,), declared_run.declared_fabric())
+    graph = _shared_strong("direct", strong_site="gpu0", fabric=fabric)
+    machine = machine_module.Machine.build(graph, 0)
+
+    result = machine.run()
+
+    channel_by_path = {}
+    for path in machine.layout.card.paths:
+        channel_by_path[path.name] = path.settings.channel.name
+    tiers = dict(declared_run.frame_tiers(machine))
+    assert result.terminal_status == "complete"
+    assert set(tiers.values()) == {"strong"}
+    assert channel_by_path["weak_to_strong"] == "fridge_to_gpu0"
+    assert channel_by_path["fpga_b_to_strong"] == "fridge_to_gpu0"
+    assert channel_by_path["strong_to_weak"] == "gpu0_to_fridge"

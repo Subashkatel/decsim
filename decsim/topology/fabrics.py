@@ -1,7 +1,8 @@
 """Links that price a wire, and fabric rules that pick a link per route.
 
 A route is one hop a transfer takes between two parts, with the site of
-each end, the fridge or the host. A link prices a route: it puts a
+each end: the fridge, the host, or any site a part is placed at. A link
+prices a route: it puts a
 channel, a latency and a rate, on the route's own payload rule, the
 reference card's (links/link_profiles.py), so what a hop carries stays
 with the hop and only its wire changes. A wire may carry its own link;
@@ -13,11 +14,19 @@ it, or the reference card's path where the rule picks none.
     RoundTripLeg   one leg of a measured round trip: half of it, less
                    the echo payload's time on the cable
     FixedPath      a path written out whole, a packet protocol and all
+    SharedChannel  any link, its routes riding one named channel
 
     ReferenceFabric  the reference card on every route
     RoleLinks        a link by the route's role, else a base rule
     FridgeHostFabric a cable between the sites, a host link on the host,
                      else a base rule
+    SiteLinks        a link by the route's pair of sites, else a base rule
+
+Transfers contend only where they ride one channel. A device is a site
+whose links are shared: every hop into or out of it rides one channel
+each way, so its pools wait for one another there, as the components
+on one SST Link share it (sst-core src/sst/core/link.h) and ns-3's net
+devices on one channel share its wire.
 
 A link times a transfer as its latency plus its bits over its rate,
 ns-3's point-to-point law (point-to-point-net-device.cc:243); the rule
@@ -219,6 +228,29 @@ class FixedPath:
 
 
 @dataclasses.dataclass(frozen=True)
+class SharedChannel:
+    """Any link, every route it prices riding one channel of this name.
+
+    The routes then wait for one another on it in both directions, a
+    half-duplex wire; SiteLinks shares a full-duplex one a channel each
+    way.
+    """
+
+    link: ports.LinkCard
+    channel: str
+
+    def priced(
+        self,
+        name: str,
+        reference: link_settings.PathSettings,
+        machine_clock: Optional[config.Clock],
+    ) -> link_settings.PathSettings:
+        """The link's path, on the shared channel instead of its own."""
+        del name
+        return self.link.priced(self.channel, reference, machine_clock)
+
+
+@dataclasses.dataclass(frozen=True)
 class ReferenceFabric:
     """Every route on the reference card (link_profiles.py)."""
 
@@ -281,6 +313,73 @@ class FridgeHostFabric:
             return self.cable
         if sites == {HOST}:
             return self.host_local
+        return self.base.link_for(route)
+
+
+@dataclasses.dataclass(frozen=True)
+class SiteLink:
+    """The link between two sites, or inside one when both are the same.
+
+    sites is a pair, in either order. shared puts every hop between the
+    two sites on one channel each way, named by the sites, so the parts
+    at a device's site contend for its link (a GPU's PCIe, an FPGA's
+    serial lanes); unshared, each hop rides a channel of its own.
+    """
+
+    sites: tuple
+    link: ports.LinkCard
+    shared: bool = False
+
+    def __post_init__(self) -> None:
+        if len(self.sites) != 2:
+            raise ValueError(
+                f"a site link joins two sites, or one site to itself; got "
+                f"{self.sites}"
+            )
+
+    def joins(self, route: Route) -> bool:
+        """Whether the route runs between this link's two sites."""
+        ends = {route.source_site, route.target_site}
+        return ends == set(self.sites)
+
+    def link_for(self, route: Route) -> ports.LinkCard:
+        """The link, on the shared channel of the route's way if shared."""
+        if not self.shared:
+            return self.link
+        channel = f"{route.source_site}_to_{route.target_site}"
+        return SharedChannel(self.link, channel)
+
+
+@dataclasses.dataclass(frozen=True)
+class SiteLinks:
+    """A link per pair of sites; a route between no listed pair, the base's.
+
+    A co-design is a graph of parts at sites joined by these links, as
+    gem5-SALAM's accelerator cluster is components and the links between
+    them: an ASIC predecoder in the fridge and a GPU in a rack, a cable
+    between them and a PCIe link into the GPU. Two entries for one pair
+    are refused, since a route would take whichever came first.
+    """
+
+    links: tuple = ()
+    base: ports.FabricRule = ReferenceFabric()
+
+    def __post_init__(self) -> None:
+        pairs = []
+        for site_link in self.links:
+            pair = frozenset(site_link.sites)
+            if pair in pairs:
+                raise ValueError(
+                    f"two site links join {sorted(pair)}; give each pair "
+                    "of sites one link"
+                )
+            pairs.append(pair)
+
+    def link_for(self, route: Route) -> Optional[ports.LinkCard]:
+        """The link of the route's pair of sites, else the base's."""
+        for site_link in self.links:
+            if site_link.joins(route):
+                return site_link.link_for(route)
         return self.base.link_for(route)
 
 

@@ -128,7 +128,8 @@ class Layout:
     store, the one the controller writes. router, None for most
     machines, sends each window to one of entry_count entry pools, the
     first pools laid out (windows/routers.py). card prices every hop the
-    machine rides.
+    machine rides. frame_site is where the Pauli frame sits, which a
+    message to it crosses the wall to reach from any other site.
     """
 
     pools: tuple
@@ -137,6 +138,7 @@ class Layout:
     card: link_settings.FabricSettings
     router: Optional[Any] = None
     entry_count: int = 1
+    frame_site: str = route_records.FRIDGE
 
     @property
     def entry_pool(self) -> PoolPlan:
@@ -316,7 +318,9 @@ class Layout:
         edge_hops = []
         for edge in self.edges:
             edge_hops.append(edge.hops)
-        return routes_build.generated(tuple(pool_hops), tuple(edge_hops))
+        return routes_build.generated(
+            tuple(pool_hops), tuple(edge_hops), self.frame_site
+        )
 
     def formation_paths(self) -> tuple:
         """The seats a round passes from the controller to each pool.

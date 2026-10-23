@@ -88,9 +88,12 @@ def layout_of(machine: graph.Machine) -> layout_module.Layout:
     shape = _shape(machine)
     card = _card(shape)
     frame_name = _frame_name(machine)
+    frame_site = _held_site(machine, "pauli_frame")
     if not shape.pools:
         idle = _idle_pool(frame_name)
-        return layout_module.Layout((idle,), (), (), card)
+        return layout_module.Layout(
+            (idle,), (), (), card, frame_site=frame_site
+        )
     pools = []
     stores = []
     for pool in shape.pools:
@@ -116,6 +119,7 @@ def layout_of(machine: graph.Machine) -> layout_module.Layout:
         card,
         router=router,
         entry_count=entry_count,
+        frame_site=frame_site,
     )
 
 
@@ -371,6 +375,27 @@ def _site(part: graph.Part) -> str:
     return part.placed
 
 
+def _held_site(machine: graph.Machine, kind_name: str) -> str:
+    """Where the part of a kind held once sits; the fridge with none."""
+    parts = machine.parts_of(kind_name)
+    if not parts:
+        return fabrics.FRIDGE
+    return _site(parts[0])
+
+
+def _site_variant(pool_site: str, frame_site: str) -> str:
+    """How the reference card prices a pool's own hops: by the frame or not.
+
+    The card has two rows for an answer or a same-pool hop: a pool on
+    the board with the frame (variant fridge) and one a hop away from it
+    (variant host), so a pool at any other site is priced as one a hop
+    away; a fabric that knows the site prices it (fabrics.SiteLinks).
+    """
+    if pool_site == frame_site:
+        return fabrics.FRIDGE
+    return fabrics.HOST
+
+
 def _hop(source_name: str, target_name: str) -> str:
     return route_records.hop_between(source_name, target_name)
 
@@ -379,13 +404,14 @@ def _intake_shape(shape: _Shape, pool: graph.Part) -> str:
     """How a pool's store takes its rounds.
 
     The controller writes the entry store, unless the first entry pool
-    sits on the host, which reads a store the rounds land in; an edge's
-    target store takes its rounds as they land.
+    sits away from the controller, where it reads a store the rounds
+    land in; an edge's target store takes its rounds as they land.
     """
     if pool not in shape.entries:
         return receiver_module.LANDED
     pool = shape.entry
-    if _site(pool) == fabrics.HOST:
+    controller_site = _held_site(shape.machine, "controller")
+    if _site(pool) != controller_site:
         return receiver_module.LANDED
     return receiver_module.WRITTEN
 
@@ -585,12 +611,14 @@ def _pool_routes(
     intake_shape = _intake_shape(shape, pool)
     pool_site = _site(pool)
     store_site = _site(store)
+    frame_site = _held_site(shape.machine, "pauli_frame")
+    variant = _site_variant(pool_site, frame_site)
     read_role = route_records.HopRole(route_records.READ, intake_shape)
-    answer_role = route_records.HopRole(route_records.ANSWER, pool_site)
-    same_pool_role = route_records.HopRole(route_records.SAME_POOL, pool_site)
+    answer_role = route_records.HopRole(route_records.ANSWER, variant)
+    same_pool_role = route_records.HopRole(route_records.SAME_POOL, variant)
     read = _route((store.name, pool.name), (store_site, pool_site), read_role)
     answer = _route(
-        (pool.name, frame_name), (pool_site, fabrics.FRIDGE), answer_role
+        (pool.name, frame_name), (pool_site, frame_site), answer_role
     )
     same_pool = _route(
         (pool.name, pool.name), (pool_site, pool_site), same_pool_role
@@ -599,8 +627,9 @@ def _pool_routes(
         # the entry store is written once, on the first entry's route
         return (read, answer, same_pool)
     write_role = route_records.HopRole(route_records.WRITE, intake_shape)
+    controller_site = _held_site(shape.machine, "controller")
     write = _route(
-        (controller_name, store.name), (fabrics.FRIDGE, store_site), write_role
+        (controller_name, store.name), (controller_site, store_site), write_role
     )
     return (write, read, answer, same_pool)
 

@@ -15,15 +15,15 @@ its site carries no name.
 import decsim.records.routes as route_records
 import decsim.records.windows as window_records
 
-# the frame sits on the chip with the controller
-FRAME_SITE = route_records.FRIDGE
 
-
-def generated(pools: tuple, edges: tuple) -> route_records.Routes:
+def generated(
+    pools: tuple, edges: tuple, frame_site: str = route_records.FRIDGE
+) -> route_records.Routes:
     """Every answer route and boundary route of pools joined by edges.
 
     Each pool answers its own windows home on its own hop, and the
-    windows an edge asks of it on that edge's route.
+    windows an edge asks of it on that edge's route. frame_site is the
+    frame's, which an answer from any other site crosses the wall to.
     """
     pool_by_id = {}
     for pool in pools:
@@ -31,7 +31,7 @@ def generated(pools: tuple, edges: tuple) -> route_records.Routes:
     answer_by_asker = {}
     name_bits_by_hop = {}
     for pool in pools:
-        name_bits_by_hop[pool.answer] = _name_bits(pool.site, FRAME_SITE)
+        name_bits_by_hop[pool.answer] = _name_bits(pool.site, frame_site)
         own_route = route_records.AnswerRoute(None, pool.answer, 0)
         answer_by_asker[pool.pool, None] = own_route
     for edge in edges:

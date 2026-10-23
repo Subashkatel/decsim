@@ -213,6 +213,8 @@ def _shape(machine: graph.Machine) -> _Shape:
     if not pools:
         return _Shape(machine, (), (), {}, ())
     entries = _entry_pools(machine, pools, edges, router)
+    for entry in entries:
+        _refuse_a_chain_that_comes_back(entry, edges)
     ordered_pools, ordered_edges = _from_the_entries(entries, pools, edges)
     store_by_pool = {}
     for pool in ordered_pools:
@@ -401,6 +403,31 @@ def _from_the_entries(entries: tuple, pools: list, edges: list) -> tuple:
             _add_once(ordered_pools, edge.target)
     _refuse_the_unreached(entries[0], pools, ordered_pools)
     return tuple(ordered_pools), tuple(ordered_edges)
+
+
+def _refuse_a_chain_that_comes_back(entry: graph.Part, edges: list) -> None:
+    """A chain from an entry pool passes each pool once.
+
+    Chains may share a target (fan-in), so a pool can be reached twice,
+    but a chain that comes back to a pool it passed would never end:
+    every chain in the sources ends at its deepest decoder (Toshio
+    2510.25222 Sec. III; Tour de gross 2506.03094).
+    """
+    passed = [entry.name]
+    leaving = _edges_leaving(entry, edges)
+    while leaving:
+        # a pool's escalate port takes one wire, so one edge leaves it
+        (edge,) = leaving
+        target = edge.target
+        if target.name in passed:
+            first = passed.index(target.name)
+            circle = passed[first:]
+            raise graph.GraphError(
+                f"the pools {circle} escalate in a circle: the chain from "
+                f"{entry.name} comes back to {target.name} and never ends"
+            )
+        passed.append(target.name)
+        leaving = _edges_leaving(target, edges)
 
 
 def _add_once(ordered_pools: list, pool: graph.Part) -> None:

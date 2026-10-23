@@ -215,6 +215,28 @@ def test_pools_no_edge_joins_are_refused():
         laid_out(cut)
 
 
+def test_a_chain_that_comes_back_to_a_pool_it_passed_is_refused():
+    """The chain weak, b, c, d escalates back into b, a pool it passed."""
+    graph_with_circle = declared_run.weak_only_graph(rounds=3)
+    switching = declared_run.declared_switching()
+    weak = graph_with_circle.part("weak")
+    pool = weak.settings
+    for source, target in (("weak", "b"), ("b", "c"), ("c", "d")):
+        graph_with_circle = machines.with_escalation(
+            graph_with_circle, source, target, pool, switching
+        )
+    graph_with_circle = machines.with_escalation_to(
+        graph_with_circle, "d", "b", switching, switching_name="d_to_b"
+    )
+
+    with pytest.raises(graph.GraphError) as refusal:
+        laid_out(graph_with_circle)
+
+    message = str(refusal.value)
+    assert "['b', 'c', 'd'] escalate in a circle" in message
+    assert "from weak comes back to b" in message
+
+
 def test_a_router_makes_each_pool_it_feeds_an_entry_pool():
     routed = _routed_chain()
 

@@ -170,9 +170,9 @@ class StreamMeasures:
         values = folds.value_summaries()
         tiers = dict(folds.window_tiers)
         end_reaction = folds.end_of_stream_reaction()
-        weak_pool, strong_pool = self.tier_pools
-        weak_growth = folds.growth_rate(weak_pool)
-        strong_growth = folds.growth_rate(strong_pool)
+        weak_pools, strong_pools = self.tier_pools
+        weak_growth = folds.growth_rate(weak_pools)
+        strong_growth = folds.growth_rate(strong_pools)
         missed, first_miss = folds.deadline_misses()
         service_us = config_module.ticks_to_microseconds(
             folds.strong_service_ticks
@@ -256,8 +256,8 @@ class StreamMeasures:
         """A window the frame committed: its decode, then its latencies."""
         stages = self.machine.observation.stages
         decode = measure.committed_decode(stages, frame_record)
-        _weak_pool, strong_pool = self.tier_pools
-        if decode.tier == strong_pool:
+        _weak_pools, strong_pools = self.tier_pools
+        if decode.tier in strong_pools:
             self.folds.fold_strong(decode)
         self.folds.note_commit(frame_record)
         self.folds.sample_escalation(window)
@@ -523,11 +523,14 @@ class _Folds:
         span_ticks = counts.decoded_commit_tick - counts.final_send_tick
         return config_module.ticks_to_microseconds(span_ticks)
 
-    def growth_rate(self, tier: window_records.PoolId) -> Optional[float]:
-        growth = self.growth_by_tier.get(tier)
-        if growth is None:
-            return None
-        return growth.slope()
+    def growth_rate(self, tier_pools: tuple) -> Optional[float]:
+        """A tier's reaction growth, fit over every window of its pools."""
+        tier_growth = _Growth()
+        for pool in tier_pools:
+            growth = self.growth_by_tier.get(pool)
+            if growth is not None:
+                tier_growth.merge(growth)
+        return tier_growth.slope()
 
     def deadline_misses(self) -> tuple:
         """The recorded windows over the deadline, the earliest's arrival."""
@@ -626,6 +629,19 @@ class _Growth:
         if self.first_arrival is None:
             self.first_arrival = arrival_ticks
         if arrival_ticks != self.first_arrival:
+            self.has_two_arrivals = True
+
+    def merge(self, other: "_Growth") -> None:
+        """Another pool's windows added, as if each had been added here."""
+        if other.first_arrival is None:
+            return
+        self.count += other.count
+        for index, value in enumerate(other.sums):
+            self.sums[index] += value
+        if self.first_arrival is None:
+            self.first_arrival = other.first_arrival
+        is_another_arrival = other.first_arrival != self.first_arrival
+        if other.has_two_arrivals or is_another_arrival:
             self.has_two_arrivals = True
 
     def slope(self) -> Optional[float]:

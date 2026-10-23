@@ -87,10 +87,12 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
+import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
 import examples.live_memory_example as live_memory_example
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
+import tests.patch_pools as patch_pools
 import tests.qpu.memory_programs as memory_programs
 import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.measured_table import decoder as measured_table_decoder
@@ -621,6 +623,59 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
     assert measurement.weak_busy_fraction == 0.0
     assert measurement.strong_queue_max == measurement.max_queued_windows
     assert measurement.strong_busy_fraction > 0.0
+
+
+def test_a_tiers_columns_are_its_pools_rows_read_together():
+    """A weak pool per patch, one unit each, all escalating to one strong.
+
+    The weak tier is the three pools: its offered load is their busy
+    time over their three units, here the mean of their own loads, and
+    its queue peak the largest of theirs. Each window is committed off
+    one pool's decode, and each escalated window off the strong pool's
+    (tests/patch_pools.py).
+    """
+    machine = patch_pools.shared_strong_per_patch()
+    shot = patch_pools.shot(machine)
+
+    measurement = measure.measure_shot(shot)
+
+    weak, w1, w2, strong = measurement.pools
+    weak_rows = (weak, w1, w2)
+    weak_loads = [row.offered_load for row in weak_rows]
+    weak_queues = [row.queue_max for row in weak_rows]
+    weak_escalated = [row.escalated_windows for row in weak_rows]
+    committed = [row.committed_windows for row in measurement.pools]
+    assert [row.pool for row in measurement.pools] == [
+        "weak",
+        "w1",
+        "w2",
+        "strong",
+    ]
+    mean_load = statistics.fmean(weak_loads)
+    assert measurement.weak_offered_load == pytest.approx(mean_load)
+    assert measurement.weak_queue_max == max(weak_queues)
+    assert measurement.strong_offered_load == strong.offered_load
+    assert sum(committed) == measurement.decoded_windows
+    assert sum(weak_escalated) == measurement.escalated_windows
+    assert strong.committed_windows == measurement.escalated_windows
+    assert min(weak_escalated) > 0
+
+
+def test_entry_pools_of_two_kinds_name_both_as_the_tasks_algorithm():
+    machine = patch_pools.one_pool()
+    weak = machine.part(machines.WEAK_POOL)
+    matching_settings = (
+        minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    )
+    matching = dataclasses.replace(weak.settings, algorithm=matching_settings)
+    pools = (("w1", matching), ("w2", weak.settings))
+    rule = routers.ByPatch.Settings(pool_by_patch=patch_pools.POOL_BY_PATCH)
+    routed = machines.with_router(machine, rule, pools)
+    layout = layout_tests.laid_out(routed)
+
+    kind = measure.active_decoder_kind(layout)
+
+    assert kind == "union_find+pymatching"
 
 
 def test_patches_named_by_an_int_and_a_str_are_measured():

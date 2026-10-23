@@ -49,6 +49,7 @@ NON_COLUMN_FIELDS = (
     "window_outcomes",
     "statistics",
     "statistic_values",
+    "pools",
 )
 # the counters a hold books for the whole shot: a reference is a token
 # on a store's slot and belongs to no path, so these repeat on every row
@@ -135,6 +136,7 @@ SHOT_TRUE_COUNTS = (
 FOLDED_FILES = (
     "shots.csv",
     "shot_links.csv",
+    "shot_pools.csv",
     "shot_stats.csv",
     "shot_data_movement.csv",
     "latency_samples.csv",
@@ -144,6 +146,12 @@ FOLDED_FILES = (
 # how a field of shot_stats.csv adds over shots: a peak or an extreme
 # keeps the largest or the smallest, every other field sums
 STATISTIC_FIELD_FOLDS = {"peak": max, "maximum": max, "minimum": min}
+# how a pool's columns of shot_pools.csv fold into pool_summary.csv: a
+# fraction or a load is a mean over the task's shots, a queue peak the
+# largest, a count of windows a sum
+POOL_MEANS = ("busy_fraction", "offered_load")
+POOL_MAXES = ("queue_max",)
+POOL_SUMS = ("committed_windows", "escalated_windows")
 # the tails stat_summary.csv reads off a statistic's value counts
 SUMMARY_PERCENTILES = (("p50", 0.5), ("p90", 0.9), ("p99", 0.99))
 # the confidence histogram's bin, a tenth of a decibel: Gidney et al.
@@ -168,6 +176,7 @@ class RunRecord:
 
     shots: list
     shot_links: list
+    shot_pools: list
     shot_statistics: list
     statistic_values: list
     shot_data_movement: list
@@ -352,6 +361,42 @@ def shot_link_rows(measurements: list) -> list:
         for path in sorted(measurement.link_totals):
             row = _shot_link_row(task_key, measurement, path)
             rows.append(row)
+    return rows
+
+
+def shot_pool_rows(measurements: list) -> list:
+    """One row per shot per pool: its load and the windows it decided.
+
+    A file of its own, as the links are: a machine with a pool per
+    patch adds rows and moves no column.
+    """
+    rows = []
+    for measurement in measurements:
+        task_key = measured_task_key(measurement)
+        for pool_row in measurement.pools:
+            row = _shot_pool_row(task_key, measurement, pool_row)
+            rows.append(row)
+    return rows
+
+
+def pool_summary_rows(pool_totals: dict) -> list:
+    """One row per task and pool: POOL_MEANS, POOL_MAXES and POOL_SUMS.
+
+    Derived when the fold runs from the task's shot_pools.csv rows, as
+    stat_summary.csv is from shot_stats.csv, so it is never in a piece.
+    """
+    rows = []
+    for (task_key, pool), totals in pool_totals.items():
+        row = task_columns(task_key)
+        row["pool"] = pool
+        row["shots"] = totals.rows
+        for name in POOL_MEANS:
+            row[name] = totals.mean(name)
+        for name in POOL_MAXES:
+            row[name] = totals.maxes[name]
+        for name in POOL_SUMS:
+            row[name] = totals.sums[name]
+        rows.append(row)
     return rows
 
 
@@ -545,6 +590,7 @@ def record_of(measurements: list) -> RunRecord:
     """The additive facts of the shots this process measured."""
     shots = shot_rows(measurements)
     links = shot_link_rows(measurements)
+    pools = shot_pool_rows(measurements)
     statistics = shot_statistics_rows(measurements)
     values = statistic_value_rows(measurements)
     movement = shot_data_movement_rows(measurements)
@@ -556,6 +602,7 @@ def record_of(measurements: list) -> RunRecord:
     return RunRecord(
         shots,
         links,
+        pools,
         statistics,
         values,
         movement,
@@ -568,11 +615,13 @@ def record_of(measurements: list) -> RunRecord:
 
 
 def write_record(record: RunRecord, report_dir: Path, swept: dict) -> None:
-    """The record's ten files; one with no rows is not written."""
+    """The record's eleven files; one with no rows is not written."""
     shots_path = report_dir / "shots.csv"
     _write_rows(record.shots, shots_path, swept)
     links_path = report_dir / "shot_links.csv"
     _write_rows(record.shot_links, links_path, swept)
+    pools_path = report_dir / "shot_pools.csv"
+    _write_rows(record.shot_pools, pools_path, swept)
     statistics_path = report_dir / "shot_stats.csv"
     _write_rows(record.shot_statistics, statistics_path, swept)
     values_path = report_dir / "stat_values.csv"
@@ -677,6 +726,10 @@ def _fold_the_folders(
     samples_rows = _rows_of_counts(counts, list(shot_totals))
     _write_rows(samples_rows, samples_path, swept)
     _fold_shot_links(folders, order, out_dir, swept)
+    pool_totals = _fold_shot_pools(folders, order, out_dir, swept)
+    pool_rows = pool_summary_rows(pool_totals)
+    pool_summary_path = out_dir / "pool_summary.csv"
+    _write_rows(pool_rows, pool_summary_path, swept)
     field_totals = _fold_shot_statistics(folders, order, out_dir, swept)
     values = _folded_statistic_values(folders)
     values_rows = _rows_of_statistic_values(values, list(shot_totals))
@@ -719,6 +772,33 @@ def _fold_shot_links(folders: list, order, out_dir: Path, swept: dict) -> None:
     """Every folder's shot_links.csv into one; no summary reads it."""
     name = "shot_links.csv"
     _fold_one_file(folders, name, order, out_dir, swept, _no_totals)
+
+
+def _fold_shot_pools(folders: list, order, out_dir: Path, swept: dict) -> dict:
+    """Every folder's shot_pools.csv into one; each task's pools' totals.
+
+    The totals are keyed (task, pool), in the order their first rows
+    came, which is the task order and each machine's layout order.
+    """
+    totals = {}
+    add_a_row = functools.partial(_add_a_pool_row, totals)
+    name = "shot_pools.csv"
+    _fold_one_file(folders, name, order, out_dir, swept, add_a_row)
+    return totals
+
+
+def _add_a_pool_row(totals: dict, text_row: dict) -> None:
+    """One shot's row of one pool onto its task's pool totals."""
+    row = fold.typed_row(text_row)
+    task_key = task_key_of(row)
+    key = (task_key, row["pool"])
+    pool_totals = totals.get(key)
+    if pool_totals is None:
+        pool_totals = fold.RowTotals(
+            means=POOL_MEANS, maxes=POOL_MAXES, sums=POOL_SUMS
+        )
+        totals[key] = pool_totals
+    pool_totals.add(row)
 
 
 def _fold_shot_statistics(
@@ -1532,6 +1612,17 @@ def _columns_kept_empty(measurement) -> tuple:
     if measurement.deadline_missed_windows is None:
         return GROWTH_COLUMNS
     return OVERLOAD_MEANS
+
+
+def _shot_pool_row(
+    task_key: tuple, measurement, pool_row: measure.PoolRow
+) -> dict:
+    """One shot's row of one pool, its fields in the record's order."""
+    row = task_columns(task_key)
+    row["seed"] = measurement.seed
+    for name in pool_row.__dataclass_fields__:
+        row[name] = getattr(pool_row, name)
+    return row
 
 
 def _shot_link_row(task_key: tuple, measurement, path: str) -> dict:

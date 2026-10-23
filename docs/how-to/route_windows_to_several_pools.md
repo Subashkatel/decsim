@@ -50,7 +50,24 @@ Every routed pool reads the entry store over a hop of its own,
 it to the pool of the window that reads it. Each frame record's `tier`
 is the pool that answered, and each pool's statistics sit at its name.
 With the same decoder on every pool, routing changes no correction,
-only the timing (`tests/windows/test_routers.py`).
+only the timing (`tests/windows/test_routers.py`; with a shared strong
+pool and a store per pool, `tests/escalation/test_shared_target.py`
+and `tests/presets/test_machines.py`).
+
+`decsim run` reads the pools two ways:
+
+- **By tier**, in `sweep.csv`: the weak tier is every entry pool, the
+  strong tier every pool an entry pool escalates to. A tier's
+  `*_busy_fraction` and `*_offered_load` are its busy unit time over
+  all its units, its `*_queue_max` its largest pool's queue, and
+  `escalated_windows` the windows any strong-tier pool committed. The
+  `algorithm` column names every entry pool's decoder kind, joined by
+  `+` when they differ.
+- **By pool**, in `shot_pools.csv` (a row per shot and pool) and
+  `pool_summary.csv` (a row per task and pool): each pool's queue
+  peak, busy fraction, offered load, the windows it committed and the
+  windows it escalated. This is where one patch's pool falling behind
+  shows while the tier as a whole keeps up.
 
 ## 4. Escalate from any routed pool, to a pool they share
 

@@ -206,6 +206,26 @@ class WindowOutcomeRow:
 
 
 @dataclasses.dataclass(frozen=True)
+class PoolRow:
+    """One pool over one shot: its load, and the windows it decided.
+
+    The load reads as the tier columns do, over this pool alone.
+    committed_windows are the windows the frame committed off this
+    pool's decode;
+    escalated_windows those it sent up its edge, none for a pool that
+    escalates nowhere. A machine of several pools on one tier, a
+    decoder per patch, shows each pool's contention here.
+    """
+
+    pool: str
+    queue_max: int
+    busy_fraction: float
+    offered_load: float
+    committed_windows: int
+    escalated_windows: int
+
+
+@dataclasses.dataclass(frozen=True)
 class ShotConfidence:
     """A shot's windows' confidence gaps, when a signal ran.
 
@@ -268,6 +288,9 @@ class ShotMeasurement:
     # behind
     weak_offered_load: float
     strong_offered_load: float
+    # each pool's own load and windows, one PoolRow a pool in layout
+    # order; shot_pools.csv holds them
+    pools: tuple
     # the windows the strong tier committed, the rounds its decodes read
     # and their summed service, and r_com, the rounds a window commits.
     # The report divides the summed service by the summed windows per
@@ -911,17 +934,18 @@ def pool_measures(
 ) -> "_PoolMeasures":
     """Each tier's queue peak, busy fraction and load over a span.
 
-    The tiers are the layout's (Layout.tier_pools), each read where its
-    pool keeps its statistics; a tier the run lacks reads zero.
-    generation_ticks is the span the rounds were generated over
-    (_generation_span_ticks); a stream keeps its two ends as it runs.
+    The tiers are the layout's (Layout.tier_pools), each pool read where
+    it keeps its statistics and a tier's pools read as one
+    (_tier_numbers); a tier the run lacks reads zero. generation_ticks
+    is the span the rounds were generated over (_generation_span_ticks);
+    a stream keeps its two ends as it runs.
     """
-    weak_pool, strong_pool = layout.tier_pools()
+    weak_pools, strong_pools = layout.tier_pools()
     pool_paths = layout.statistics_path_by_pool()
-    weak_path = pool_paths.get(weak_pool)
-    strong_path = pool_paths.get(strong_pool)
-    weak = _pool_numbers(run_statistics, weak_path, generation_ticks)
-    strong = _pool_numbers(run_statistics, strong_path, generation_ticks)
+    weak_usages = _usages_of(run_statistics, pool_paths, weak_pools)
+    strong_usages = _usages_of(run_statistics, pool_paths, strong_pools)
+    weak = _tier_numbers(weak_usages, generation_ticks)
+    strong = _tier_numbers(strong_usages, generation_ticks)
     return _PoolMeasures(
         weak_queue_max=weak.queue_max,
         strong_queue_max=strong.queue_max,
@@ -930,6 +954,33 @@ def pool_measures(
         weak_offered_load=weak.offered_load,
         strong_offered_load=strong.offered_load,
     )
+
+
+def pool_rows(
+    observation: observation_module.Observation,
+    layout: layout_module.Layout,
+    generation_ticks: int,
+) -> tuple:
+    """Every pool's PoolRow over the shot, in layout order."""
+    run_statistics = observation.statistics
+    pool_paths = layout.statistics_path_by_pool()
+    committed = _committed_by_pool(observation)
+    rows = []
+    for plan in layout.pools:
+        one_pool = (plan.pool,)
+        usages = _usages_of(run_statistics, pool_paths, one_pool)
+        numbers = _tier_numbers(usages, generation_ticks)
+        escalated = _escalated_windows(run_statistics, layout, plan.pool)
+        row = PoolRow(
+            pool=plan.pool.word,
+            queue_max=numbers.queue_max,
+            busy_fraction=numbers.busy_fraction,
+            offered_load=numbers.offered_load,
+            committed_windows=committed[plan.pool.word],
+            escalated_windows=escalated,
+        )
+        rows.append(row)
+    return tuple(rows)
 
 
 def last_required_send_ticks(decode: "_CommittedDecode", qpu_send: dict) -> int:
@@ -981,9 +1032,7 @@ def end_of_stream_reaction_us(
     return [reaction]
 
 
-def reaction_growth_rate(
-    recorded: list, tier: Optional[window_records.PoolId]
-) -> Optional[float]:
+def reaction_growth_rate(recorded: list, tier_pools: tuple) -> Optional[float]:
     """How fast a tier's reaction time grows along the shot, in us per us.
 
     The least-squares slope of each window's buffer0_ready_to_frame
@@ -998,7 +1047,8 @@ def reaction_growth_rate(
     estimate of it, not equal to it. Against the commit tick the
     slope would tend to 1 - 1 / load, under 1 however far the tier is
     overloaded. None when the tier's recorded windows completed at fewer
-    than two distinct ticks, which leave no slope to fit.
+    than two distinct ticks, which leave no slope to fit. A tier of
+    several pools is fit over every window its pools committed.
 
     The law holds for an unbounded FIFO queue fed without a pause by
     stationary arrivals and service. A bounded store holds the backlog
@@ -1009,7 +1059,7 @@ def reaction_growth_rate(
     arrivals_us = []
     reactions_us = []
     for window, frame_record in recorded:
-        if window_records.PoolId(frame_record.tier) != tier:
+        if window_records.PoolId(frame_record.tier) not in tier_pools:
             continue
         arrival_us = _arrival_microseconds(window)
         reaction_us = _reaction_microseconds(window, frame_record)
@@ -1073,11 +1123,20 @@ def chain_load(samples: dict, window_period_us: float) -> float:
 def active_decoder_kind(
     layout: layout_module.Layout,
 ) -> Optional[Union[str, float]]:
-    """The kind of the entry pool, which decodes the plan's windows."""
-    pool_settings = layout.entry_pool.settings
-    if pool_settings is None:
-        return None
-    return pool_settings.algorithm.name
+    """The kind of the entry pools, which decode the plan's windows.
+
+    Entry pools of several kinds, a decoder row per region, are named
+    together, each kind once in layout order, joined by a plus.
+    """
+    kinds = []
+    for plan in layout.entry_pools:
+        kind = _decoder_kind(plan)
+        if kind not in kinds:
+            kinds.append(kind)
+    if len(kinds) == 1:
+        return kinds[0]
+    words = [str(kind) for kind in kinds]
+    return "+".join(words)
 
 
 def trace_path_for_shot(path: Union[str, pathlib.Path], label: str) -> str:
@@ -1160,9 +1219,9 @@ def _measurement(
     decoded = decoded_windows(observation)
     decoded_window_count = len(decoded)
     recorded = recorded_windows(observation, graph.observation)
-    weak_pool, strong_pool = layout.tier_pools()
-    weak_growth = reaction_growth_rate(recorded, weak_pool)
-    strong_growth = reaction_growth_rate(recorded, strong_pool)
+    weak_pools, strong_pools = layout.tier_pools()
+    weak_growth = reaction_growth_rate(recorded, weak_pools)
+    strong_growth = reaction_growth_rate(recorded, strong_pools)
     missed_windows, first_miss_us = deadline_misses(
         recorded, graph.observation.reaction_deadline_microseconds
     )
@@ -1177,9 +1236,11 @@ def _measurement(
     round_period_ticks = config_module.microseconds_to_ticks(
         round_period_microseconds
     )
-    pools = _pool_measures(observation, round_period_ticks, layout)
-    strong = _strong_decodes(observation, strong_pool)
-    tiers = _tier_records(observation, weak_pool, strong_pool)
+    generation_ticks = _generation_span_ticks(observation, round_period_ticks)
+    pools = pool_measures(observation.statistics, layout, generation_ticks)
+    pool_table = pool_rows(observation, layout, generation_ticks)
+    strong = _strong_decodes(observation, strong_pools)
+    tiers = _tier_records(observation, weak_pools, strong_pools)
     backlog_peak = _backlog_peak_rounds(observation)
     processes = parallel_processes_needed(
         samples, code, round_period_microseconds
@@ -1221,6 +1282,7 @@ def _measurement(
         strong_busy_fraction=pools.strong_busy_fraction,
         weak_offered_load=pools.weak_offered_load,
         strong_offered_load=pools.strong_offered_load,
+        pools=pool_table,
         escalated_windows=strong.windows,
         strong_decoded_rounds=strong.rounds,
         strong_service_sum_us=strong.service_sum_microseconds,
@@ -1594,6 +1656,20 @@ _NO_POOL = _PoolNumbers(queue_max=0, busy_fraction=0.0, offered_load=0.0)
 
 
 @dataclasses.dataclass(frozen=True)
+class _PoolUsage:
+    """One pool's raw load: its queue peak, busy units and units.
+
+    busy_units_mean is the busy units' time average, busy_ticks the
+    busy unit ticks (the busy level's area), so pools add.
+    """
+
+    queue_max: int
+    busy_units_mean: float
+    busy_ticks: int
+    unit_count: int
+
+
+@dataclasses.dataclass(frozen=True)
 class _PoolMeasures:
     """Each tier's pool load over the shot."""
 
@@ -1734,49 +1810,99 @@ def _referee_counts(
     )
 
 
-def _pool_measures(
-    observation: observation_module.Observation,
-    round_period_ticks: int,
-    layout: layout_module.Layout,
-) -> _PoolMeasures:
-    """Each tier's queue peak, busy fraction and load, from its statistics.
-
-    The weak row reads the layout's weak tier, the strong row its strong
-    one (a strong-only run's window pool); a tier the run lacks reads zero.
-    """
-    generation_ticks = _generation_span_ticks(observation, round_period_ticks)
-    return pool_measures(observation.statistics, layout, generation_ticks)
+def _decoder_kind(
+    plan: layout_module.PoolPlan,
+) -> Optional[Union[str, float]]:
+    """One pool's decoder kind; None for a pool that decodes nothing."""
+    if plan.settings is None:
+        return None
+    return plan.settings.algorithm.name
 
 
-def _pool_numbers(
+def _usages_of(
     run_statistics: statistics_registry.Registry,
-    path: Optional[str],
-    generation_ticks: int,
-) -> "_PoolNumbers":
-    """One pool's queue peak, busy fraction and offered load.
+    pool_paths: dict,
+    pools: tuple,
+) -> list:
+    """The raw load of each of the pools whose units keep statistics."""
+    usages = []
+    for pool in pools:
+        path = pool_paths.get(pool)
+        usage = _pool_usage(run_statistics, path)
+        if usage is not None:
+            usages.append(usage)
+    return usages
 
-    The busy fraction is the busy units' time average over the run, or
-    over its region of interest, drain included, per unit (Triage's
-    utilization, 2605.04459
-    lines 1024-1031); the offered load is the busy unit ticks over the
-    units times the generation span: rho = lambda E[S] / c, the ratio
-    chain_load forms for the serial chain.
-    """
+
+def _pool_usage(
+    run_statistics: statistics_registry.Registry, path: Optional[str]
+) -> Optional["_PoolUsage"]:
+    """One pool's queue peak, busy units and units; None with no units."""
     if path is None:
-        return _NO_POOL
+        return None
     units_group = run_statistics.groups.get(f"{path}.units")
     if units_group is None:
-        return _NO_POOL
+        return None
     queue_group = run_statistics.groups[f"{path}.queue"]
     busy = units_group.busy_units
-    unit_count = units_group.units.count
-    time_average = 0.0
+    busy_units_mean = 0.0
     if busy.span:
-        time_average = busy.area / busy.span
-    busy_fraction = time_average / unit_count
+        busy_units_mean = busy.area / busy.span
+    queue_max = queue_group.queued.peak
+    unit_count = units_group.units.count
+    return _PoolUsage(queue_max, busy_units_mean, busy.area, unit_count)
+
+
+def _tier_numbers(usages: list, generation_ticks: int) -> "_PoolNumbers":
+    """Pools read as one: their units together, their largest queue.
+
+    The busy fraction is the busy units' time average over the units,
+    over the run or its region of interest, drain included (Triage's
+    utilization, 2605.04459 lines 1024-1031); the offered load is the
+    busy unit ticks over the units times the generation span: rho =
+    lambda E[S] / c, the ratio chain_load forms for the serial chain,
+    with c every unit of the pools. The queue peak is the largest
+    pool's, since each pool queues apart and two pools' peaks need not
+    fall at one tick. No pool reads zero.
+    """
+    if not usages:
+        return _NO_POOL
+    queue_max = 0
+    busy_units_mean = 0.0
+    busy_ticks = 0
+    unit_count = 0
+    for usage in usages:
+        queue_max = max(queue_max, usage.queue_max)
+        busy_units_mean += usage.busy_units_mean
+        busy_ticks += usage.busy_ticks
+        unit_count += usage.unit_count
+    busy_fraction = busy_units_mean / unit_count
     capacity_ticks = unit_count * generation_ticks
-    offered_load = busy.area / capacity_ticks
-    return _PoolNumbers(queue_group.queued.peak, busy_fraction, offered_load)
+    offered_load = busy_ticks / capacity_ticks
+    return _PoolNumbers(queue_max, busy_fraction, offered_load)
+
+
+def _committed_by_pool(
+    observation: observation_module.Observation,
+) -> collections.Counter:
+    """The windows the frame committed off each pool's decode, by word."""
+    committed = collections.Counter()
+    for frame_record in observation.frame_corrections.committed:
+        committed[frame_record.tier] += 1
+    return committed
+
+
+def _escalated_windows(
+    run_statistics: statistics_registry.Registry,
+    layout: layout_module.Layout,
+    pool: window_records.PoolId,
+) -> int:
+    """The windows a pool sent up its edge; none with no edge."""
+    edge = layout.edge_leaving(pool)
+    if edge is None:
+        return 0
+    edge_group = run_statistics.groups[edge.name]
+    return edge_group.escalated.count
 
 
 def _generation_span_ticks(
@@ -1806,8 +1932,7 @@ def _generation_span_ticks(
 
 
 def _strong_decodes(
-    observation: observation_module.Observation,
-    strong_pool: Optional[window_records.PoolId],
+    observation: observation_module.Observation, strong_pools: tuple
 ) -> _StrongDecodes:
     """The windows the strong tier committed, their rounds, their service.
 
@@ -1820,7 +1945,7 @@ def _strong_decodes(
     service_ticks = 0
     for frame_record in observation.frame_corrections.committed:
         tier = window_records.PoolId(frame_record.tier)
-        if tier != strong_pool:
+        if tier not in strong_pools:
             continue
         decode = committed_decode(stages, frame_record)
         windows += 1
@@ -1834,8 +1959,8 @@ def _strong_decodes(
 
 def _tier_records(
     observation: observation_module.Observation,
-    weak_pool: Optional[window_records.PoolId],
-    strong_pool: Optional[window_records.PoolId],
+    weak_pools: tuple,
+    strong_pools: tuple,
 ) -> _TierRecords:
     """Each tier's inputs, computes and waits off the switching records.
 
@@ -1849,9 +1974,9 @@ def _tier_records(
         return _TierRecords()
     lives = _decode_lives(observation.stages)
     requests = records.requests
-    weak_requests = _requests_of_pool(requests, lives, weak_pool)
-    strong_requests = _requests_of_pool(requests, lives, strong_pool)
-    weights = _weak_syndrome_weights(requests, weak_pool)
+    weak_requests = _requests_of_pools(requests, lives, weak_pools)
+    strong_requests = _requests_of_pools(requests, lives, strong_pools)
+    weights = _weak_syndrome_weights(requests, weak_pools)
     weak_computes = _weak_compute_microseconds(weak_requests, lives)
     strong_waits = _strong_wait_microseconds(strong_requests, lives)
     held_peak = _strong_held_in_units_peak(strong_requests, lives)
@@ -1898,13 +2023,11 @@ def _decode_life(records: list) -> _DecodeLife:
     return _DecodeLife(dispatch, ready, compute_start, max(ends))
 
 
-def _weak_syndrome_weights(
-    requests: list, weak_pool: Optional[window_records.PoolId]
-) -> list:
+def _weak_syndrome_weights(requests: list, weak_pools: tuple) -> list:
     """The set bits of every weak request's landed input that has bits."""
     weights = []
     for request in requests:
-        is_weak = request.request_key.pool == weak_pool
+        is_weak = request.request_key.pool in weak_pools
         if is_weak and request.syndrome_weight is not None:
             weights.append(request.syndrome_weight)
     return weights
@@ -1958,14 +2081,12 @@ def _strong_held_in_units_peak(strong_requests: list, lives: dict) -> int:
     return peak
 
 
-def _requests_of_pool(
-    requests: list, lives: dict, pool: Optional[window_records.PoolId]
-) -> list:
-    """The pool's requests whose decode ran at least one stage."""
+def _requests_of_pools(requests: list, lives: dict, pools: tuple) -> list:
+    """The pools' requests whose decode ran at least one stage."""
     chosen = []
     for request in requests:
         key = request.request_key
-        if key.pool == pool and key.run_sequence in lives:
+        if key.pool in pools and key.run_sequence in lives:
             chosen.append(request)
     return chosen
 

@@ -417,11 +417,3 @@ def test_a_pool_the_router_feeds_and_an_edge_reaches_is_refused():
 
     with pytest.raises(graph.GraphError, match="fed by the router and reached"):
         laid_out(both)
-
-
-def test_the_tier_measures_over_two_entry_pools_are_refused():
-    routed = _routed_chain()
-    layout = laid_out(routed)
-
-    with pytest.raises(NotImplementedError, match="over 2 entry pools"):
-        layout.tier_pools()

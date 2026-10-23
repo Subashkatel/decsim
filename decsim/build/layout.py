@@ -22,7 +22,6 @@ import decsim.links.settings as link_settings
 import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
-import decsim.refusals as refusals
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 
 # where every round's path to a decoder starts
@@ -194,27 +193,26 @@ class Layout:
         raise KeyError(name)
 
     def tier_pools(self) -> tuple:
-        """The weak tier's pool and the strong tier's, either None if absent.
+        """The weak tier's pools and the strong tier's, each a tuple.
 
-        The weak tier is the entry pool and the strong one its entry
-        edge's target, whatever their parts are named. An entry pool whose
-        rounds land in its store, as a host pool's do, is a strong tier
-        with no weak one. A run with no store has neither. The reports
-        read the two tiers off this one rule; with several entry pools a
-        weak tier is no one pool, so they are refused rather than read off
-        the first, and each pool's own statistics stay at its path.
+        The weak tier is every entry pool whose store the controller
+        writes, the strong tier every pool an edge out of one of them
+        targets, once each in graph order, whatever their parts are
+        named. An entry pool whose rounds land in its store, as a host
+        pool's do, is a strong-tier pool with no weak one before it. A
+        run with no store has neither. The reports read a tier as its
+        pools together; each pool's own numbers stay at its path.
         """
-        _refuse_tiers_over_several_entry_pools(self.entry_pools)
         if not self.stores:
-            return (None, None)
-        entry = self.entry_pool
-        entry_store = self.store(entry.store)
-        if entry_store.intake.shape == receiver_module.LANDED:
-            return (None, entry.pool)
-        if not self.edges:
-            return (entry.pool, None)
-        entry_edge = self.edges[0]
-        return (entry.pool, entry_edge.hops.target)
+            return ((), ())
+        weak = []
+        strong = []
+        for entry in self.entry_pools:
+            entry_weak, entry_strong = self._tiers_from(entry)
+            weak.extend(entry_weak)
+            strong.extend(entry_strong)
+        strong_once = dict.fromkeys(strong)
+        return (tuple(weak), tuple(strong_once))
 
     def input_hop_by_pool(self) -> dict:
         """The hop each pool's input rides: its store's read hop.
@@ -358,6 +356,16 @@ class Layout:
                 edge = self.edge_leaving(target.pool)
         return tuple(paths)
 
+    def _tiers_from(self, entry: PoolPlan) -> tuple:
+        """The weak and strong pools one entry pool puts in the tiers."""
+        entry_store = self.store(entry.store)
+        if entry_store.intake.shape == receiver_module.LANDED:
+            return ((), (entry.pool,))
+        edge = self.edge_leaving(entry.pool)
+        if edge is None:
+            return ((entry.pool,), ())
+        return ((entry.pool,), (edge.hops.target,))
+
 
 def _add_once(paths: list, path: tuple) -> None:
     """Append the path unless it is already listed."""
@@ -376,15 +384,4 @@ def _refuse_a_pool_not_held(
     raise ValueError(
         f"router.factory_pool names {pool.word!r}, which is no pool of "
         f"this machine; its pools are {names}"
-    )
-
-
-def _refuse_tiers_over_several_entry_pools(entry_pools: tuple) -> None:
-    if len(entry_pools) < 2:
-        return
-    raise NotImplementedError(
-        f"the weak and strong tier measures over {len(entry_pools)} entry "
-        "pools are not implemented yet: they would describe the first pool "
-        "alone; each pool's own statistics are kept at its path; "
-        f"{refusals.REFUSALS}"
     )

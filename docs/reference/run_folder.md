@@ -25,7 +25,7 @@ with another `code_state.patch`, is refused:
 
 | Name | Written by | What it is |
 | --- | --- | --- |
-| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one task, its additive files (`shots.csv`, `shot_links.csv`, `shot_stats.csv`, `stat_values.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`, `window_outcomes.csv`) without the swept columns, an online task's calibrator as the piece left it in `state.pickle`, which the task's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
+| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one task, its additive files (`shots.csv`, `shot_links.csv`, `shot_pools.csv`, `shot_stats.csv`, `stat_values.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`, `window_outcomes.csv`) without the swept columns, an online task's calibrator as the piece left it in `state.pickle`, which the task's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
 | `piece.json` | `decsim/experiments/pieces.py`, `write` | the piece's `task_id`, `first_seed` and `count` (its other counts are its own `shots.csv` columns summed: `is_scored`, `logical_failure`, `sim_wall_seconds`, `executed_rounds` and the `*_windows` status columns), its `confidence_shot_count` (the shots its confidence rows cover, `all`, or null when no confidence signal ran; a fold refuses a task whose pieces differ in it, a piece without it included), the `state_sha256` of an online task's `state.pickle`, its `peak_memory_mb` (the peak resident memory of the process that ran it, read when the piece ended), and the `commit`, `dirty`, `patch_sha256` (the sha256 of the tree's `code_state.patch`, null when it has none), `python`, `packages` (each third-party top-level module the process that ran the shots had imported, and its version: the module's own `__version__`, else its installed distribution's; read in that process, so a pooled worker names the decoder package it loaded), `host`, `processor_model`, `slurm_job_id`, `slurm_array_job_id` and `slurm_array_task_id` of the process that ran it (a run and a fold refuse a folder holding a piece whose tree is not the one its `run.json` names: another commit, the same commit clean against dirty, or another patch, since its rows would pool two simulators under one `run.json`) |
 | `jobs.json`, `run.sbatch`, `fold.sbatch`, `logs/` | `decsim/experiments/plan_command.py`, `launch` | what `decsim run --slurm` writes: each job's pieces, `[task name, first seed, count]`, longest first; the job array, whose job `i` runs job `i`'s pieces with the run file where it stands, so a file beside it is found; the job that folds after the array; and their Slurm logs, `logs/<array id>_<i>.log` and `logs/fold.log`. A launch again replaces them all, packing only the pieces not yet saved |
 | `tasks/<name>/machine.json`, `tasks/<name>/inputs/` | `decsim/experiments/run_folder.py`, `write_task_record` | each task's record and workload, below, written before any shot and only once every task of the experiment has built and been accepted, so a refused one changes no record. A name the folder holds for a task of another id is refused, and so is a task whose shot runs no round, which sizes no piece. The record also holds `rounds_per_shot`, the QEC rounds the plan gives a shot, each patch's rounds added up over every operation that sends detector data, which sizes the task's pieces (a live stream also idles through its feedback wait, rounds only its run knows), and `experiment`: its `collection`, whether its threshold is `adaptive`, and the `algorithm` that decodes its windows, which `decsim run --fold` folds it by, whatever its run file says later |
@@ -46,6 +46,8 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | --- | --- | --- |
 | `shots.csv` | `decsim/experiments/report.py`, `shot_rows` | one row per shot |
 | `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
+| `shot_pools.csv` | `decsim/experiments/report.py`, `shot_pool_rows` | one row per shot per decoder pool |
+| `pool_summary.csv` | `decsim/experiments/report.py`, `pool_summary_rows` | one row per task and decoder pool, written by the fold |
 | `shot_stats.csv` | `decsim/experiments/report.py`, `shot_statistics_rows` | one row per shot per part, statistic and field |
 | `stat_summary.csv` | `decsim/experiments/report.py`, `statistic_summary_rows` | one row per task, part, statistic and derived measure, written by the fold |
 | `stat_values.csv` | `decsim/experiments/report.py`, `statistic_value_rows` | one row per task, part, statistic and distinct value: how many times it was seen, or for a level how many ticks it was held |
@@ -94,7 +96,8 @@ tasks first set them (`decsim/experiments/run_folder.py`,
 `swept_values`). Every other file below names its task by the same
 columns, and `algorithm` follows them: the `name` of the decoder record
 of the tier that decodes the plan's windows, such as `pymatching`, or a
-priced row's latency in microseconds in its place
+priced row's latency in microseconds in its place; entry pools of
+several kinds are named together, `union_find+pymatching`
 (`decsim/experiments/measure.py`, `active_decoder_kind`). The values the design fixed come
 first and what was measured after, one variable per column, which is
 Wickham's tidy table (Tidy Data, J. Stat. Softw. 59(10), 2014, section
@@ -116,7 +119,7 @@ name (`_us` microseconds, `_bits`, `_per_shot`).
 | `load` | service time, boundary handoff and input hop per window, divided by the interval between windows arriving; above 1 the decoder cannot keep up |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | what the machine got through |
 | `max_queued_windows` | the most jobs that waited in the ready queue at once; a depth counts only when time passes at it, so a job that joins and leaves in one tick never waited |
-| `weak_queue_max`, `strong_queue_max` | the most jobs that waited in each tier's ready queue at once, by the same rule. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. |
+| `weak_queue_max`, `strong_queue_max` | the most jobs that waited in each tier's ready queue at once, by the same rule. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. A tier is every pool at its depth: the weak tier every entry pool, the strong tier every pool an entry pool escalates to (`decsim/build/layout.py`, `tier_pools`); a tier of several pools reads its largest pool's queue here, and its busy fraction and offered load below over all its units. `shot_pools.csv` has each pool's own. |
 | `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy, over the whole run from tick 0 to its last event, the drain after the last round included, so it is not the tier's offered load |
 | `weak_offered_load`, `strong_offered_load` | each tier's load: its units' busy time over its unit count times the span the QPU generated the rounds over, rho = lambda E[S] / c. The span runs from the QPU's first readout to its last plus one round period, an idle patch's rounds included, so a delay the source puts on a readout's departure does not stretch it, and operations that run side by side share it rather than add up. The run drains every decode, so the busy time is the work the rounds offered the tier; above 1 the tier gets work faster than it finishes it and falls behind. A tier the run does not build reads zero |
 | `escalated_windows`, `strong_decoded_rounds`, `strong_service_sum_us` | the windows the strong tier committed, the rounds its decodes read, and their service added up; a task divides the sum by the windows |
@@ -292,6 +295,30 @@ The link set is data, not schema: a topology with another link adds rows
 here and moves no column of any file. A link's mean per shot at a task
 is the mean of a column over that task's rows of the link, and its bits
 per transfer is the mean `payload_bits` over the mean `transfers`.
+
+### `shot_pools.csv`
+
+One row per shot per decoder pool, in the machine's layout order: the
+entry pools first, then each pool an edge reaches.
+
+| Column | What it is |
+| --- | --- |
+| `task_id`, the swept paths, `algorithm`, `seed` | the shot |
+| `pool` | the pool's part name |
+| `queue_max`, `busy_fraction`, `offered_load` | as the tier columns of `shots.csv`, over this pool alone |
+| `committed_windows` | the windows the frame committed off this pool's decode |
+| `escalated_windows` | the windows this pool sent up its edge; zero for a pool that escalates nowhere |
+
+The pool set is data, not schema, as the link set is: a machine with a
+pool per patch adds rows. A window is committed off one pool's decode,
+so `committed_windows` adds up to `decoded_windows` over a shot's rows.
+
+### `pool_summary.csv`
+
+One row per task and pool, derived when the fold runs from the task's
+`shot_pools.csv` rows, so it is never in a piece: `shots`, the mean
+`busy_fraction` and `offered_load` over the shots, the largest
+`queue_max`, and `committed_windows` and `escalated_windows` added up.
 
 ### `shot_stats.csv`
 

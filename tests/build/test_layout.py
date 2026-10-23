@@ -1,16 +1,18 @@
-"""A machine's layout: the paths its rounds take and the factory's pool.
+"""A machine's layout: the paths its rounds take, its tiers, the factory's.
 
 A router's entry pools share one store, each reading it over a hop of
 its own, as VQD's decoders take their syndromes from the Arbiter (Maurya
 and Tannu 2406.17995v2 Sec. 5). No paper sets decoders aside for the
 magic-state factory (DecoNet 2504.11805 Sec. VIII-F; VQD Sec. 5.3), so a
-run of several entry pools names the one that serves it.
+run of several entry pools names the one that serves it. A tier is the
+pools at one depth of the chains, which the reports read as one.
 """
 
 import pytest
 
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
+import decsim.records.windows as window_records
 import decsim.windows.routers as routers
 import tests.declared_run as declared_run
 import tests.topology.test_graph_layout as layout_tests
@@ -61,3 +63,52 @@ def test_a_factory_pool_the_machine_does_not_hold_is_refused():
         "router.factory_pool names 'nowhere', which is no pool of this "
         "machine; its pools are ['weak', 'fpga_b', 'strong', 'deep']"
     )
+
+
+def test_one_entry_pools_tiers_are_it_and_its_edges_target_not_the_deep():
+    chain = layout_tests.chain_machine()
+    layout = layout_tests.laid_out(chain)
+
+    tiers = layout.tier_pools()
+
+    weak = window_records.PoolId(machines.WEAK_POOL)
+    strong = window_records.PoolId(machines.STRONG_POOL)
+    assert tiers == ((weak,), (strong,))
+
+
+def test_a_pool_whose_rounds_land_is_a_strong_tier_with_no_weak_one():
+    strong_base = machines.strong_baseline(3, 0.001, 1.0)
+    layout = layout_tests.laid_out(strong_base)
+
+    tiers = layout.tier_pools()
+
+    strong = window_records.PoolId(machines.STRONG_POOL)
+    assert tiers == ((), (strong,))
+
+
+def test_two_entry_pools_are_one_weak_tier_over_their_shared_target_once():
+    routed = _routed_chain()
+    switching = routed.part(machines.SWITCHING)
+    both = machines.with_escalation_to(
+        routed, "fpga_b", machines.STRONG_POOL, switching.settings
+    )
+    layout = layout_tests.laid_out(both)
+
+    tiers = layout.tier_pools()
+
+    weak = window_records.PoolId(machines.WEAK_POOL)
+    fpga_b = window_records.PoolId("fpga_b")
+    strong = window_records.PoolId(machines.STRONG_POOL)
+    assert tiers == ((weak, fpga_b), (strong,))
+
+
+def test_an_entry_pool_that_escalates_nowhere_is_in_the_weak_tier_alone():
+    routed = _routed_chain()
+    layout = layout_tests.laid_out(routed)
+
+    tiers = layout.tier_pools()
+
+    weak = window_records.PoolId(machines.WEAK_POOL)
+    fpga_b = window_records.PoolId("fpga_b")
+    strong = window_records.PoolId(machines.STRONG_POOL)
+    assert tiers == ((weak, fpga_b), (strong,))

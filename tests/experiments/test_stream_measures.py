@@ -187,13 +187,13 @@ def test_the_escalated_share_is_sampled_off_the_frames_commits_in_order():
     machine, _result, folded = _run(graph)
     observation = machine.observation
     windows = observation.windows.windows
-    _weak_pool, strong_pool = machine.layout.tier_pools()
+    _weak_pools, strong_pools = machine.layout.tier_pools()
     every = stream_measures.ESCALATION_SAMPLED_EVERY
     expected = []
     escalated = 0
     commits = observation.frame_corrections.committed
     for count, record in enumerate(commits, start=1):
-        escalated += window_records.PoolId(record.tier) == strong_pool
+        escalated += window_records.PoolId(record.tier) in strong_pools
         if count % every == 0:
             first_round = windows[record.window_key].commit_lo
             expected.append((count, escalated, first_round))

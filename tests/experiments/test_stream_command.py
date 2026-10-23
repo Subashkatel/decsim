@@ -2,7 +2,10 @@
 
 A memory task runs as a stream and writes one record, with its moving
 threshold's when it has one; each shape a stream does not build yet is
-refused by name, "not implemented yet".
+refused by name, "not implemented yet". Patches streamed on a pool each,
+or sharing a strong pool, answer every window as one pool does
+(tests/patch_pools.py: a router decides where a window decodes, never
+what it reads).
 """
 
 import dataclasses
@@ -23,6 +26,7 @@ import decsim.parameters.assignments as assignments
 import decsim.presets.machines as machines
 import decsim.qpu.syndrome_devices as syndrome_devices
 import tests.experiments.run_files as run_files
+import tests.patch_pools as patch_pools
 
 RUN_FILE = """
 import decsim
@@ -116,6 +120,37 @@ def test_a_stream_whose_target_steps_by_the_backlog_binds_its_queue():
     checks = summary["target_steps"]
     assert len(checks) == summary["windows"] // 10
     assert {share for _windows, share, _mean in checks} <= {0.1, 0.2}
+
+
+# the rounds the patch streams run: every weak pool escalates in them
+PATCH_ROUNDS = 30
+
+
+def test_patches_streamed_on_a_pool_each_answer_every_window_as_one_pool():
+    one_pool = patch_pools.one_pool()
+    per_patch = patch_pools.pool_per_patch(one_pool)
+
+    one_answers, _one_pools = patch_pools.streamed(one_pool, PATCH_ROUNDS)
+    routed_answers, routed_pools = patch_pools.streamed(per_patch, PATCH_ROUNDS)
+
+    assert routed_answers == one_answers
+    assert routed_pools == {"weak", "w1", "w2"}
+
+
+def test_patches_streamed_beside_a_shared_strong_pool_answer_as_one_pair():
+    pair = patch_pools.one_pair()
+    shared = patch_pools.shared_strong_per_patch()
+    shared_stores = patch_pools.shared_strong_per_patch(has_store_per_pool=True)
+
+    pair_answers, _pair_pools = patch_pools.streamed(pair, PATCH_ROUNDS)
+    shared_answers, shared_pools = patch_pools.streamed(shared, PATCH_ROUNDS)
+    stores_answers, _stores_pools = patch_pools.streamed(
+        shared_stores, PATCH_ROUNDS
+    )
+
+    assert shared_answers == pair_answers
+    assert stores_answers == pair_answers
+    assert shared_pools == {"weak", "w1", "w2", "strong"}
 
 
 def _observation(machine, **changes):

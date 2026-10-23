@@ -201,7 +201,8 @@ happened after; a level keeps the level it holds and restarts its
 area and span; a value the machine is built with, such as a pool's
 units, is kept. It cuts `stats.csv` and `stat_values.csv`, the queue
 peaks, the busy fractions and the offered loads, which are then over
-the rounds read out since, and the backlog peak; the latency points
+the rounds read out since, the backlog peak, and every column of
+`shot_pools.csv`, so a pool's row adds up; the latency points
 keep the interval above. The default, 0, measures the whole run, and a
 run that ends inside its warm-up is refused.
 
@@ -312,6 +313,8 @@ entry pools first, then each pool an edge reaches.
 The pool set is data, not schema, as the link set is: a machine with a
 pool per patch adds rows. A window is committed off one pool's decode,
 so `committed_windows` adds up to `decoded_windows` over a shot's rows.
+With `observation.warmup_rounds` every column counts from the reset on,
+as the statistics do.
 
 ### `pool_summary.csv`
 

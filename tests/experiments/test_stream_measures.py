@@ -8,6 +8,7 @@ leave no window, stage, frame write or round event behind.
 """
 
 import collections
+import dataclasses
 import math
 
 import pytest
@@ -16,6 +17,7 @@ import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.collect as collect
 import decsim.experiments.measure as measure
+import decsim.experiments.stream_command as stream_command
 import decsim.experiments.stream_measures as stream_measures
 import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
@@ -28,6 +30,7 @@ import decsim.records.workload as workload_records
 import decsim.windows.schemes.region_sliding as region_sliding
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
+import tests.patch_pools as patch_pools
 import tests.stream_machines as stream_machines
 
 SEED = 17
@@ -113,6 +116,16 @@ def _differences(folded, shot) -> list:
     return differences
 
 
+def _kept_whole(task: collect.Task, rounds: int, warmup: int):
+    """The task's patches as a stream that keeps every ledger whole.
+
+    measure_shot reads the whole ledgers; the stream folds as it goes.
+    """
+    streamed = stream_command.stream_machine(task, rounds, warmup)
+    observation = dataclasses.replace(streamed.observation, folds_windows=False)
+    return dataclasses.replace(streamed, observation=observation)
+
+
 def _value_pairs(folded, shot) -> list:
     pairs = []
     for name, summary in folded.values.items():
@@ -124,9 +137,12 @@ def _value_pairs(folded, shot) -> list:
 
 
 def _pool_pairs(folded, shot) -> list:
-    return [
+    pairs = [
         (name, folded.pools[name], getattr(shot, name)) for name in POOL_FIELDS
     ]
+    shot_rows = [dataclasses.asdict(row) for row in shot.pools]
+    pairs.append(("pool rows", folded.pool_rows, shot_rows))
+    return pairs
 
 
 def _growth_differences(folded, shot) -> list:
@@ -180,6 +196,37 @@ def test_a_stream_that_lets_each_window_go_measures_the_same_and_keeps_none(
     assert observation.stages.records_for(100, 0) == ()
     assert observation.frame_corrections.committed == []
     assert observation.round_events.events == []
+
+
+def test_patches_on_a_pool_each_beside_a_shared_strong_pool_measure_alike():
+    shared = patch_pools.shared_strong_per_patch()
+    task = collect.Task("patches", shared, {})
+    graph = _kept_whole(task, 30, 0)
+    machine, result, folded = _run(graph)
+    stream_task = collect.Task("patches", graph, {})
+    shot = collect.Shot(stream_task, SEED, machine, result, 0.0)
+
+    measured = measure.measure_shot(shot)
+
+    pools = [row["pool"] for row in folded.pool_rows]
+    assert _differences(folded, measured) == []
+    assert pools == ["weak", "w1", "w2", "strong"]
+
+
+def test_a_pools_row_counts_the_windows_committed_past_the_warmup():
+    one_pool = patch_pools.one_pool()
+    per_patch = patch_pools.pool_per_patch(one_pool)
+    task = collect.Task("patches", per_patch, {})
+    graph = _kept_whole(task, 30, 10)
+    machine, result, folded = _run(graph)
+    stream_task = collect.Task("patches", graph, {})
+    shot = collect.Shot(stream_task, SEED, machine, result, 0.0)
+
+    measured = measure.measure_shot(shot)
+
+    committed = [row["committed_windows"] for row in folded.pool_rows]
+    assert _differences(folded, measured) == []
+    assert 0 < sum(committed) < folded.decoded_windows
 
 
 def test_the_escalated_share_is_sampled_off_the_frames_commits_in_order():

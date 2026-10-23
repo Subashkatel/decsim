@@ -211,10 +211,11 @@ class PoolRow:
 
     The load reads as the tier columns do, over this pool alone.
     committed_windows are the windows the frame committed off this
-    pool's decode;
-    escalated_windows those it sent up its edge, none for a pool that
-    escalates nowhere. A machine of several pools on one tier, a
-    decoder per patch, shows each pool's contention here.
+    pool's decode; escalated_windows those it sent up its edge, none for
+    a pool that escalates nowhere. Every number is over the region of
+    interest, from the statistics' restart on, so a row adds up. A
+    machine of several pools on one tier, a decoder per patch, shows
+    each pool's contention here.
     """
 
     pool: str
@@ -957,14 +958,17 @@ def pool_measures(
 
 
 def pool_rows(
-    observation: observation_module.Observation,
+    run_statistics: statistics_registry.Registry,
     layout: layout_module.Layout,
+    committed: collections.Counter,
     generation_ticks: int,
 ) -> tuple:
-    """Every pool's PoolRow over the shot, in layout order."""
-    run_statistics = observation.statistics
+    """Every pool's PoolRow over the run, in layout order.
+
+    committed counts the windows the frame committed off each pool's
+    decode, by its word: a shot's frame ledger, or a stream's fold of it.
+    """
     pool_paths = layout.statistics_path_by_pool()
-    committed = _committed_by_pool(observation)
     rows = []
     for plan in layout.pools:
         one_pool = (plan.pool,)
@@ -1238,7 +1242,10 @@ def _measurement(
     )
     generation_ticks = _generation_span_ticks(observation, round_period_ticks)
     pools = pool_measures(observation.statistics, layout, generation_ticks)
-    pool_table = pool_rows(observation, layout, generation_ticks)
+    committed = _committed_by_pool(observation)
+    pool_table = pool_rows(
+        observation.statistics, layout, committed, generation_ticks
+    )
     strong = _strong_decodes(observation, strong_pools)
     tiers = _tier_records(observation, weak_pools, strong_pools)
     backlog_peak = _backlog_peak_rounds(observation)
@@ -1885,9 +1892,16 @@ def _tier_numbers(usages: list, generation_ticks: int) -> "_PoolNumbers":
 def _committed_by_pool(
     observation: observation_module.Observation,
 ) -> collections.Counter:
-    """The windows the frame committed off each pool's decode, by word."""
+    """The windows the frame committed off each pool's decode, by word.
+
+    Only the commits from the statistics' restart on, the region the
+    pool's load is read over.
+    """
+    reset_tick = observation.statistics.reset_tick
     committed = collections.Counter()
     for frame_record in observation.frame_corrections.committed:
+        if frame_record.committed_ticks < reset_tick:
+            continue
         committed[frame_record.tier] += 1
     return committed
 

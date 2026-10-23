@@ -5,9 +5,10 @@ at p = 0.03 so that windows fail and escalate, each patch's windows sent
 by a router to a pool of its own: weak for patch 0, w1 and w2 for the
 others, each Experiment 1's union-find row. A router decides where and
 when a window decodes, never what it reads, so every machine here must
-answer every window as one pool does. The strong pool is belief matching
-on stated times, a decoder that draws nothing, so two pools of it answer
-alike; Relay-BP draws from its pool's own seed and would not.
+answer every window as one pool does, in a shot or in a stream. The
+strong pool is belief matching on stated times, a decoder that draws
+nothing, so two pools of it answer alike; Relay-BP draws from its pool's
+own seed and would not.
 """
 
 import dataclasses
@@ -17,6 +18,8 @@ import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
+import decsim.experiments.stream_command as stream_command
+import decsim.machine as machine_module
 import decsim.presets.experiment_one as experiment_one
 import decsim.presets.machines as machines
 import decsim.producers as producers
@@ -140,3 +143,30 @@ def committing_pools(patch_shot: collect.Shot) -> set:
     observation = patch_shot.machine.observation
     committed = observation.frame_corrections.committed
     return {record.tier for record in committed}
+
+
+def streamed(machine: graph.Machine, rounds: int) -> tuple:
+    """The patches streamed for the rounds at SEED: answers and pools.
+
+    The answers are as answers reads a shot's; the pools are those that
+    committed at least one window.
+    """
+    task = collect.Task("patches", machine, {})
+    stream_graph = stream_command.stream_machine(task, rounds, 0)
+    built = machine_module.Machine.build(stream_graph, SEED)
+    commits = []
+    frame = built.control.pauli_frame
+    frame.trace.correction_committed.connect(commits.append)
+    result = built.run()
+    by_window = {}
+    for record in commits:
+        by_window[record.window_key] = record.logical_observables
+    outcomes = []
+    for operation_result in result.operation_results:
+        outcome = (
+            operation_result.operation_id,
+            operation_result.logical_observables,
+        )
+        outcomes.append(outcome)
+    pools = {record.tier for record in commits}
+    return (by_window, tuple(outcomes)), pools

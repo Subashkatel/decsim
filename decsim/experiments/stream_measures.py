@@ -85,6 +85,9 @@ class StreamMeasurement:
     throughput_rounds_per_us: float
     max_queued_windows: int
     pools: dict
+    # each pool's own load and windows, the PoolRow a shot's
+    # shot_pools.csv holds, one dict a pool in layout order
+    pool_rows: list
     backlog_peak_rounds: Optional[int]
     referee_windows_checked: int
     referee_window_disagreements: int
@@ -210,8 +213,7 @@ class StreamMeasures:
         missed_truth = _logical_failure(owners)
         managers = run_statistics.groups[decoders_part.MANAGERS_PATH]
         audit = observation.referee_audit
-        pools = self._pools()
-        pool_numbers = dataclasses.asdict(pools)
+        pool_numbers, pool_row_numbers = self._pool_numbers()
         link_totals = measure.link_totals(result.link_traffic)
         rows = run_statistics.rows()
         value_counts = run_statistics.value_counts()
@@ -223,6 +225,7 @@ class StreamMeasures:
             "is_scored": is_scored,
             "max_queued_windows": managers.queued.peak,
             "pools": pool_numbers,
+            "pool_rows": pool_row_numbers,
             "backlog_peak_rounds": backlog_peak,
             "referee_windows_checked": audit.windows_checked,
             "referee_window_disagreements": audit.window_disagreements,
@@ -236,6 +239,8 @@ class StreamMeasures:
         sources = window_manager.window_sources()
         sources.window_final.connect(self.window_final)
         machine.links.trace.transfer_delivered.connect(self.transfer_delivered)
+        run_statistics = machine.observation.statistics
+        run_statistics.on_reset(self.folds.restart_pool_commits)
         frame = machine.control.pauli_frame
         if frame is not None:
             frame.trace.correction_committed.connect(self.correction_committed)
@@ -317,15 +322,25 @@ class StreamMeasures:
         let_go = self.folds.rounds_to_let_go(stream_id, kept_from)
         self.transfers.forget_rounds(stream_id, let_go)
 
-    def _pools(self) -> object:
-        machine = self.machine
-        device = machine.qpu.device
+    def _pool_numbers(self) -> tuple:
+        """Each tier's load, then each pool's own row, as plain data.
+
+        Both are over the span the QPU generated the region of interest's
+        rounds over.
+        """
+        run_statistics = self.machine.observation.statistics
+        layout = self.machine.layout
+        device = self.machine.qpu.device
         round_period_ticks = device.clock.period_ticks
         generation_ticks = self.folds.generation_ticks(round_period_ticks)
-        run_statistics = machine.observation.statistics
-        return measure.pool_measures(
-            run_statistics, machine.layout, generation_ticks
+        tiers = measure.pool_measures(run_statistics, layout, generation_ticks)
+        committed = self.folds.counts.committed_by_pool
+        rows = measure.pool_rows(
+            run_statistics, layout, committed, generation_ticks
         )
+        tier_numbers = dataclasses.asdict(tiers)
+        row_numbers = [dataclasses.asdict(row) for row in rows]
+        return tier_numbers, row_numbers
 
 
 class _Folds:
@@ -395,9 +410,19 @@ class _Folds:
     ) -> None:
         counts = self.counts
         counts.committed_windows += 1
+        counts.committed_by_pool[frame_record.tier] += 1
         counts.last_commit_tick = _higher(
             counts.last_commit_tick, frame_record.committed_ticks
         )
+
+    def restart_pool_commits(self, tick: int) -> None:
+        """The statistics restart: each pool's commits count from here.
+
+        A pool's row reads its load over the region of interest, so its
+        committed windows are counted over the same region.
+        """
+        del tick
+        self.counts.committed_by_pool.clear()
 
     def sample_escalation(self, window: window_records.Window) -> None:
         """Every hundredth committed window, the share escalated so far."""
@@ -566,6 +591,11 @@ class _Counts:
     last_readout_tick: Optional[int] = None
     latest_round_by_stream: dict = dataclasses.field(default_factory=dict)
     let_go_below_by_stream: dict = dataclasses.field(default_factory=dict)
+    # the windows the frame committed off each pool's decode, by word,
+    # since the statistics' restart
+    committed_by_pool: collections.Counter = dataclasses.field(
+        default_factory=collections.Counter
+    )
     # (committed windows, escalated windows, first committed round)
     escalation_series: list = dataclasses.field(default_factory=list)
     # the reaction budget (observation.reaction_deadline_microseconds)

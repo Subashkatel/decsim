@@ -72,7 +72,7 @@ def stream_graph(run: StreamRun, folds: bool) -> graph.Machine:
 def stream_workload(program, rounds: int) -> workload_settings.WorkloadSettings:
     """The stream owner, protected from round 1, read out at the round."""
     memory = program_records.Operation(STREAM_ID, "memory", (0,), patches=(0,))
-    return memory_stream.stream_of(memory, program, rounds)
+    return memory_stream.streams_of([(memory, program)], rounds)
 
 
 def matching_pool(latency: float) -> decoder_settings.DecoderPoolSettings:

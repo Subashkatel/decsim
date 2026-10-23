@@ -69,6 +69,11 @@ and `tests/presets/test_machines.py`).
   windows it escalated. This is where one patch's pool falling behind
   shows while the tier as a whole keeps up.
 
+`decsim stream` runs the same machines over a long computation: each
+memory patch is its own stream, and its record holds the same tier
+numbers in `pools` and each pool's row in `pool_rows`
+([How to run a memory as a stream](run_a_memory_as_a_stream.md)).
+
 ## 4. Escalate from any routed pool, to a pool they share
 
 Any entry pool may escalate. Several may escalate to one target, as

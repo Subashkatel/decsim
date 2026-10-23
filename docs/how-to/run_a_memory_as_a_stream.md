@@ -13,7 +13,7 @@ deadline.
 
 ## 1. Pick a memory task
 
-Any task whose workload is one decoded Stim memory patch streams, as
+Any task whose workload is decoded Stim memory patches streams, as
 every task of `examples/my_first_sweep.py` is:
 
 ```
@@ -28,10 +28,16 @@ stream repeats (`decsim/frontends/memory_stream.py`). A task with no
 Pauli frame gets the default one, since a window is measured when the
 frame commits it.
 
+Several patches (`MemorySettings(patches=N)`) stream side by side, each
+its own stream with its own readout, on whatever graph the task builds:
+a pool per patch behind a router, a shared strong pool, a chain
+([How to route windows to several pools](route_windows_to_several_pools.md)).
+
 ## 2. Choose the rounds and the warmup
 
-- `--rounds N` is the stream's length. The readout is scheduled at round
-  N, and its logical outcome is the stream's one outcome.
+- `--rounds N` is the stream's length. Each patch's readout is
+  scheduled at round N, and the stream fails when any patch's outcome
+  is wrong.
 - `--warmup W` leaves the first W rounds out of the region of interest.
   The statistics restart after round W, and the latencies are sampled
   from the windows that commit after it. It is below N.
@@ -51,7 +57,7 @@ warmup, the seed, and the measurement
 | Field | What it holds |
 |---|---|
 | `rounds` | the rounds read out |
-| `logical_failure` | whether the end readout's prediction was wrong |
+| `logical_failure` | whether any patch's end readout was predicted wrong |
 | `decoded_windows` | every window decoded, the warmup's too |
 | `recorded_windows` | the windows of the region of interest |
 | `values` | each latency's count, mean and maximum, in microseconds |
@@ -59,6 +65,8 @@ warmup, the seed, and the measurement
 | `weak_reaction_growth_rate` | the reaction time's growth per microsecond of the stream; above 0 the tier falls behind |
 | `deadline_missed_windows` | the windows over the reaction budget, when one is set |
 | `max_queued_windows` | the most windows waiting at once |
+| `pools` | each tier's queue peak, busy fraction and offered load, its pools read together |
+| `pool_rows` | each pool's own queue peak, busy fraction, offered load, committed and escalated windows past the warmup, as `shot_pools.csv` holds for a shot |
 | `statistics` | every part's statistic rows over the region of interest |
 | `escalation_series` | every hundredth committed window: the windows committed, the escalated among them and its first committed round |
 
@@ -75,15 +83,14 @@ stream's alone)
 
 Each of these is refused, "not implemented yet", with its reason:
 
-- a workload other than one decoded Stim memory patch, such as several
-  patches, a memory with no circuit, a circuit with no REPEAT block
-  (Stim writes one from 3 rounds on), or a memory that decodes nothing;
+- a workload other than decoded Stim memory patches, such as a memory
+  with no circuit, a circuit with no REPEAT block (Stim writes one from
+  3 rounds on), or a memory that decodes nothing;
 - a source other than the Stim device;
 - the trace, the log, and the data movement and window outcome records,
   which grow with every round;
 - batched or bulk strong decoding, whose merged batch the per-window
   measures do not read;
-- a graph of a new shape;
 - the double window on a stream, which absorbs windows a stream has not
   laid yet;
 - a logical failure counted inside the stream, which no source defines.

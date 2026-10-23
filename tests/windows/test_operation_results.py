@@ -29,9 +29,6 @@ class _Store:
     def __init__(self) -> None:
         self.closed = []
 
-    def has_live_stream_reference(self, _stream_id) -> bool:
-        return False
-
     def has_stream(self, _stream_id) -> bool:
         return True
 

@@ -87,6 +87,7 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
+import decsim.windows.revision_rules as revision_rules
 import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
 import examples.live_memory_example as live_memory_example
@@ -1345,6 +1346,33 @@ def test_a_cancelled_speculative_decode_ends_at_the_cancel():
     cancelled_stages = [record.stage for record in cancelled]
     assert ends == verdicts
     assert cancelled_stages == ["algorithm"] * 10
+
+
+def test_a_no_cancel_shot_answers_as_the_cancelling_one():
+    """Every window is kept while its strong decode runs on, unwanted.
+
+    no_cancel lets each speculative strong decode run to its end and
+    drops its answer (revision_rules.NoCancel). Those decodes still read
+    the stream's rounds after its last window is final, and the result
+    is delivered then all the same, so the shot answers and is measured
+    as the cancelling one is.
+    """
+    no_cancel = revision_rules.NoCancel.Settings()
+    settings = switching_settings(0.0, run_both_at_once=True)
+    letting_run = settings.with_settings(
+        machines.SWITCHING, cancel_rule=no_cancel
+    )
+    task = task_at(letting_run, SWITCHING_ERROR_PROBABILITY)
+
+    shot = collect.run_shot(task, 0)
+    measurement = measure.measure_shot(shot)
+    cancelling = switching_run(0.0, run_both_at_once=True)
+
+    counts = shot.machine.decoders.decoder_manager.strong_requests.counts
+    cancelling_results = cancelling.result.operation_results
+    assert counts.abandoned == 10
+    assert shot.result.operation_results == cancelling_results
+    assert measurement.logical_failure is False
 
 
 def test_a_full_buffer_0_holds_rounds_and_the_wait_is_a_point():

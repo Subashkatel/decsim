@@ -21,6 +21,7 @@ store's occupancy), the rounds stored, and the reads asked of it.
 """
 
 import dataclasses
+import enum
 from collections.abc import Mapping
 from typing import Any, ClassVar, Optional
 
@@ -108,9 +109,8 @@ class SyndromeBuffer:
         self.engine = engine
         self.round_by_key = _StoredRounds()
         self.holds = round_holds.RoundHolds()
-        # stream id -> True while it may receive rounds, False once
-        # closed; a closed identity never reopens
-        self.open_by_stream: dict = {}
+        # stream id -> its _StreamState here
+        self.state_by_stream: dict = {}
         self.trace = _TraceSources()
         if settings.bits is not None:
             engine.action_done.connect(self._ask_for_room_again)
@@ -235,20 +235,18 @@ class SyndromeBuffer:
 
     def has_stream(self, stream_id: Any) -> bool:  # an opaque identity
         """True while the stream may still receive rounds."""
-        return self.open_by_stream.get(stream_id, False)
+        state = self.state_by_stream.get(stream_id, _StreamState.CLOSED)
+        return state is not _StreamState.CLOSED
 
     def close_stream(self, stream_id: Any) -> None:  # an opaque identity
-        """Retire a stream once none of its rounds or holds are live."""
-        self.open_by_stream[stream_id] = False
-        open_ids = self._open_stream_ids()
-        self.holds.forget_released_outside(open_ids)
+        """Retire the stream once no live hold names it.
 
-    def has_live_stream_reference(
-        self,
-        stream_id: Any,  # an opaque identity
-    ) -> bool:
-        """True while any live hold refers to this stream."""
-        return self.holds.references(stream_id)
+        A hold still naming it, a strong decode let run out reading its
+        rounds, keeps it taking rounds until that hold ends, so the
+        reader gets its whole input.
+        """
+        self.state_by_stream[stream_id] = _StreamState.CLOSING
+        self._close_unheld_streams()
 
     def let_go_before(
         self,
@@ -290,6 +288,7 @@ class SyndromeBuffer:
         orphaned = self.holds.release(holder)
         self.trace.hold_released.fire(holder)
         self._free_stored(orphaned)
+        self._close_unheld_streams()
 
     def has_hold(self, holder: decoding_records.Hold) -> bool:
         """True while this holder token is live."""
@@ -397,14 +396,34 @@ class SyndromeBuffer:
         return kept_bits
 
     def _open(self, stream_id) -> None:
-        self.open_by_stream[stream_id] = True
+        """Serve the stream; one asked to close stays closing."""
+        state = self.state_by_stream.get(stream_id)
+        if state is _StreamState.CLOSING:
+            return
+        self.state_by_stream[stream_id] = _StreamState.OPEN
 
-    def _open_stream_ids(self) -> set:
-        open_ids = set()
-        for stream_id, is_open in self.open_by_stream.items():
-            if is_open:
-                open_ids.add(stream_id)
-        return open_ids
+    def _close_unheld_streams(self) -> None:
+        """Close each closing stream that no live hold names any more."""
+        closed = []
+        for stream_id, state in self.state_by_stream.items():
+            if state is not _StreamState.CLOSING:
+                continue
+            if self.holds.references(stream_id):
+                continue
+            closed.append(stream_id)
+        if not closed:
+            return
+        for stream_id in closed:
+            self.state_by_stream[stream_id] = _StreamState.CLOSED
+        served_ids = self._served_stream_ids()
+        self.holds.forget_released_outside(served_ids)
+
+    def _served_stream_ids(self) -> set:
+        served_ids = set()
+        for stream_id, state in self.state_by_stream.items():
+            if state is not _StreamState.CLOSED:
+                served_ids.add(stream_id)
+        return served_ids
 
     def _hold_record(self, holder, round_keys) -> round_holds.HoldRecord:
         """The record of a hold; a hold may name rounds not yet written.
@@ -508,6 +527,15 @@ class SyndromeBuffer:
             self.detection_events.retire_round(round_key)
         if self.held_rounds is not None:
             self.held_rounds.retry()
+
+
+class _StreamState(enum.Enum):
+    """Whether the store serves a stream."""
+
+    OPEN = "open"
+    # asked to close while a live hold still names it: still served
+    CLOSING = "closing"
+    CLOSED = "closed"
 
 
 @dataclasses.dataclass(frozen=True)

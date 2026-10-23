@@ -116,8 +116,11 @@ class OperationResults:
     def deliver_if_final(self, operation: program_records.Operation) -> None:
         """Deliver the result once every window is final and the stream sealed.
 
-        Every window committed, no strong redo pending, no store still
-        referring to the operation, the stream sealed.
+        Every window committed, no strong redo pending, the stream
+        sealed: no decode can change the result after that. A decode
+        whose answer no longer counts, a strong one let run out
+        (revision_rules.NoCancel), may still read the stream's rounds;
+        each store retires the stream once its last hold ends.
         """
         if operation.id in self.deliveries.finished_operation_ids:
             return
@@ -291,12 +294,8 @@ class OperationResults:
         )
 
     def _is_final(self, stream_id) -> bool:
-        """Every window committed and final, no store holding, sealed."""
+        """Every window committed and final, and the stream sealed."""
         if not self._are_windows_final(stream_id):
-            return False
-        if self._entry_store_references(stream_id):
-            return False
-        if self._strong_store_references(stream_id):
             return False
         return self.tracker.is_sealed(stream_id)
 
@@ -463,20 +462,6 @@ class OperationResults:
             if not cursor.passes(window):
                 return
             cursor.passed += 1
-
-    def _entry_store_references(self, stream_id) -> bool:
-        """Whether a live hold in an entry store names it, a copy's too."""
-        for store in self.retention.entry_stores():
-            if store.has_live_stream_reference(stream_id):
-                return True
-        return False
-
-    def _strong_store_references(self, stream_id) -> bool:
-        """Whether a live hold in a store a region lands in names it."""
-        for store in self.retention.landing_stores():
-            if store.has_live_stream_reference(stream_id):
-                return True
-        return False
 
     def _close_strong_store_stream(self, stream_id) -> None:
         """Retire the stream in every store a region lands in."""

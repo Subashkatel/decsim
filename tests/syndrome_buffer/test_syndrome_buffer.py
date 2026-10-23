@@ -335,6 +335,26 @@ def test_an_unheld_round_is_freed_on_arrival_and_a_held_one_is_not():
     assert the_store.occupancy == 1
 
 
+def test_a_stream_closed_while_a_hold_names_it_is_served_until_it_ends():
+    """A strong decode let run out still reads the rounds of a closed stream.
+
+    The stream's result is delivered and its store asked to close it;
+    the hold's reader still gets its rounds, and the stream closes when
+    that hold ends.
+    """
+    the_store = store()
+    reads = decoding_records.WindowReads((1, 0))
+    the_store.register_hold(reads, [(1, 2)])
+
+    the_store.close_stream(1)
+    is_served_while_held = the_store.has_stream(1)
+    the_store.release_hold(reads)
+    is_served_after = the_store.has_stream(1)
+
+    assert is_served_while_held is True
+    assert is_served_after is False
+
+
 def test_settlement_reports_a_hold_on_a_round_never_written():
     the_store = store()
     reads = decoding_records.WindowReads((1, 0))

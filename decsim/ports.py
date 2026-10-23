@@ -297,21 +297,13 @@ class RetainedRounds(Protocol):
         self,
         stream_id: Any,  # an opaque identity
     ) -> None:
-        """The stream sends no more rounds; a closed one never reopens.
+        """The stream's result is delivered: it closes once no hold names it.
 
-        A round still crossing a priced link when its stream closes
-        never enters the store: no hold can name a closed stream, so
-        the round has no reader and the receiver drops it at the landing.
-        """
-
-    def has_live_stream_reference(
-        self,
-        stream_id: Any,  # an opaque identity
-    ) -> bool:
-        """Whether a live hold still names this stream.
-
-        A stored round that no hold names has no reader, so it does not
-        keep its stream's results waiting.
+        Until then the store still serves it, so a reader still holding
+        its rounds gets its whole input. A round still crossing a priced
+        link once the stream has closed never enters the store: no hold
+        names a closed stream, so the round has no reader and the
+        receiver drops it at the landing.
         """
 
 

@@ -36,6 +36,7 @@ import tests.declared_run as declared_run
 import tests.decoders.test_decoder_tiers as decoder_tiers
 import tests.escalation.declared_fabric as declared_fabric
 import tests.escalation.test_strong_window_shapes as shape_tests
+import tests.one_entry as one_entry
 
 
 class _RecordingQueue:
@@ -161,7 +162,9 @@ class _Fixture:
         input_fold = decoder_memory_transfer.DecoderInputStaging(
             None, self.engine
         )
-        gate = decode_requests.WindowInputGate()
+        gate = decode_requests.WindowInputGate(
+            {window_records.WEAK_POOL_ID: True}
+        )
         gate.interaction = interaction
         gate.input_fold = input_fold
         self.gate = gate
@@ -177,6 +180,7 @@ class _Fixture:
             clock=clock,
         )
         self.requester.tracker = self.tracker
+        self.requester.router = one_entry.router()
         self.requester.retention = self.retention
         self.requester.builder = self.builder
         self.requester.decode_queue = self.queue
@@ -340,7 +344,7 @@ def _landed_job(fixture, folds_in_place: bool):
     job.decoder_input = memory.deposit(job)
     job.memory = memory
     if folds_in_place:
-        fixture.gate.copies_the_window_fold = False
+        fixture.gate.copies_fold_by_pool[window_records.WEAK_POOL_ID] = False
     return job, memory
 
 

@@ -102,9 +102,11 @@ class PartKind:
 # it. The controller sends rounds to every store, and the frame takes
 # corrections from every pool. A pool's results reach a switching part,
 # an escalate edge, whose verdict sends a window it escalates on to the
-# re-decode of the pool it targets; a pool takes at most one edge in and
-# one out, so the pools form a tree from each pool that decodes first:
-# one, or each pool a router feeds.
+# re-decode of the pool it targets. A pool sends to at most one edge,
+# since no design sends one result to two decoders, but takes any number
+# in: one strong pool may serve every weak pool, as Delfosse's decoding
+# units serve every lazy decoder (2001.11427 Sec. V) and Toshio's single
+# strong decoder its N_window weak ones (2510.25222 Sec. III C).
 _QPU_PORTS = (
     Port("readout", OUTPUT, MEASUREMENTS),
     Port("pulses", INPUT, COMMANDS),
@@ -125,7 +127,7 @@ _DECODER_POOL_PORTS = (
     Port("rounds", INPUT, ROUNDS),
     Port("corrections", OUTPUT, CORRECTIONS, is_required=False),
     Port("escalate", OUTPUT, ESCALATIONS, is_required=False),
-    Port("escalated", INPUT, REDECODES, is_required=False),
+    Port("escalated", INPUT, REDECODES, is_many=True, is_required=False),
 )
 # A router sits between the entry store and the entry pools: the store's
 # reads reach it, and its windows reach every pool it routes to.

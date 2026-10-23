@@ -373,10 +373,14 @@ class SyndromeRoundReceiver(Protocol):
     def reserve_region(self, region: round_records.EscalatedRegion) -> None:
         """Take the room an escalated region's rounds will need, or refuse."""
 
+    def is_round_coming(self, round_key: tuple) -> bool:
+        """Whether a round is on its way in: room reserved, not stored yet."""
+
     def receive_region(
         self,
         region: round_records.EscalatedRegion,
         on_stored: Callable[[], None],
+        arrival: transfer_records.StoreHop,
     ) -> None:
         """Take an escalated region that landed here: every round its slot.
 
@@ -612,8 +616,9 @@ class WindowRetention(Protocol):
 
     Which store a strong window reads is the retention's to say, so a
     caller asks for holds and input, never for a store. A call that
-    takes target asks about the edge to that pool: the store it carries
-    from and the store it lands in; None is the entry edge.
+    takes target asks about the edge to that pool on the window's
+    chain, the line of edges from its entry pool: the store it carries
+    from and the store it lands in; None is the chain's first edge.
     """
 
     def hold_strong_input(self, job: decoding_records.DecodeJob) -> None:
@@ -657,6 +662,7 @@ class WindowRetention(Protocol):
 
     def escalated_rounds(
         self,
+        stream_id: Any,  # an opaque identity
         round_keys: list,
         target: Optional[window_records.PoolId] = None,
     ) -> tuple:
@@ -688,8 +694,12 @@ class WindowRetention(Protocol):
     ) -> None:
         """Drop a hold that is still live; nothing for one already gone."""
 
-    def release_strong_hold_if_live(self, owner: decoding_records.Hold) -> None:
-        """Drop a room-side hold when it is still registered."""
+    def release_strong_hold_if_live(
+        self,
+        owner: decoding_records.Hold,
+        stream_id: Any,  # an opaque identity
+    ) -> None:
+        """Drop the stream's room-side hold when it is still registered."""
 
     def release_absorbed_strong_hold(
         self,
@@ -734,6 +744,7 @@ class WindowRetention(Protocol):
 
     def require_strong_retained(
         self,
+        stream_id: Any,  # an opaque identity
         round_keys: list,
         purpose: str,
         target: Optional[window_records.PoolId] = None,
@@ -1018,8 +1029,12 @@ class DecoderOutput(Protocol):
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
         on_committed: Callable[[], None],
+        asked_by: Optional[window_records.PoolId] = None,
     ) -> None:
-        """Send the result on its tier's output link; commit it at delivery."""
+        """Send the result on the route of its pool and the pool that asked.
+
+        Commit it at delivery.
+        """
 
     def send_selection(
         self,
@@ -1986,6 +2001,20 @@ class EscalationPolicy(Protocol):
         decode ends several escalations and is told once, under its
         first window's key.
         """
+
+
+class StrongResultLearner(Protocol):
+    """Where a target pool's manager tells a strong result.
+
+    The policy of the edge that escalated the window learns it
+    (windows/escalate_edges.py StrongResultLearner); several edges may
+    share one target pool.
+    """
+
+    def learn_from_strong_result(
+        self, window_key: tuple, result: decoding_records.DecodeResult
+    ) -> None:
+        """The target answered for the window: its escalating edge learns."""
 
 
 class EscalationVerdict(Protocol):

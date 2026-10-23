@@ -152,9 +152,7 @@ def _routes(answer_route: str = "direct") -> route_records.Routes:
         _STRONG_TO_WEAK,
         answer_route=answer_route,
     )
-    return routes_build.generated(
-        _POOL_HOPS, (edge,), window_records.WEAK_POOL_ID
-    )
+    return routes_build.generated(_POOL_HOPS, (edge,))
 
 
 def _request_key(tier) -> window_records.DecoderRequestKey:
@@ -230,7 +228,8 @@ def test_a_strong_answer_through_the_weak_chip_commits_there_then_goes_home():
     frame = _Frame(engine, 3)
     clock = config.Clock(4)
     routes = _routes("through_weak_chip")
-    output = decoder_output_module.DecoderOutput(engine, routes, clock=clock)
+    weak = window_records.WEAK_POOL_ID
+    output = decoder_output_module.DecoderOutput(engine, routes, {weak: clock})
     output.transfers = transfers
     output.frame = frame
     committed = []
@@ -240,7 +239,7 @@ def test_a_strong_answer_through_the_weak_chip_commits_there_then_goes_home():
     strong_key = _request_key(strong)
     window = _window()
     operation = _operation(1)
-    output.publish(window, operation, result, strong_key, on_committed)
+    output.publish(window, operation, result, strong_key, on_committed, weak)
     engine.run()
     assert transfers.sent == [
         (
@@ -282,7 +281,11 @@ def _timing_only_job(patch_ids: tuple) -> decoding_records.DecodeJob:
         fragment_index=0,
     )
     return decoding_records.DecodeJob(
-        stream_id=4, window_id=1, round_count=5, payloads=[fragment]
+        stream_id=4,
+        window_id=1,
+        round_count=5,
+        payloads=[fragment],
+        request_key=_request_key(window_records.WEAK_POOL_ID),
     )
 
 
@@ -317,7 +320,11 @@ def test_a_direct_selection_carries_a_crossing_bit_per_observable():
         physical_faults=placed,
     )
     weak_job = decoding_records.DecodeJob(
-        stream_id=4, window_id=1, round_count=5, detector_error_model=model
+        stream_id=4,
+        window_id=1,
+        round_count=5,
+        detector_error_model=model,
+        request_key=_request_key(window_records.WEAK_POOL_ID),
     )
     assert _selection_bits("direct", weak_job) == 64 + 2
 

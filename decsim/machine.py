@@ -53,6 +53,7 @@ import decsim.build.program as program_build
 import decsim.build.qpu as qpu_part
 import decsim.build.readout as readout_part
 import decsim.build.windows as windows_part
+import decsim.confidence.gap_join as gap_join_module
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric
 import decsim.observe.link_traffic as link_traffic
@@ -62,6 +63,7 @@ import decsim.ports as ports
 import decsim.records.identity as identity_records
 import decsim.records.results as result_records
 import decsim.records.seeds as seed_records
+import decsim.records.windows as window_records
 import decsim.seeding as seeding
 import decsim.statistics.registry as statistics_registry
 import decsim.topology.graph as topology_graph
@@ -246,7 +248,7 @@ class Machine:
             retention=windows.retention,
         )
         input_fold = decoders.decoder_manager.input_fold()
-        routed_sides = _routed_sides(layout, readout, decoders)
+        routed_sides = _routed_sides(layout, readout, decoders, windows, engine)
         windows.connect(
             weak_store=weak_store,
             strong_store=strong_store,
@@ -271,10 +273,12 @@ class Machine:
         for part in switching_parts:
             part.connect(plan, readout, windows, decoders)
         escalation_build.join_the_chain(switching_parts)
-        if switching_parts:
-            entry_switching = switching_parts[0]
-            # a window's solves join on the entry edge's signal alone
-            windows.gap_join.signal = entry_switching.confidence_signal
+        for part in switching_parts:
+            # an entry pool's solves join on the signal of its own edge
+            part.bind_entry_join(windows)
+        escalation_build.bind_strong_result_learners(
+            edges, windows.router, decoders
+        )
         # the managers hear their rows before the planner compiles a
         # model, and the sender asks the wired window side where it reads
         decoders.start()
@@ -514,12 +518,14 @@ def _routed_sides(
     layout: layout_module.Layout,
     readout: readout_part.Readout,
     decoders: decoders_part.Decoders,
+    windows: windows_part.Windows,
+    engine: engine_module.Engine,
 ) -> tuple:
-    """Each entry pool past the first: its manager and its store's end.
+    """Each entry pool past the first: its manager, store end and join.
 
     The entry store sends to each over a hop of its own (layout
-    StoreReader); none of them has an edge leaving it yet, so none has
-    a join.
+    StoreReader). A pool an edge leaves joins its solves for that edge's
+    verdict, as the first entry pool's do (build/windows.py).
     """
     entry_pools = layout.entry_pools
     if len(entry_pools) == 1:
@@ -530,9 +536,26 @@ def _routed_sides(
         pool = entry.pool
         manager = decoders.manager_of(pool)
         store_output = entry_store.output_for(pool)
-        side = routers.EntrySide(pool, manager, store_output)
+        gap_join = _entry_join(layout, pool, manager, windows, engine)
+        side = routers.EntrySide(pool, manager, store_output, gap_join)
         sides.append(side)
     return tuple(sides)
+
+
+def _entry_join(
+    layout: layout_module.Layout,
+    pool: window_records.PoolId,
+    manager: ports.DecodeQueue,
+    windows: windows_part.Windows,
+    engine: engine_module.Engine,
+) -> Optional[gap_join_module.WindowGapJoin]:
+    """The join of an entry pool's solves; None for a pool no edge leaves."""
+    if layout.edge_leaving(pool) is None:
+        return None
+    gap_join = gap_join_module.WindowGapJoin(engine)
+    gap_join.decode_queue = manager
+    gap_join.verdict = windows.verdict
+    return gap_join
 
 
 def _root_seed(value) -> Optional[int]:

@@ -589,7 +589,7 @@ def window_points_us(
     qpu_send: dict,
     input_path: str,
     answer_send: dict,
-    escalation_path: Optional[str],
+    escalation_paths: tuple,
 ) -> dict:
     """The per-window latency points, in us, for one decoded window.
 
@@ -617,9 +617,11 @@ def window_points_us(
     stream_id, window_id = window.key
     committed = frame_record.committed_ticks
     handoff_ticks = link_delay.get((BOUNDARY_HOP, stream_id, window_id), 0)
-    escalation_ticks = link_delay.get(
-        (escalation_path, stream_id, window_id), 0
-    )
+    # a window climbs one entry edge, so the others carried none of it
+    escalation_ticks = 0
+    for escalation_path in escalation_paths:
+        escalation_key = (escalation_path, stream_id, window_id)
+        escalation_ticks += link_delay.get(escalation_key, 0)
     accepted = frame_record.accepted_ticks
     output_sent = answer_send.get(window.key, accepted)
     output_ticks = accepted - output_sent
@@ -754,7 +756,7 @@ def collect_samples(
     """
     routes = layout.routes()
     input_hops = layout.input_hop_by_pool()
-    escalation_hop = layout.entry_escalation_hop()
+    escalation_hops = layout.entry_escalation_hops()
     write_hop = layout.controller_write_hop()
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
@@ -785,7 +787,7 @@ def collect_samples(
         observation, observation_settings
     ):
         sample = window_sample(
-            window, frame_record, stages, reads, input_hops, escalation_hop
+            window, frame_record, stages, reads, input_hops, escalation_hops
         )
         for name, value in sample.values.items():
             samples[name].append(value)
@@ -826,7 +828,7 @@ def window_sample(
     stages: stage_records.StageLedger,
     reads: TransferReads,
     input_hops: dict,
-    escalation_hop: Optional[str],
+    escalation_hops: tuple,
 ) -> WindowSample:
     """One decoded window's values, as collect_samples reads every one.
 
@@ -848,7 +850,7 @@ def window_sample(
         reads.qpu_send,
         input_path,
         reads.answer_send,
-        escalation_hop,
+        escalation_hops,
     )
     return WindowSample(values, decode)
 

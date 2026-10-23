@@ -40,7 +40,7 @@ def _outcomes(verdict):
     )
     policy = _Policy(verdict)
     manager = types.SimpleNamespace(
-        strong_requests=requests, escalation_policy=policy
+        strong_requests=requests, strong_result_learner=policy
     )
     outcomes = decode_outcomes.DecodeOutcomes(engine, manager)
     return outcomes, requests, policy

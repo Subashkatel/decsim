@@ -141,14 +141,13 @@ def build_plan(
         has_static_decode_plan=has_static_decode_plan,
         batches_each_member=batches_each_member,
     )
-    leaves_the_entry_pool = True
     for part in switching_parts:
         edge_settings = part.edge.settings
+        leaves_an_entry_pool = part.leaves_an_entry_pool
         edge_shape = _edge_run_shape(
-            run_shape, edge_settings, leaves_the_entry_pool
+            run_shape, edge_settings, leaves_an_entry_pool
         )
         part.policy.check_plan(edge_shape)
-        leaves_the_entry_pool = False
     _check_region_scheme(scheme, workload.patch_lives, dynamic_streams)
     release_rule = window_settings.release_rule_for(
         windows, workload.patch_lives
@@ -437,7 +436,7 @@ def _strong_window_settings(
 def _edge_run_shape(
     run_shape: decoding_records.RunShape,
     edge_settings: escalation_settings.SwitchingSettings,
-    leaves_the_entry_pool: bool,
+    leaves_an_entry_pool: bool,
 ) -> decoding_records.RunShape:
     """The run as one edge checks it: with its own strong window row."""
     strong_window = edge_settings.strong_window
@@ -445,7 +444,7 @@ def _edge_run_shape(
         run_shape,
         strong_window=strong_window.name,
         is_absorbing_strong_window=strong_window.absorbs_weak_windows,
-        leaves_the_entry_pool=leaves_the_entry_pool,
+        leaves_an_entry_pool=leaves_an_entry_pool,
     )
 
 

@@ -40,8 +40,7 @@ import decsim.windows.window_planner as window_planner_module
 class Windows:
     """Every component that turns landed rounds into committed corrections.
 
-    gap_join is None on a run that computes no confidence, and router
-    on a run of one entry pool.
+    gap_join is None on a run that computes no confidence.
     """
 
     models: window_planner_module.WindowModels
@@ -60,7 +59,7 @@ class Windows:
     requester: decode_requests.DecodeRequester
     gap_join: Optional[gap_join_module.WindowGapJoin]
     window_manager: window_manager_module.WindowManager
-    router: Optional[routers.Router] = None
+    router: routers.Router
 
     @classmethod
     def build(
@@ -100,15 +99,11 @@ class Windows:
         decoder_output = _decoder_output(
             layout.edges, routes, machine_clock, engine
         )
-        redo_pool = _entry_target(layout)
-        copies_the_window_fold = _copies_the_boundary_fold(entry.settings)
-        copies_the_strong_fold = _copies_the_boundary_fold(redo_pool)
-        gate = decode_requests.WindowInputGate(
-            copies_the_window_fold, copies_the_strong_fold
-        )
-        for other_entry in layout.entry_pools[1:]:
-            copies = _copies_the_boundary_fold(other_entry.settings)
-            gate.copies_fold_by_entry_pool[other_entry.pool] = copies
+        copies_fold_by_pool = {}
+        for pool_plan in layout.pools:
+            copies = _copies_the_boundary_fold(pool_plan.settings)
+            copies_fold_by_pool[pool_plan.pool] = copies
+        gate = decode_requests.WindowInputGate(copies_fold_by_pool)
         router = _router(layout, plan.planned_operations)
         builder = decode_requests.DecodeRequestBuilder(engine)
         ledger = committed_rounds.LogicalLedger()
@@ -127,7 +122,7 @@ class Windows:
             clock=clocked_windows.clock,
             decision_cycles=clocked_windows.decision_cycles,
         )
-        gap_join = _gap_join(is_switching, recorded_signal, engine)
+        gap_join = _gap_join(layout, recorded_signal, engine)
         feedback_boundary_mode = workload.feedback_boundary_mode
         window_manager = window_manager_module.WindowManager(
             engine, feedback_boundary_mode=feedback_boundary_mode
@@ -200,6 +195,15 @@ class Windows:
         for side in routed_sides:
             self.router.add_side(side)
 
+    def join_of(
+        self, pool: window_records.PoolId
+    ) -> Optional[gap_join_module.WindowGapJoin]:
+        """The join of an entry pool's solves; None when it has none."""
+        side = self.router.side_of(pool)
+        if side is None:
+            return self.gap_join
+        return side.gap_join
+
     def start(self) -> None:
         """Build every planned window's model, then its first boundary."""
         self.planner.start()
@@ -270,12 +274,12 @@ class Windows:
         if self.gap_join is not None:
             self.gap_join.verdict = verdict
         router = self.router
-        if router is None:
-            return
         router.tracker = self.tracker
+        self.committer.router = router
         requester.router = router
         verdict.router = router
         self.courier.router = router
+        self.retention.router = router
 
 
 def recorded_signal(
@@ -325,15 +329,15 @@ def _retention(
     )
 
 
-def _router(
-    layout: layout_module.Layout, operations: tuple
-) -> Optional[routers.Router]:
-    """The router of the layout's entry pools; None for one entry pool.
+def _router(layout: layout_module.Layout, operations: tuple) -> routers.Router:
+    """The router of the layout's entry pools, one_pool for a single one.
 
     Its rule must send every operation to one of them.
     """
     if layout.router is None:
-        return None
+        entry = layout.entry_pool
+        rule = routers.OnePool.Settings(entry.pool.word)
+        return routers.Router(rule)
     pool_names = []
     for entry in layout.entry_pools:
         pool_names.append(entry.pool.word)
@@ -343,34 +347,23 @@ def _router(
 
 
 def _gap_join(
-    is_switching: bool,
+    layout: layout_module.Layout,
     recorded_signal: Optional[ports.ConfidenceSignal],
     engine: engine_module.Engine,
 ) -> Optional[gap_join_module.WindowGapJoin]:
-    """The join of a window's solves; None on a run that computes no gap.
+    """The join of the first entry pool's solves; None when it has no gap.
 
-    A switching run's join reads its edge's signal, bound when the
-    machine assembles; a recorded signal is bound here.
+    An entry pool that escalates joins on its edge's signal, bound when
+    the machine assembles; a recorded signal is bound here.
     """
     if recorded_signal is not None:
         gap_join = gap_join_module.WindowGapJoin(engine)
         gap_join.signal = recorded_signal
         return gap_join
-    if not is_switching:
+    entry = layout.entry_pool
+    if layout.edge_leaving(entry.pool) is None:
         return None
     return gap_join_module.WindowGapJoin(engine)
-
-
-def _entry_target(
-    layout: layout_module.Layout,
-) -> Optional[decoder_settings.DecoderPoolSettings]:
-    """The settings of the pool the entry edge escalates to; None for none."""
-    if not layout.edges:
-        return None
-    entry_edge = layout.edges[0]
-    hops = entry_edge.hops
-    target = layout.pool(hops.target)
-    return target.settings
 
 
 def _decoder_output(
@@ -381,33 +374,46 @@ def _decoder_output(
 ) -> decoder_output_module.DecoderOutput:
     """The decoder side's sends, each answer on its generated route.
 
-    A route that commits on the source chip counts its cycles on the
-    entry edge's switching clock, so a run with no clock for it is
+    A route that commits on an edge's source chip counts its cycles on
+    that edge's switching clock, so a run with no clock for it is
     refused.
     """
-    if not edges:
-        return decoder_output_module.DecoderOutput(engine, routes)
-    entry_edge = edges[0]
-    switching = entry_edge.settings
-    hops = entry_edge.hops
-    clocked_switching = config.with_machine_clock(switching, machine_clock)
-    route_name = switching.strong_answer_route
-    route = routes.answer(hops.target)
-    if route.commit_cycles > 0 and clocked_switching.clock is None:
-        raise ValueError(
-            f"switching.strong_answer_route {route_name!r} commits on the "
-            "weak chip in clock cycles, so it needs switching.clock or the "
-            "machine's clock"
+    clock_by_asker = {}
+    for edge in edges:
+        switching = edge.settings
+        hops = edge.hops
+        clocked_switching = config.with_machine_clock(switching, machine_clock)
+        route = routes.answer(hops.target, hops.source)
+        _refuse_a_chip_commit_with_no_clock(
+            edge, route, clocked_switching.clock
         )
-    return decoder_output_module.DecoderOutput(
-        engine, routes, clock=clocked_switching.clock
+        clock_by_asker[hops.source] = clocked_switching.clock
+    return decoder_output_module.DecoderOutput(engine, routes, clock_by_asker)
+
+
+def _refuse_a_chip_commit_with_no_clock(
+    edge: layout_module.EdgePlan,
+    route: route_records.AnswerRoute,
+    clock: Optional[config.Clock],
+) -> None:
+    if route.commit_cycles == 0 or clock is not None:
+        return
+    route_name = edge.settings.strong_answer_route
+    raise ValueError(
+        f"{edge.name}.strong_answer_route {route_name!r} commits on the "
+        f"source chip in clock cycles, so it needs {edge.name}.clock or "
+        "the machine's clock"
     )
 
 
 def _copies_the_boundary_fold(
-    decoder: Optional[decoder_settings.DecoderPoolSettings],
+    pool: Optional[decoder_settings.DecoderPoolSettings],
 ) -> bool:
-    """Whether a tier folds its boundary mask into a copy of its input."""
-    if decoder is None:
+    """Whether a pool folds its boundary mask into a copy of its input.
+
+    The idle pool of a run with no decoder has no settings and folds
+    nothing, so either answer holds; it copies.
+    """
+    if pool is None:
         return True
-    return decoder.copies_boundary_fold
+    return pool.copies_boundary_fold

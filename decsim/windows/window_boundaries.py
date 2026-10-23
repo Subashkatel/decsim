@@ -51,9 +51,9 @@ class BoundaryCourier:
     """Delivers committed boundaries, versioned, held until final.
 
     routes says which hop a boundary takes between two pools. Every
-    hand-on lands on the pool that decodes the dependent window:
-    routes.window_pool, or the entry pool the router names for it, whose
-    rule is fixed before the run (routers.py); a pinned face lands on
+    hand-on lands on the entry pool the router names for the dependent
+    window, whose rule is fixed before the run (routers.py); a pinned
+    face lands on
     the pool of the strong request it pins.
     """
 
@@ -67,8 +67,8 @@ class BoundaryCourier:
     # the facade hears every delivery that landed in a window, and
     # whether it was the last boundary a shipped window owed
     windows = ports.Port(ports.WindowInput)
-    # the router of a machine of several entry pools; None for one
-    router = ports.Port(routers.Router, optional=True)
+    # which entry pool decodes each window (routers.py)
+    router = ports.Port(routers.Router)
 
     def __init__(self, routes: route_records.Routes) -> None:
         self.routes = routes
@@ -480,8 +480,6 @@ class BoundaryCourier:
 
     def _pool_of(self, window_key: tuple) -> window_records.PoolId:
         """The entry pool that decodes a window."""
-        if self.router is None:
-            return self.routes.window_pool
         window = self.planner.windows_by_key[window_key]
         return self.router.pool_for(window)
 

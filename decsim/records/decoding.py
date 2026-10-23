@@ -845,8 +845,8 @@ class RunShape:
     declaration that its region replaces the weak windows it covers (the
     double window, Toshio et al. 2510.25222 Sec. III C). commit_round_count
     and buffer_round_count size every window. Each edge checks the run
-    with its own strong window row; leaves_the_entry_pool says whether
-    the edge decides on the entry pool's windows, whose boundaries the
+    with its own strong window row; leaves_an_entry_pool says whether
+    the edge decides on an entry pool's windows, whose boundaries the
     boundary policy ships. is_bulk_strong says decoder_manager.bulk_strong
     batches the strong re-decodes timing-only; batches_each_member that a
     pool's batching row batches them and decodes each member.
@@ -864,5 +864,5 @@ class RunShape:
     is_bulk_strong: bool
     has_dynamic_streams: bool
     has_static_decode_plan: bool
-    leaves_the_entry_pool: bool = True
+    leaves_an_entry_pool: bool = True
     batches_each_member: bool = False

@@ -286,9 +286,9 @@ class StreamMeasures:
         stages = self.machine.observation.stages
         layout = self.machine.layout
         input_hops = layout.input_hop_by_pool()
-        escalation_hop = layout.entry_escalation_hop()
+        escalation_hops = layout.entry_escalation_hops()
         return measure.window_sample(
-            window, frame_record, stages, reads, input_hops, escalation_hop
+            window, frame_record, stages, reads, input_hops, escalation_hops
         )
 
     def _let_go(self, window: window_records.Window) -> None:

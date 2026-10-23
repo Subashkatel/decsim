@@ -35,6 +35,7 @@ import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
 import decsim.records.formation as formation_records
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
@@ -52,13 +53,13 @@ FORMING_CYCLES = 5
 # the controller writes the weak store; an escalated region lands in the
 # strong one, as the layout makes each store's intake from the graph
 _CONTROLLER_LABEL = "controller assembler"
-_WEAK_WRITE = receiver_module.Hop(
+_WEAK_WRITE = transfer_records.StoreHop(
     "controller_to_weak_buffer", _CONTROLLER_LABEL
 )
-_STRONG_WRITE = receiver_module.Hop(
+_STRONG_WRITE = transfer_records.StoreHop(
     "controller_to_strong_buffer", _CONTROLLER_LABEL
 )
-_ESCALATION = receiver_module.Hop("weak_to_strong", "weak")
+_ESCALATION = transfer_records.StoreHop("weak_to_strong", "weak")
 WEAK_STORE_INTAKE = receiver_module.StoreIntake(
     name="weak_buffer",
     seat="weak_buffer",
@@ -70,7 +71,6 @@ STRONG_STORE_INTAKE = receiver_module.StoreIntake(
     seat="strong_buffer",
     shape=receiver_module.LANDED,
     controller_write=_STRONG_WRITE,
-    escalation=_ESCALATION,
 )
 
 
@@ -669,7 +669,7 @@ def test_the_rounds_before_a_region_land_raw_and_cost_no_formation():
         stored_at.append(engine.now)
 
     receiver.reserve_region(carried)
-    receiver.receive_region(carried, record_stored)
+    receiver.receive_region(carried, record_stored, _ESCALATION)
     engine.run()
 
     seat = "strong_buffer"
@@ -700,7 +700,7 @@ def test_a_region_formed_here_is_reported_stored_once_every_round_is():
         stored_at.append((engine.now, receiver.store.occupancy))
 
     receiver.reserve_region(carried)
-    receiver.receive_region(carried, record_stored)
+    receiver.receive_region(carried, record_stored, _ESCALATION)
     engine.run()
 
     assert stored_at == [(50, 2)]
@@ -729,8 +729,8 @@ def test_a_later_region_forms_after_an_earlier_one_landing_at_once():
 
     receiver.reserve_region(first)
     receiver.reserve_region(second)
-    receiver.receive_region(first, first_stored)
-    receiver.receive_region(second, second_stored)
+    receiver.receive_region(first, first_stored, _ESCALATION)
+    receiver.receive_region(second, second_stored, _ESCALATION)
     engine.run()
 
     assert stored_at == [(130, "rounds 1 to 6"), (210, "rounds 7 to 10")]

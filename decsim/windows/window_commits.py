@@ -88,6 +88,8 @@ class WindowCommitter:
     decoder_output = ports.Port(ports.DecoderOutput)
     results = ports.Port(operation_results.OperationResults)
     edges = ports.Port(escalate_edges.EscalateEdges)
+    # which entry pool decodes each window, so which chain it climbed
+    router = ports.Port(routers.Router)
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
@@ -120,7 +122,8 @@ class WindowCommitter:
                 on_result_read,
             )
             return
-        edge = self.edges.entering(revision.request_key.pool)
+        entry = self.router.pool_for(window)
+        edge = self.edges.entering(revision.request_key.pool, entry)
         replace_rule = edge.rules.replace
         if not is_final:
             replace_rule.on_provisional(self, revision)
@@ -128,7 +131,11 @@ class WindowCommitter:
         chosen = replace_rule.final_revision(earlier, revision)
         result = _final_result(chosen)
         self.publish_strong(
-            window, revision.operation, result, revision.request_key
+            window,
+            revision.operation,
+            result,
+            revision.request_key,
+            edge.source,
         )
 
     def commit_or_publish(
@@ -181,8 +188,12 @@ class WindowCommitter:
         operation: program_records.Operation,
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
+        asked_by: window_records.PoolId,
     ) -> None:
         """Send the final result home; it finalizes the window on landing.
+
+        asked_by is the source of the edge the result came over, whose
+        route the answer takes.
 
         The result carries what the weak decode committed of the faults
         behind the window (_final_result), so the frame and the
@@ -198,7 +209,7 @@ class WindowCommitter:
             self.finish_strong, window, operation, result, request_key
         )
         self.decoder_output.publish(
-            window, operation, result, request_key, finish
+            window, operation, result, request_key, finish, asked_by
         )
 
     def replace_provisionally(
@@ -317,8 +328,8 @@ class WindowVerdict:
     decode_queue = ports.Port(ports.DecodeQueue)
     committer = ports.Port(WindowCommitter)
     edges = ports.Port(escalate_edges.EscalateEdges)
-    # the router of a machine of several entry pools; None for one
-    router = ports.Port(routers.Router, optional=True)
+    # which entry pool decodes each window (routers.py)
+    router = ports.Port(routers.Router)
 
     def __init__(
         self,
@@ -343,7 +354,7 @@ class WindowVerdict:
         """
         pool = job.request_key.pool
         edge = self.edges.leaving(pool)
-        is_first = self._is_an_entry_pool(pool)
+        is_first = self._decoded_first(job)
         if not is_first and edge is None:
             self._commit_final_revision(job, result)
             return
@@ -429,7 +440,7 @@ class WindowVerdict:
         window = self._window_of(job)
         operation = self.tracker.operation_by_id[window.stream_id]
         request_key = job.request_key
-        is_first = self._is_an_entry_pool(request_key.pool)
+        is_first = self._decoded_first(job)
         commit_region = _commit_region_of(job, window)
         return Revision(
             window, operation, result, request_key, is_first, commit_region
@@ -449,22 +460,22 @@ class WindowVerdict:
         side = self._routed_side(pool)
         if side is not None:
             return side.decode_queue
-        edge = self.edges.entering(pool)
-        return edge.decode_queue
+        return self.edges.queue_of(pool)
 
-    def _is_an_entry_pool(self, pool: window_records.PoolId) -> bool:
-        """Whether the pool decodes the planner's windows."""
-        if pool == self.window_pool:
-            return True
-        side = self._routed_side(pool)
-        return side is not None
+    def _decoded_first(self, job: decoding_records.DecodeJob) -> bool:
+        """Whether the job's pool is the entry pool of its window.
+
+        A pool may be one window's entry pool and another's target, so
+        the window's router answer decides, not the pool.
+        """
+        window = self._window_of(job)
+        entry = self.router.pool_for(window)
+        return job.request_key.pool == entry
 
     def _routed_side(
         self, pool: window_records.PoolId
     ) -> Optional[routers.EntrySide]:
         """The side of an entry pool past the first; None for any other."""
-        if self.router is None:
-            return None
         return self.router.side_of(pool)
 
 

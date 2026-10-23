@@ -158,8 +158,7 @@ def test_the_entry_store_is_written_and_a_targets_store_landed():
 
     assert entry_store.intake.shape == receiver_module.WRITTEN
     assert deep_store.intake.shape == receiver_module.LANDED
-    assert deep_store.intake.escalation.path_name == "strong_to_deep"
-    assert deep_store.intake.escalation.source_name == "strong_buffer"
+    assert deep_edge.hops.forward == "strong_to_deep"
     assert deep_edge.carried_from == "strong_buffer"
 
 
@@ -224,18 +223,33 @@ def test_a_router_makes_each_pool_it_feeds_an_entry_pool():
     assert layout.router.rule == _ROUTED_BY_PATCH
 
 
-def test_an_edge_from_an_entry_pool_past_the_first_is_refused():
-    """Only the first entry pool escalates yet."""
+def test_two_entry_pools_escalate_to_one_shared_strong_pool():
+    """Toshio's N_window weak decoders and a single strong decoder.
+
+    2510.25222 Sec. III C: fpga_b escalates to the strong pool the
+    weak pool escalates to, which is laid out once.
+    """
     routed = _routed_chain()
     switching = graph.Part("routed_switching", DEEP_SWITCHING_SLOT)
-    without_deep_edge = routed.without_part(DEEP_SWITCHING)
     results = graph.Wire(f"{_ROUTED_POOL}.escalate", "routed_switching.results")
-    redecode = graph.Wire("routed_switching.redecode", f"{DEEP_POOL}.escalated")
-    with_edge = without_deep_edge.with_part(switching)
-    escalating = with_edge.with_wires(results, redecode)
+    redecode = graph.Wire(
+        "routed_switching.redecode", f"{machines.STRONG_POOL}.escalated"
+    )
+    with_edge = routed.with_part(switching)
+    sharing = with_edge.with_wires(results, redecode)
 
-    with pytest.raises(graph.GraphError, match="not implemented yet"):
-        laid_out(escalating)
+    layout = laid_out(sharing)
+    pool_names = [plan.names.seat for plan in layout.pools]
+    routed_id = window_records.PoolId(_ROUTED_POOL)
+    routed_edge = layout.edge_leaving(routed_id)
+
+    assert pool_names == [
+        machines.WEAK_POOL,
+        _ROUTED_POOL,
+        machines.STRONG_POOL,
+        DEEP_POOL,
+    ]
+    assert routed_edge.hops.target.word == machines.STRONG_POOL
 
 
 def test_a_pool_reached_by_no_edge_and_no_router_is_refused():

@@ -80,8 +80,15 @@ def _packet(stream_id, round_index) -> round_records.SyndromeRoundPacket:
     )
 
 
-def _strong_retention(strong_store, rounds_arrived: int):
-    """A retention whose strong syndrome buffer is the one under test."""
+def _all_to_weak(_stream_id) -> window_records.PoolId:
+    return window_records.WEAK_POOL_ID
+
+
+def _strong_retention(strong_store, rounds_arrived: int, entry_of=_all_to_weak):
+    """A retention whose strong syndrome buffer is the one under test.
+
+    entry_of names each stream's entry pool, the router's answer.
+    """
     planner = types.SimpleNamespace(successors_by_stream={1: []})
     tracker = types.SimpleNamespace(
         effective_round_count_for_window=lambda _stream_id, _window: 9,
@@ -97,6 +104,13 @@ def _strong_retention(strong_store, rounds_arrived: int):
     retention.strong_store = strong_store
     retention.planner = planner
     retention.tracker = tracker
+    retention.router = types.SimpleNamespace(pool_of_stream=entry_of)
+    retention.add_edge(
+        window_records.WEAK_POOL_ID,
+        window_records.STRONG_POOL_ID,
+        weak_store,
+        strong_store,
+    )
     return retention
 
 
@@ -452,8 +466,7 @@ def _chain_retention():
     deep = _store()
     retention = _strong_retention(strong, rounds_arrived=9)
     weak = retention.weak_store
-    retention.add_edge(window_records.STRONG_POOL_ID, weak, strong)
-    retention.add_edge(DEEP_POOL, strong, deep)
+    retention.add_edge(window_records.STRONG_POOL_ID, DEEP_POOL, strong, deep)
     return retention, (weak, strong, deep)
 
 
@@ -483,6 +496,56 @@ def test_a_chain_keeps_a_windows_reads_in_each_edges_two_stores():
         (deep.has_hold(to_strong), deep.has_hold(to_deep)),
     ]
     assert held_by_store == [(True, False), (True, True), (False, True)]
+
+
+FPGA_POOL = window_records.PoolId("fpga_b")
+
+
+def _shared_target_retention():
+    """Weak and fpga_b each escalate to strong, and strong on to deep.
+
+    Stream 1 enters at weak and stream 2 at fpga_b, whose store is its
+    own: Delfosse's lazy decoders sharing one strong unit (2001.11427
+    Sec. V).
+    """
+    strong = _store()
+    deep = _store()
+    fpga = _store()
+    entry_by_stream = {1: window_records.WEAK_POOL_ID, 2: FPGA_POOL}
+    retention = _strong_retention(
+        strong, rounds_arrived=9, entry_of=entry_by_stream.get
+    )
+    weak = retention.weak_store
+    retention.add_edge(FPGA_POOL, window_records.STRONG_POOL_ID, fpga, strong)
+    retention.add_edge(window_records.STRONG_POOL_ID, DEEP_POOL, strong, deep)
+    return retention, (weak, fpga, strong, deep)
+
+
+def test_a_window_holds_its_rounds_only_on_its_own_entry_pools_chain():
+    retention, stores = _shared_target_retention()
+    window = window_records.Window(
+        stream_id=2,
+        window_index=0,
+        commit_lo=1,
+        commit_hi=3,
+        buffer_hi=5,
+        round_count=6,
+    )
+
+    retention.register_window((2, 0), window)
+
+    to_strong = decoding_records.PotentialStrong((2, 0))
+    to_deep = decoding_records.PotentialStrong((2, 0), DEEP_POOL)
+    held_by_store = []
+    for store in stores:
+        held = (store.has_hold(to_strong), store.has_hold(to_deep))
+        held_by_store.append(held)
+    assert held_by_store == [
+        (False, False),
+        (True, False),
+        (True, True),
+        (False, True),
+    ]
 
 
 def test_a_final_window_ends_its_reads_on_every_edge():
@@ -547,6 +610,6 @@ def test_a_deep_edge_carries_its_rounds_from_the_middle_store():
     packet = _packet(1, 2)
     strong.accept_packed_round(packet, publication_tick=2)
 
-    packets = retention.escalated_rounds([(1, 2)], DEEP_POOL)
+    packets = retention.escalated_rounds(1, [(1, 2)], DEEP_POOL)
 
     assert packets == (packet,)

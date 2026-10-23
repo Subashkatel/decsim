@@ -343,6 +343,29 @@ def with_escalation(
     return grown.with_wires(results, redecode)
 
 
+def with_escalation_to(
+    machine: graph.Machine,
+    source: str,
+    target: str,
+    switching: escalation_settings.SwitchingSettings,
+    switching_name: Optional[str] = None,
+) -> graph.Machine:
+    """The machine whose source pool also escalates to a pool it holds.
+
+    The target already serves other pools, as Delfosse's shared decoding
+    units serve every lazy decoder (2001.11427 Sec. V) and Toshio's one
+    strong decoder its N_window weak ones (2510.25222 Sec. III C). The
+    switching part is source_switching unless switching_name names it.
+    """
+    if switching_name is None:
+        switching_name = f"{source}_switching"
+    switching_part = graph.Part(switching_name, switching)
+    grown = machine.with_part(switching_part)
+    results = graph.Wire(f"{source}.escalate", f"{switching_name}.results")
+    redecode = graph.Wire(f"{switching_name}.redecode", f"{target}.escalated")
+    return grown.with_wires(results, redecode)
+
+
 def with_router(
     machine: graph.Machine,
     rule: Any,

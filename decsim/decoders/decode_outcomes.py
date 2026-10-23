@@ -105,11 +105,11 @@ class DecodeOutcomes:
         by window).
         """
         self.manager.strong_requests.finish_service(job)
-        policy = self.manager.escalation_policy
+        learner = self.manager.strong_result_learner
         for held in deliveries:
-            if policy is not None:
+            if learner is not None:
                 window_key = held.request_job.strong_decode_for
-                policy.learn_from_strong_result(window_key, held.result)
+                learner.learn_from_strong_result(window_key, held.result)
         for held in deliveries:
             self.complete_strong(held)
 

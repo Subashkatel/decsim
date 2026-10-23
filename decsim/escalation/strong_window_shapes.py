@@ -352,7 +352,9 @@ class DoubleWindow(StrongWindowPorts):
             )
         finally:
             if guard is not None:
-                self.retention.release_strong_hold_if_live(guard)
+                self.retention.release_strong_hold_if_live(
+                    guard, strong_request_key.stream_id
+                )
 
     def release_conditions(
         self, assignment: pending_strong_windows.StrongAssignment

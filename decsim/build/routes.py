@@ -3,6 +3,7 @@
 An answer goes home on its pool's own hop, or, for an edge whose
 answer route is through_weak_chip, down the edge's reverse hop to the
 source chip, which joins it and sends it home on the source's hop. A
+pool several edges target answers on each edge's route in turn. A
 boundary between two decodes of one pool rides the pool's same-pool
 hop; across an edge it rides the edge's forward or reverse hop. Every
 message that crosses the wall between two sites names the request it
@@ -11,8 +12,6 @@ are open (records/windows.py REQUEST_KEY_WIRE_BITS); one that stays on
 its site carries no name.
 """
 
-from typing import Optional
-
 import decsim.records.routes as route_records
 import decsim.records.windows as window_records
 
@@ -20,43 +19,43 @@ import decsim.records.windows as window_records
 FRAME_SITE = route_records.FRIDGE
 
 
-def generated(
-    pools: tuple,
-    edges: tuple,
-    window_pool: window_records.PoolId,
-) -> route_records.Routes:
-    """Every answer route and boundary route of pools joined by edges."""
+def generated(pools: tuple, edges: tuple) -> route_records.Routes:
+    """Every answer route and boundary route of pools joined by edges.
+
+    Each pool answers its own windows home on its own hop, and the
+    windows an edge asks of it on that edge's route.
+    """
     pool_by_id = {}
     for pool in pools:
         pool_by_id[pool.pool] = pool
-    answer_by_pool = {}
+    answer_by_asker = {}
     name_bits_by_hop = {}
     for pool in pools:
-        route = _answer_route(pool, pool_by_id, edges, name_bits_by_hop)
-        answer_by_pool[pool.pool] = route
+        name_bits_by_hop[pool.answer] = _name_bits(pool.site, FRAME_SITE)
+        own_route = route_records.AnswerRoute(None, pool.answer, 0)
+        answer_by_asker[pool.pool, None] = own_route
+    for edge in edges:
+        route = _edge_answer_route(edge, pool_by_id, name_bits_by_hop)
+        answer_by_asker[edge.target, edge.source] = route
     boundary_by_pair = _boundary_routes(pools, pool_by_id, edges)
     return route_records.Routes(
-        window_pool=window_pool,
-        answer_by_pool=answer_by_pool,
+        answer_by_asker=answer_by_asker,
         boundary_by_pair=boundary_by_pair,
         name_bits_by_answer_hop=name_bits_by_hop,
     )
 
 
-def _answer_route(
-    pool: route_records.PoolHops,
+def _edge_answer_route(
+    edge: route_records.EdgeHops,
     pool_by_id: dict,
-    edges: tuple,
     name_bits_by_hop: dict,
 ) -> route_records.AnswerRoute:
-    """The pool's answer route; records the name each of its hops carries."""
-    edge = _incoming_edge(pool.pool, edges)
-    if edge is None or edge.answer_route == route_records.DIRECT:
-        name_bits_by_hop[pool.answer] = _name_bits(pool.site, FRAME_SITE)
-        return route_records.AnswerRoute(None, pool.answer, 0)
+    """The route of the target's answer to the edge; records its down hop."""
+    target = pool_by_id[edge.target]
+    if edge.answer_route == route_records.DIRECT:
+        return route_records.AnswerRoute(None, target.answer, 0)
     source = pool_by_id[edge.source]
-    name_bits_by_hop[edge.reverse] = _name_bits(pool.site, source.site)
-    name_bits_by_hop[source.answer] = _name_bits(source.site, FRAME_SITE)
+    name_bits_by_hop[edge.reverse] = _name_bits(target.site, source.site)
     return route_records.AnswerRoute(
         down=edge.reverse,
         home=source.answer,
@@ -114,15 +113,6 @@ def _join_from(
         path = route_records.hop_between(sender.pool.word, receiver.pool.word)
         name_bits = _name_bits(sender.site, receiver.site)
         routes[pair] = route_records.BoundaryRoute(path, name_bits)
-
-
-def _incoming_edge(
-    pool: window_records.PoolId, edges: tuple
-) -> Optional[route_records.EdgeHops]:
-    for edge in edges:
-        if edge.target == pool:
-            return edge
-    return None
 
 
 def _name_bits(sender_site: str, receiver_site: str) -> int:

@@ -27,6 +27,19 @@ CONTROLLER_TO_QPU = "controller_to_qpu"  # the instruction back
 
 
 @dataclass(frozen=True)
+class StoreHop:
+    """A hop that lands in a store: its row, and where its bits sat.
+
+    A store's controller write is one; each escalate edge into the
+    store's pool lands its regions over its own (escalation/
+    strong_redecode.py).
+    """
+
+    path_name: LinkPath
+    source_name: str
+
+
+@dataclass(frozen=True)
 class RequestTransferRelation:
     """Provenance tying one transfer to the decoder request it serves."""
 

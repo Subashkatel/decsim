@@ -142,21 +142,30 @@ class EdgeHops:
 
 @dataclasses.dataclass(frozen=True)
 class Routes:
-    """Every answer's route by pool, every boundary's by pair of pools.
+    """Every answer's route by who asked, every boundary's by pair of pools.
 
-    window_pool decodes the planner's windows, so every hand-on lands
-    there. name_bits_by_answer_hop is each hop an answer rides, with
-    the bits of the name it carries beside its flips.
+    answer_by_asker keys a route by (pool, asked_by): asked_by is the
+    source of the edge that asked the pool, None for a window the pool
+    decodes first. name_bits_by_answer_hop is each hop an answer rides,
+    with the bits of the name it carries beside its flips.
     """
 
-    window_pool: window_records.PoolId
-    answer_by_pool: dict
+    answer_by_asker: dict
     boundary_by_pair: dict
     name_bits_by_answer_hop: dict
 
-    def answer(self, pool: window_records.PoolId) -> AnswerRoute:
-        """The route a pool's answer takes to the frame."""
-        return self.answer_by_pool[pool]
+    def answer(
+        self,
+        pool: window_records.PoolId,
+        asked_by: Optional[window_records.PoolId] = None,
+    ) -> AnswerRoute:
+        """The route a pool's answer takes to the frame.
+
+        A pool several edges target answers each down its own edge, as
+        each of Toshio's weak decoders joins the one strong decoder's
+        answer for its own window (2510.25222 Sec. III C).
+        """
+        return self.answer_by_asker[pool, asked_by]
 
     def boundary(
         self,

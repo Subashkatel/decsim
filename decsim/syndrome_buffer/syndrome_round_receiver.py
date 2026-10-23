@@ -46,6 +46,7 @@ from typing import Optional
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
 
 # how a store takes its rounds, as the module docstring says
@@ -55,29 +56,20 @@ INTAKES = (WRITTEN, LANDED)
 
 
 @dataclasses.dataclass(frozen=True)
-class Hop:
-    """A hop that lands in a store: its row, and where its bits sat."""
-
-    path_name: str
-    source_name: str
-
-
-@dataclasses.dataclass(frozen=True)
 class StoreIntake:
     """How one store takes its rounds.
 
     name is the store's, the line it narrates on and the copy's target;
     seat is its place on the path, as detection_events.formed_at names
     it; shape is one of INTAKES. controller_write is the hop the
-    controller writes over, and escalation the hop an escalated region
-    lands over, None for a store no escalation reaches.
+    controller writes over; an escalated region names the hop it lands
+    over itself, since each edge into the store's pool has its own.
     """
 
     name: str
     seat: str
     shape: str
-    controller_write: Hop
-    escalation: Optional[Hop] = None
+    controller_write: transfer_records.StoreHop
 
 
 class SyndromeRoundReceiver:
@@ -202,14 +194,24 @@ class SyndromeRoundReceiver:
             stated = round_records.stated_bits(bits)
             self.reserved_bits_by_round[round_key] = stated
 
+    def is_round_coming(self, round_key: tuple) -> bool:
+        """Whether a round is on its way in: room reserved, not stored yet.
+
+        Every edge into this store's pool asks before it carries a
+        round, so a round two edges' regions read crosses once.
+        """
+        return round_key in self.reserved_bits_by_round
+
     def receive_region(
         self,
         region: round_records.EscalatedRegion,
         on_stored: Callable[[], None],
+        arrival: transfer_records.StoreHop,
     ) -> None:
         """Take an escalated region that landed here: every round its slot.
 
-        on_stored runs once the store holds every round.
+        arrival is the edge's hop it landed over. on_stored runs once
+        the store holds every round.
         """
         packet_bits = []
         for packet in region.carried_packets:
@@ -219,7 +221,7 @@ class SyndromeRoundReceiver:
             region.rounds_before,
             region.packets,
             packet_bits,
-            self.intake.escalation,
+            arrival,
             on_stored,
         )
 
@@ -354,7 +356,7 @@ class SyndromeRoundReceiver:
         round_key: tuple,
         bits: Optional[int],
         packet: round_records.SyndromeRoundPacket,
-        hop: Hop,
+        hop: transfer_records.StoreHop,
     ) -> None:
         """The copy the intake made, and its line in the I/O trace."""
         self.trace.copy_made.fire(
@@ -369,7 +371,7 @@ class SyndromeRoundReceiver:
         rounds_before: tuple,
         packets: tuple,
         packet_bits,
-        hop: Hop,
+        hop: transfer_records.StoreHop,
         on_stored: Callable[[], None],
     ) -> None:
         """Land the rounds once this seat has formed them, if it forms them.
@@ -397,7 +399,7 @@ class SyndromeRoundReceiver:
         rounds_before: tuple,
         packets: tuple,
         packet_bits,
-        hop: Hop,
+        hop: transfer_records.StoreHop,
         on_stored: Callable[[], None],
     ) -> None:
         """Each round as the store holds it; its copy reports the hop's bits.
@@ -455,7 +457,7 @@ class SyndromeRoundReceiver:
         self,
         packet: round_records.SyndromeRoundPacket,
         packet_bits: Optional[int],
-        hop: Hop,
+        hop: transfer_records.StoreHop,
     ) -> None:
         """Store the round, or drop it when its operation already closed.
 
@@ -475,7 +477,7 @@ class SyndromeRoundReceiver:
         self,
         packet: round_records.SyndromeRoundPacket,
         packet_bits: Optional[int],
-        hop: Hop,
+        hop: transfer_records.StoreHop,
     ) -> None:
         self.store.accept_packed_round(packet, publication_tick=self.engine.now)
         round_key = (packet.stream_id, packet.round_index)
@@ -493,7 +495,7 @@ class SyndromeRoundReceiver:
         self,
         packet: round_records.SyndromeRoundPacket,
         packet_bits: Optional[int],
-        hop: Hop,
+        hop: transfer_records.StoreHop,
     ) -> None:
         """The operation closed while the round crossed: it has no reader.
 
@@ -511,7 +513,9 @@ class SyndromeRoundReceiver:
         )
 
     def _received_text(
-        self, packet: round_records.SyndromeRoundPacket, hop: Hop
+        self,
+        packet: round_records.SyndromeRoundPacket,
+        hop: transfer_records.StoreHop,
     ) -> str:
         defects = packet.defects_text()
         holds = self.store.held_rounds_description()
@@ -521,7 +525,9 @@ class SyndromeRoundReceiver:
         )
 
     def _dropped_text(
-        self, packet: round_records.SyndromeRoundPacket, hop: Hop
+        self,
+        packet: round_records.SyndromeRoundPacket,
+        hop: transfer_records.StoreHop,
     ) -> str:
         holds = self.store.held_rounds_description()
         return (

@@ -25,6 +25,7 @@ import decsim.windows.round_retention as round_retention
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
 import tests.experiments.run_files as run_files
+import tests.one_entry as one_entry
 
 
 def _reference_layout():
@@ -98,6 +99,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     transfers = window_transfers.WindowTransfers(engine)
     transfers.link = links
     courier = window_boundaries.BoundaryCourier(_ROUTES)
+    courier.router = one_entry.router()
     courier.planner = planner
     courier.transfers = transfers
     courier.retention = _retention_of(20)
@@ -170,6 +172,7 @@ def test_an_interaction_picking_targets_reads_any_planned_window():
     windows = {(1, 0): source, (1, 1): later}
     interaction = _ReadingInteraction()
     courier = window_boundaries.BoundaryCourier(_ROUTES)
+    courier.router = one_entry.router()
     courier.planner = types.SimpleNamespace(windows_by_key=windows)
     courier.interaction = interaction
     operation = program_records.Operation(
@@ -281,6 +284,7 @@ def _pinned_courier():
     transfers.link = links
     recording = _RecordingTransfers(transfers)
     courier = window_boundaries.BoundaryCourier(_ROUTES)
+    courier.router = one_entry.router()
     courier.planner = planner
     courier.transfers = recording
     courier.retention = _retention_of(6)

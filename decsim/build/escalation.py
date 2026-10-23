@@ -24,9 +24,11 @@ import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_regions as strong_regions
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
+import decsim.records.transfers as transfer_records
 import decsim.refusals as refusals
 import decsim.windows.escalate_edges as escalate_edges
 import decsim.windows.revision_rules as revision_rules
+import decsim.windows.routers as routers
 import decsim.windows.window_commits as window_commits
 
 if TYPE_CHECKING:
@@ -97,8 +99,9 @@ class Switching:
         pending = pending_strong_windows.PendingStrongWindows()
         costs = _verdict_costs(settings, machine_clock)
         rules = _edge_rules(settings, costs)
+        arrival = transfer_records.StoreHop(hops.forward, edge.carried_from)
         strong_redecode = strong_redecode_module.StrongRedecode(
-            engine, hops, rules
+            engine, hops, arrival, rules
         )
         if settings.deadline is not None:
             strong_redecode.deadline = settings.deadline.build(engine)
@@ -132,12 +135,33 @@ class Switching:
         strong_redecode.decode_queue = target_manager
         strong_redecode.policy = self.policy
         windows.retention.add_edge(
-            strong_redecode.target, carried.store, target_store.store
+            strong_redecode.source,
+            strong_redecode.target,
+            carried.store,
+            target_store.store,
         )
-        target_manager.escalation_policy = self.policy
+
         self._bind_the_source_join(windows, decoders)
         self._bind_the_deadline(decoders)
         self._bind_the_queue_readers(decoders)
+
+    def bind_entry_join(self, windows: "windows_part.Windows") -> None:
+        """An entry pool's join reads this edge's signal, the pool's own."""
+        if not self.leaves_an_entry_pool:
+            return
+        source = self.strong_redecode.source
+        join = windows.join_of(source)
+        join.signal = self.confidence_signal
+
+    @property
+    def leaves_an_entry_pool(self) -> bool:
+        """Whether the edge's source decodes the planner's windows first.
+
+        Such an edge's verdict reads the window side's join of that
+        pool's solves; an edge past an entry pool joins its source's
+        results itself.
+        """
+        return self.source_join is None
 
     def statistics_parts(self) -> tuple:
         """The strong redecode at the edge's path; its verdict's, deadline's.
@@ -241,16 +265,19 @@ def build_switching(
 ) -> tuple:
     """One switching part per escalate edge, in graph order.
 
-    The task's calibrator, online_threshold, decides on the entry edge,
-    the one whose threshold the task learns. An edge past the entry
-    takes no region that absorbs its source windows yet, nor does one
-    beside a router: neither is implemented yet.
+    The task's calibrator, online_threshold, decides on the first edge,
+    the one whose threshold the task learns. An edge past an entry pool
+    joins its source pool's results itself and takes no region that
+    absorbs its source windows yet, nor does an edge beside a router:
+    neither is implemented yet.
     """
+    _refuse_one_learned_threshold_for_several_entries(layout, online_threshold)
+    _refuse_entry_edges_that_disagree(layout)
     parts = []
     threshold = online_threshold
     for edge in layout.edges:
         part = Switching.build(edge, layout, engine, threshold, machine_clock)
-        if not parts:
+        if layout.is_entry(edge.hops.source):
             _refuse_absorbing_beside_a_router(part, layout)
         else:
             _refuse_past_the_entry(part)
@@ -281,6 +308,22 @@ def join_the_chain(switching_parts: tuple) -> None:
         entering = redecode_by_target[source]
         entering.target_join = part.source_join
         entering.next_edge = part.strong_redecode
+
+
+def bind_strong_result_learners(
+    edges: escalate_edges.EscalateEdges,
+    router: routers.Router,
+    decoders: "decoders_part.Decoders",
+) -> None:
+    """Each target pool's manager teaches its results to the asking edge."""
+    targets = []
+    for edge in edges.edges:
+        if edge.target not in targets:
+            targets.append(edge.target)
+    for target in targets:
+        manager = decoders.manager_of(target)
+        learner = escalate_edges.StrongResultLearner(edges, router, target)
+        manager.strong_result_learner = learner
 
 
 def signal_by_pool(switching_parts: tuple) -> dict:
@@ -456,6 +499,55 @@ def _refuse_absorbing_beside_a_router(
         "router is not implemented yet: it absorbs neighbouring windows "
         f"the router may have sent to another entry pool; {refusals.REFUSALS}"
     )
+
+
+def _refuse_one_learned_threshold_for_several_entries(
+    layout: layout_module.Layout,
+    online_threshold: Optional[ports.ThresholdSource],
+) -> None:
+    """The task learns one threshold, which would reach one entry edge.
+
+    The calibrator decides on the first edge alone, so a second edge
+    out of an entry pool would keep its fixed threshold unannounced.
+    """
+    if online_threshold is None:
+        return
+    entry_edges = []
+    for edge in layout.edges:
+        if layout.is_entry(edge.hops.source):
+            entry_edges.append(edge.name)
+    if len(entry_edges) <= 1:
+        return
+    raise ValueError(
+        "the task's online threshold learns one edge's threshold, and "
+        f"{len(entry_edges)} edges leave entry pools: {entry_edges}; "
+        "give each edge a fixed threshold"
+    )
+
+
+def _refuse_entry_edges_that_disagree(layout: layout_module.Layout) -> None:
+    """Every edge out of an entry pool shapes and reads windows alike.
+
+    The planner lays one plan for every entry pool's windows on the
+    first entry edge's strong window, and a shot records one signal by
+    its name (Layout.entry_switching), so a second edge that differed
+    would run on the first one's.
+    """
+    first = layout.entry_switching()
+    for edge in layout.edges:
+        if not layout.is_entry(edge.hops.source):
+            continue
+        settings = edge.settings
+        same_window = settings.strong_window == first.strong_window
+        same_signal = settings.confidence.name == first.confidence.name
+        if same_window and same_signal:
+            continue
+        raise ValueError(
+            f"escalate edge {edge.name!r} leaves an entry pool with a "
+            "strong_window or confidence other than the first entry "
+            "edge's; the planner lays one plan for every entry pool, so "
+            "edges out of entry pools must agree on both"
+        )
 
 
 def _refuse(edge: layout_module.EdgePlan, what: str, reason: str) -> None:

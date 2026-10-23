@@ -77,7 +77,7 @@ def test_a_route_through_the_weak_chip_with_no_clock_is_refused():
         machine_module.Machine.build(clockless, 0)
     assert str(refusal.value) == (
         "switching.strong_answer_route 'through_weak_chip' commits on the "
-        "weak chip in clock cycles, so it needs switching.clock or the "
+        "source chip in clock cycles, so it needs switching.clock or the "
         "machine's clock"
     )
 

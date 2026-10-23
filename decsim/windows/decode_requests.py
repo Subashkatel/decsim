@@ -45,19 +45,12 @@ class WindowInputGate:
     # the decoder side's input, which installs what this hands it
     input_fold = ports.Port(ports.DecoderInputFold)
 
-    def __init__(
-        self,
-        copies_the_window_fold: bool = True,
-        copies_the_strong_fold: bool = True,
-    ):
-        # each tier's copies_boundary_fold: a copy duplicates the landed
+    def __init__(self, copies_fold_by_pool: dict):
+        # each pool's copies_boundary_fold: a copy duplicates the landed
         # input, in place XORs the mask into the unit's own memory. A
-        # window job is decoded by the tier that decodes the plan's
-        # windows, a strong re-decode by the strong tier.
-        self.copies_the_window_fold = copies_the_window_fold
-        self.copies_the_strong_fold = copies_the_strong_fold
-        # the fold of each entry pool past the first a router feeds
-        self.copies_fold_by_entry_pool: dict = {}
+        # job is folded as the pool that decodes it folds, an entry
+        # pool's window or any target's re-decode alike
+        self.copies_fold_by_pool = copies_fold_by_pool
 
     def mask_input(self, job: decoding_records.DecodeJob) -> None:
         """XOR the window's boundary mask into the input the decode reads.
@@ -94,13 +87,9 @@ class WindowInputGate:
     # ---- private
 
     def _copies_the_fold(self, job: decoding_records.DecodeJob) -> bool:
-        """The fold of the tier that decodes this job."""
-        if job.kind is not decoding_records.DecodeJobKind.WINDOW:
-            return self.copies_the_strong_fold
+        """The fold of the pool that decodes this job."""
         pool = job.request_key.pool
-        return self.copies_fold_by_entry_pool.get(
-            pool, self.copies_the_window_fold
-        )
+        return self.copies_fold_by_pool[pool]
 
     def _masked_round(self, state, window_info, round_input):
         fragments = []
@@ -380,8 +369,8 @@ class DecodeRequester:
     store_output = ports.Port(ports.SyndromeBufferOutput)
     # a run whose weak decoder reports its own soft output has no join
     gap_join = ports.Port(ports.WindowGapJoin, optional=True)
-    # the router of a machine of several entry pools; None for one
-    router = ports.Port(routers.Router, optional=True)
+    # which entry pool decodes each window (routers.py)
+    router = ports.Port(routers.Router)
 
     def __init__(
         self,
@@ -484,11 +473,6 @@ class DecodeRequester:
         for submission in submissions:
             self._admit(submission)
 
-    def _primary_edge(self) -> Optional[ports.EscalateEdge]:
-        """The edge the primary tier's results meet; None with no switching."""
-        primary_tier = self.retention.primary_tier
-        return self.edges.leaving(primary_tier)
-
     def _primary_submissions(
         self, primary_jobs: list, is_input_held: bool
     ) -> list:
@@ -509,17 +493,13 @@ class DecodeRequester:
     # ---- private: the entry pool a window is decoded on
 
     def _pool_for(self, window: window_records.Window) -> window_records.PoolId:
-        """The entry pool that decodes the window: the router's, or the one."""
-        if self.router is None:
-            return self.retention.primary_tier
+        """The entry pool that decodes the window."""
         return self.router.pool_for(window)
 
     def _routed_side(
         self, pool: window_records.PoolId
     ) -> Optional[routers.EntrySide]:
         """The side of an entry pool past the first; None for the first."""
-        if self.router is None:
-            return None
         return self.router.side_of(pool)
 
     def _queue_of(self, pool: window_records.PoolId) -> ports.DecodeQueue:
@@ -549,8 +529,6 @@ class DecodeRequester:
 
     def _routed_queues(self) -> list:
         """Every entry pool's manager past the first, in build order."""
-        if self.router is None:
-            return []
         sides = self.router.sides()
         return [side.decode_queue for side in sides]
 
@@ -646,7 +624,9 @@ class DecodeRequester:
         first, each other entry pool's, then each edge's target in graph
         order.
         """
-        edge = self._primary_edge()
+        stream_id, _window_index = window_key
+        entry = self.router.pool_of_stream(stream_id)
+        edge = self.edges.leaving(entry)
         if edge is not None:
             speculative = edge.released_submission(window_key)
             started = _speculative_submissions(speculative)
@@ -655,15 +635,16 @@ class DecodeRequester:
         self.decode_queue.release_window(window_key)
         for decode_queue in self._routed_queues():
             decode_queue.release_window(window_key)
-        for edge in self.edges.edges:
-            edge.decode_queue.release_window(window_key)
+        for decode_queue in self.edges.target_queues():
+            decode_queue.release_window(window_key)
 
     def _admit(self, submission: decoding_records.Submission) -> None:
         job = submission.job
         if job.strong_decode_for is not None:
             # the speculative strong decode started with the weak job (Toshio
             # 2510.25222 lines 598-601) is its edge's target's to serve
-            edge = self.edges.entering(job.request_key.pool)
+            entry = self._pool_for(job.window)
+            edge = self.edges.entering(job.request_key.pool, entry)
             edge.enqueue_target(job, None)
             return
         job.window.t_queued = self.builder.engine.now

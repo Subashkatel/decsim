@@ -10,6 +10,12 @@ a window's pool is known when the window is planned, and a boundary
 that leaves for it rides to that pool.
 
     by_patch  each patch's windows to the pool its table names
+    one_pool  every window to the one entry pool, the rule of a machine
+              with no router part
+
+Every machine has a router, so every part asks one owner which entry
+pool decodes a window, and the line of edges a window may climb starts
+there (windows/escalate_edges.py).
 
 A rule that reads the run's state (the least loaded pool, a backlog, a
 round) has no paper behind it and is not built; the rule slot takes a
@@ -86,6 +92,28 @@ class ByPatch:
                 _refuse_an_unrouted_operation(operation, table)
 
 
+class OnePool:
+    """Every window to the one entry pool: a machine with no router part."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The one entry pool, by its part's name."""
+
+        pool: str
+        name = "one_pool"
+
+        def pool_for(self, operation: program_records.Operation) -> str:
+            """The one pool."""
+            del operation
+            return self.pool
+
+        def check_operations(
+            self, operations: tuple, pool_names: tuple
+        ) -> None:
+            """Nothing to refuse: the build names the entry pool itself."""
+            del operations, pool_names
+
+
 @dataclasses.dataclass(frozen=True)
 class EntrySide:
     """What one entry pool's windows are asked through.
@@ -106,7 +134,7 @@ class Router:
 
     sides holds every entry pool's side but the first, whose objects the
     window side holds itself (build/windows.py): a machine of one entry
-    pool has no router.
+    pool holds none.
     """
 
     tracker = ports.Port(round_tracker_module.RoundTracker)
@@ -132,7 +160,14 @@ class Router:
 
     def pool_for(self, window: window_records.Window) -> window_records.PoolId:
         """The entry pool that decodes this window."""
-        operation = self.tracker.operation_by_id[window.stream_id]
+        return self.pool_of_stream(window.stream_id)
+
+    def pool_of_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> window_records.PoolId:
+        """The entry pool that decodes every window of the stream."""
+        operation = self.tracker.operation_by_id[stream_id]
         name = self.rule.pool_for(operation)
         return window_records.PoolId(name)
 

@@ -301,7 +301,8 @@ class StrongRegions:
         its potential restart hold.
         """
         purpose = f"strong-region plan for {key}"
-        self.retention.require_strong_retained(context_keys, purpose)
+        self.retention.require_strong_retained(key[0], context_keys, purpose)
+
         self.retention.require_retained(restart_reads, purpose)
 
     def _modelled_region(

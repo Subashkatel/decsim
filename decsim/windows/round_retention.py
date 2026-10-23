@@ -4,11 +4,13 @@ A window holds [start_round, buffer_hi], with any successor overflow, in
 the store its tier reads. When the strong tier may re-decode it, the
 same rounds and those a strong redo reads (records/windows.py
 strong_context_bounds) are also held as a potential strong read in both
-stores of each escalate edge, the one it carries from and the one it
-lands in: the chip keeps them until the verdict and carries them up
-with the escalation (Toshio et al. 2510.25222 lines 1247-1250). A chain
-keeps one per edge, so a pool's store keeps a window's rounds until the
-pool's own verdict; the window's final commit ends them all. At admission
+stores of each escalate edge on its chain, the one it carries from and
+the one it lands in: the chip keeps them until the verdict and carries
+them up with the escalation (Toshio et al. 2510.25222 lines 1247-1250).
+A window's chain is the line of edges from the entry pool the router
+sends it to, so a pool's store keeps a window's rounds until the pool's
+own verdict, and a window of another entry pool holds nothing on an edge
+it never climbs; the window's final commit ends them all. At admission
 the window's hold becomes its request's, released once the input lands
 in the unit's memory. Under the double window, a window an earlier one
 bounds also keeps the rounds its restart would re-read
@@ -42,7 +44,21 @@ import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 import decsim.windows.round_tracker as round_tracker
+import decsim.windows.routers as routers
 import decsim.windows.window_planner as window_planner
+
+
+@dataclasses.dataclass(frozen=True)
+class RetainedEdge:
+    """One escalate edge as the retention sees it: its target, its stores.
+
+    carried_from is the store its source reads, landed_in the store its
+    target reads.
+    """
+
+    target: window_records.PoolId
+    carried_from: ports.RetainedRounds
+    landed_in: ports.RetainedRounds
 
 
 class RoundRetention:
@@ -51,14 +67,17 @@ class RoundRetention:
     A holder is a window or a request.
     """
 
-    # the entry edge's two stores: the one the entry pool reads, and the
-    # one its target reads. A run whose plan's windows the strong tier
-    # decodes has no weak store; a run that reads no rounds from the room
-    # side has no store there
+    # the store the entry pools read, and the one the first entry edge's
+    # target reads. A run whose plan's windows the strong tier decodes
+    # has no weak store; a run that reads no rounds from the room side
+    # has no store there
     weak_store = ports.Port(ports.RetainedRounds, optional=True)
     strong_store = ports.Port(ports.RetainedRounds, optional=True)
     planner = ports.Port(window_planner.WindowPlanner)
     tracker = ports.Port(round_tracker.RoundTracker)
+    # the owner of which entry pool decodes a stream, where its chain
+    # of edges starts; a run with no edge never asks it
+    router = ports.Port(routers.Router, optional=True)
     # the run's placement, asked how many rounds before a read's first
     # round its recipes read when a seat on that read forms the events
     detection_events = ports.Port(ports.DetectionEventPlacement)
@@ -76,18 +95,20 @@ class RoundRetention:
         # that forms the detection events (detection_events.formed_at),
         # None when none does
         self.strong_side_seat = strong_side_seat
-        # each escalate edge's store it carries from and store it lands
-        # in, by its target pool, in graph order (add_edge)
-        self.stores_by_edge: dict = {}
+        # each escalate edge, by its source pool: a pool leaves by at
+        # most one edge (topology/part_kinds.py), so its source names it
+        self.edge_by_source: dict = {}
 
     def add_edge(
         self,
+        source: window_records.PoolId,
         target: window_records.PoolId,
         carried_from: ports.RetainedRounds,
         landed_in: ports.RetainedRounds,
     ) -> None:
         """An escalate edge's two stores, which keep its potential reads."""
-        self.stores_by_edge[target] = (carried_from, landed_in)
+        edge = RetainedEdge(target, carried_from, landed_in)
+        self.edge_by_source[source] = edge
 
     # ---- the stores
 
@@ -116,7 +137,7 @@ class RoundRetention:
         for owner, identities in buffering_plan.weak_holds:
             self.primary_store.register_hold(owner, identities)
         for owner, identities in buffering_plan.potential_holds:
-            self._hold_on_every_edge(owner, identities)
+            self._hold_on_the_chain(owner, identities)
 
     def release_round_if_unheld(self, round_key: tuple) -> None:
         """Free a weak syndrome buffer round whose every consumer resolved."""
@@ -141,7 +162,7 @@ class RoundRetention:
         self.primary_store.register_hold(reads, primary_reads)
         potential = decoding_records.PotentialStrong(key)
         held = primary_reads + strong_context
-        self._hold_on_every_edge(potential, held)
+        self._hold_on_the_chain(potential, held)
         self._hold_later_stream_reads(window)
 
     def release_later_stream_reads(
@@ -150,7 +171,7 @@ class RoundRetention:
     ) -> None:
         """A sealed stream has every window registered: its hold ends."""
         later_reads = decoding_records.LaterStreamReads(stream_id)
-        self.release_strong_hold_if_live(later_reads)
+        self.release_strong_hold_if_live(later_reads, stream_id)
 
     def replace_window_reads(
         self, key: tuple, window: window_records.Window
@@ -320,15 +341,15 @@ class RoundRetention:
         on the chip too, so the region could be carried up again.
         """
         request_key = job.request_key
-        target = request_key.pool
         in_flight = decoding_records.StrongInputInFlight(request_key)
         owner = decoding_records.DecoderInputHold(request_key)
-        for store in self._strong_context_stores(target):
+        stores = self._strong_context_stores(
+            request_key.stream_id, request_key.pool
+        )
+        for store in stores:
             self._move_to_in_flight(store, job, in_flight)
             _move_hold_to_input(store, in_flight, owner, job)
-        job.input_hold = functools.partial(
-            self._release_strong_input, owner, target
-        )
+        job.input_hold = functools.partial(_release_from_each, stores, owner)
         self._hold_for_the_next_edge(job)
 
     # ---- what a strong window holds
@@ -363,11 +384,12 @@ class RoundRetention:
 
         Which store a strong window reads is the retention's to say, so
         the shape asks for the input rather than for the store: the store
-        the edge to target lands in, the entry edge's by default.
+        the edge to target on the window's chain lands in, its entry
+        edge's by default.
         """
-        _carried_from, landed_in = self._edge_stores(target)
-        builder.stamp_first_round(window, landed_in)
-        return builder.assemble_payloads(window, landed_in)
+        edge = self._edge_into(window.stream_id, target)
+        builder.stamp_first_round(window, edge.landed_in)
+        return builder.assemble_payloads(window, edge.landed_in)
 
     def landed_through(
         self,
@@ -375,8 +397,8 @@ class RoundRetention:
         target: Optional[window_records.PoolId] = None,
     ) -> int:
         """The stream's highest round the edge's landing store holds."""
-        _carried_from, landed_in = self._edge_stores(target)
-        return self.tracker.strong_rounds_arrived(stream_id, landed_in)
+        edge = self._edge_into(stream_id, target)
+        return self.tracker.strong_rounds_arrived(stream_id, edge.landed_in)
 
     def context_rounds_in_flight(
         self,
@@ -394,8 +416,9 @@ class RoundRetention:
         report loudly. A caller carries or waits for the first and never
         for the second.
         """
-        carried_from, landed_in = self._edge_stores(target)
-        arrived_for = self._arrivals_counted_for(carried_from)
+        edge = self._edge_into(key[0], target)
+        landed_in = edge.landed_in
+        arrived_for = self._arrivals_counted_for(edge.carried_from)
         crossing = []
         released = []
         for round_key in read_keys:
@@ -421,18 +444,20 @@ class RoundRetention:
 
     def escalated_rounds(
         self,
+        stream_id: Any,  # an opaque identity
         round_keys: list,
         target: Optional[window_records.PoolId] = None,
     ) -> tuple:
         """The packets of these rounds in the store the edge carries from.
 
-        The rounds are there: the window's potential strong read keeps
-        them on the chip until its verdict, and the request's hold after.
+        The edge is the one into target on the stream's chain. The
+        rounds are there: the window's potential strong read keeps them
+        on the chip until its verdict, and the request's hold after.
         """
-        carried_from, _landed_in = self._edge_stores(target)
+        edge = self._edge_into(stream_id, target)
         packets = []
         for round_key in round_keys:
-            fragments = carried_from.retained_fragments(round_key)
+            fragments = edge.carried_from.retained_fragments(round_key)
             assert fragments is not None, (
                 f"round {round_key} left the store it is carried from "
                 f"before its escalation carried it"
@@ -456,7 +481,7 @@ class RoundRetention:
         pending_hold = decoding_records.PendingStrong(
             strong_request_key, restart_key
         )
-        stores = self._strong_context_stores(target)
+        stores = self._strong_context_stores(key[0], target)
         for store in stores:
             store.transfer_hold(potential_hold, pending_hold)
         for store in stores:
@@ -486,27 +511,35 @@ class RoundRetention:
         guarded = self._guarded_strong_reads(
             key, restart_key, proposed_restart, context_keys, restart_read_keys
         )
-        for store in self._strong_context_stores():
+        for store in self._strong_context_stores(key[0]):
             store.register_hold(guard, guarded)
         return guard
 
-    def release_strong_hold_if_live(self, owner: decoding_records.Hold) -> None:
-        """Drop an entry edge hold, in both stores, when it is registered."""
-        for store in self._strong_context_stores():
+    def release_strong_hold_if_live(
+        self,
+        owner: decoding_records.Hold,
+        stream_id: Any,  # an opaque identity
+    ) -> None:
+        """Drop the stream's entry edge hold, in both stores, if registered."""
+        for store in self._strong_context_stores(stream_id):
             self.release_hold_if_live(owner, store)
 
     def release_potential_strong(self, key: tuple) -> None:
         """The window is final: no edge re-decodes it, so each read ends."""
-        for target in self._edge_targets():
-            potential = decoding_records.PotentialStrong(key, target)
-            for store in self._strong_context_stores(target):
+        for edge in self._chain_of(key[0]):
+            potential = decoding_records.PotentialStrong(key, edge.target)
+            for store in self._held_stores(edge):
                 self.release_hold_if_live(potential, store)
 
     def landing_stores(self) -> tuple:
-        """Each store a region lands in: every edge's, else the strong one."""
+        """Each store a region lands in, once: every edge's, else the strong.
+
+        Pools that share a target share the store it reads.
+        """
         stores = []
-        for _carried_from, landed_in in self.stores_by_edge.values():
-            stores.append(landed_in)
+        for edge in self.edge_by_source.values():
+            if not _holds_store(stores, edge.landed_in):
+                stores.append(edge.landed_in)
         if not stores and self.strong_store is not None:
             stores.append(self.strong_store)
         return tuple(stores)
@@ -525,21 +558,20 @@ class RoundRetention:
         the strong window too, and the absorbed window is never decoded,
         so no reader of it is left.
         """
-        entry_target = self._entry_target()
-        absorbed = decoding_records.PotentialStrong(key, entry_target)
-        absorbed_identities = self.strong_store.hold_round_identities(absorbed)
-        replacement_identities = self.strong_store.hold_round_identities(
-            replacement
-        )
+        entry_edge = self._edge_into(key[0])
+        landed_in = entry_edge.landed_in
+        absorbed = decoding_records.PotentialStrong(key, entry_edge.target)
+        absorbed_identities = landed_in.hold_round_identities(absorbed)
+        replacement_identities = landed_in.hold_round_identities(replacement)
         needed = _from_the_first_round_on(
             absorbed_identities, replacement_identities
         )
         replacements = set(replacement_identities)
         if restart_key is not None:
             restart_potential = decoding_records.PotentialStrong(
-                restart_key, entry_target
+                restart_key, entry_edge.target
             )
-            restart_identities = self.strong_store.hold_round_identities(
+            restart_identities = landed_in.hold_round_identities(
                 restart_potential
             )
             replacements.update(restart_identities)
@@ -550,7 +582,7 @@ class RoundRetention:
                 f"absorbing window {key}: rounds {listed} are held by "
                 f"neither the strong request nor the restart window"
             )
-        for store in self._strong_context_stores():
+        for store in self._strong_context_stores(key[0]):
             store.release_hold(absorbed)
         # an absorbed window is never decoded, so no edge past the entry
         # re-decodes it either
@@ -598,19 +630,18 @@ class RoundRetention:
         restart_read_keys,
     ) -> list:
         """Every room-side round the plan must keep while it lands."""
-        entry_target = self._entry_target()
+        entry_edge = self._edge_into(key[0])
+        landed_in = entry_edge.landed_in
         escalated_potential = decoding_records.PotentialStrong(
-            key, entry_target
+            key, entry_edge.target
         )
         restart_potential = decoding_records.PotentialStrong(
-            restart_key, entry_target
+            restart_key, entry_edge.target
         )
-        escalated_identities = self.strong_store.hold_round_identities(
+        escalated_identities = landed_in.hold_round_identities(
             escalated_potential
         )
-        restart_identities = self.strong_store.hold_round_identities(
-            restart_potential
-        )
+        restart_identities = landed_in.hold_round_identities(restart_potential)
         guarded = list(escalated_identities)
         guarded += list(restart_identities)
         guarded += list(context_keys)
@@ -622,13 +653,14 @@ class RoundRetention:
 
     def require_strong_retained(
         self,
+        stream_id: Any,  # an opaque identity
         round_keys: list,
         purpose: str,
         target: Optional[window_records.PoolId] = None,
     ) -> None:
         """Every listed round must still sit in the edge's landing store."""
-        _carried_from, landed_in = self._edge_stores(target)
-        self.require_retained(round_keys, purpose, landed_in)
+        edge = self._edge_into(stream_id, target)
+        self.require_retained(round_keys, purpose, edge.landed_in)
 
     def require_retained(
         self,
@@ -670,9 +702,9 @@ class RoundRetention:
         )
         later_reads = decoding_records.LaterStreamReads(window.stream_id)
         if not read_keys:
-            self.release_strong_hold_if_live(later_reads)
+            self.release_strong_hold_if_live(later_reads, window.stream_id)
             return
-        for store in self._strong_context_stores():
+        for store in self._strong_context_stores(window.stream_id):
             _hold_or_replace(store, later_reads, read_keys)
 
     def _repoint_reads(
@@ -681,10 +713,11 @@ class RoundRetention:
         """Move the window's potential strong, read and restart holds."""
         strong_context = self.strong_context_read_keys(window, primary_reads)
         held = primary_reads + strong_context
-        for target in self._edge_targets():
-            potential = decoding_records.PotentialStrong(key, target)
-            for store in self._strong_context_stores(target):
+        for edge in self._chain_of(window.stream_id):
+            potential = decoding_records.PotentialStrong(key, edge.target)
+            for store in self._held_stores(edge):
                 _replace_if_live(store, potential, held)
+
         reads = decoding_records.WindowReads(key)
         if self.primary_store.has_hold(reads):
             self.primary_store.replace_hold(reads, primary_reads)
@@ -716,38 +749,74 @@ class RoundRetention:
         return round_keys
 
     def _strong_context_stores(
-        self, target: Optional[window_records.PoolId] = None
+        self,
+        stream_id: Any,  # an opaque identity
+        target: Optional[window_records.PoolId] = None,
     ) -> tuple:
-        """The stores that keep an edge's strong context: both, or none."""
-        if self.is_strong_context_retained:
-            return self._edge_stores(target)
-        return ()
+        """The two stores of the edge into target on the stream's chain.
 
-    def _edge_stores(
-        self, target: Optional[window_records.PoolId] = None
+        target None is the chain's first edge. None when the run keeps
+        no strong context, or the stream's entry pool escalates nowhere.
+        """
+        if not self.is_strong_context_retained:
+            return ()
+        if target is None and not self._chain_of(stream_id):
+            return ()
+        edge = self._edge_into(stream_id, target)
+        return self._held_stores(edge)
+
+    def _held_stores(self, edge: RetainedEdge) -> tuple:
+        """The edge's two stores when the run keeps strong context."""
+        if not self.is_strong_context_retained:
+            return ()
+        return (edge.carried_from, edge.landed_in)
+
+    def _chain_of(
+        self,
+        stream_id: Any,  # an opaque identity
     ) -> tuple:
-        """The stores an edge carries from and lands in; else the entry's."""
-        entry_stores = (self.weak_store, self.strong_store)
-        return self.stores_by_edge.get(target, entry_stores)
+        """The edges the stream's windows may climb, from its entry pool.
 
-    def _edge_targets(self) -> tuple:
-        """Each edge's target in graph order; else the strong pool."""
-        if self.stores_by_edge:
-            return tuple(self.stores_by_edge)
-        return (window_records.STRONG_POOL_ID,)
+        The router owns which entry pool decodes the stream; each pool
+        on from it leaves by at most one edge, so the chain is a line.
+        """
+        if not self.edge_by_source:
+            return ()
+        pool = self.router.pool_of_stream(stream_id)
+        chain = []
+        edge = self.edge_by_source.get(pool)
+        while edge is not None:
+            chain.append(edge)
+            edge = self.edge_by_source.get(edge.target)
+        return tuple(chain)
 
-    def _entry_target(self) -> window_records.PoolId:
-        """The entry edge's target, whose double window absorbs windows."""
-        targets = self._edge_targets()
-        return targets[0]
+    def _edge_into(
+        self,
+        stream_id: Any,  # an opaque identity
+        target: Optional[window_records.PoolId] = None,
+    ) -> RetainedEdge:
+        """The edge into target on the stream's chain; None is the first.
 
-    def _hold_on_every_edge(
+        An escalation side asks only about the edges its windows climb,
+        so a chain with no such edge is a broken contract.
+        """
+        chain = self._chain_of(stream_id)
+        for edge in chain:
+            if target is None or edge.target == target:
+                return edge
+        raise RuntimeError(
+            f"stream {stream_id}'s windows climb no edge into {target}; "
+            f"its chain reaches {[edge.target for edge in chain]}"
+        )
+
+    def _hold_on_the_chain(
         self, potential: decoding_records.PotentialStrong, held
     ) -> None:
-        """Register the window's potential read on each edge's stores."""
-        for target in self._edge_targets():
-            owner = dataclasses.replace(potential, target=target)
-            for store in self._strong_context_stores(target):
+        """Register the window's potential read on each edge it may climb."""
+        stream_id = potential.window_key[0]
+        for edge in self._chain_of(stream_id):
+            owner = dataclasses.replace(potential, target=edge.target)
+            for store in self._held_stores(edge):
                 store.register_hold(owner, held)
 
     def _arrivals_counted_for(self, store):
@@ -784,33 +853,15 @@ class RoundRetention:
         until the verdict or the window's final commit, as it names a
         weak window's own.
         """
-        next_target = self._next_target(job.request_key.pool)
-        if next_target is None:
+        next_edge = self.edge_by_source.get(job.request_key.pool)
+        if next_edge is None:
             return
         potential = decoding_records.PotentialStrong(
-            job.strong_decode_for, next_target
+            job.strong_decode_for, next_edge.target
         )
         identities = round_identities_of(job.payloads)
-        for store in self._strong_context_stores(next_target):
+        for store in self._held_stores(next_edge):
             _replace_or_register(store, potential, identities)
-
-    def _next_target(
-        self, pool: window_records.PoolId
-    ) -> Optional[window_records.PoolId]:
-        """The target of the edge that leaves pool; None when none does."""
-        stores = self.stores_by_edge.get(pool)
-        if stores is None:
-            return None
-        _carried_from, pool_store = stores
-        for target, edge_stores in self.stores_by_edge.items():
-            if edge_stores[0] is pool_store:
-                return target
-        return None
-
-    def _release_strong_input(self, owner, target) -> None:
-        """The strong input landed in its unit: both stores let it go."""
-        for store in self._strong_context_stores(target):
-            store.release_hold(owner)
 
 
 class SharedInputHold:
@@ -840,6 +891,20 @@ def round_identities_of(payloads: list) -> tuple:
     for fragment in payloads:
         identities[(fragment.stream_id, fragment.round_index)] = None
     return tuple(identities)
+
+
+def _release_from_each(stores: tuple, owner) -> None:
+    """The strong input landed in its unit: both stores let it go."""
+    for store in stores:
+        store.release_hold(owner)
+
+
+def _holds_store(stores: list, store) -> bool:
+    """Whether this very store is listed; stores compare by identity."""
+    for listed in stores:
+        if listed is store:
+            return True
+    return False
 
 
 def _stored_through(tracker, store, stream_id) -> int:

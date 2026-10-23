@@ -5,15 +5,16 @@ and edge goes by its part's name, and each hop by the parts at its
 ends, <source part>_to_<target part>, with its role
 (records/routes.py HopRole): the wire's own link prices it, else the
 machine's fabric rule, on the reference card's payload rule for its
-role. The pools form a tree: one pool decodes
-the planner's windows, the entry, and every other pool is the target of
-one switching part, an escalate edge, whose results come from another
-pool. They are laid out entry first, then each edge's target in the
-order the switching parts are written.
+role. An entry pool decodes the planner's windows: the one pool no
+edge reaches, or each pool a router feeds. Every other pool is the
+target of one or more switching parts, escalate edges, each from
+another pool, and each pool leaves by at most one edge, so a window
+climbs one line from its entry pool. They are laid out entries first,
+then each edge's target, once, in the order the edges are reached.
 
 The entry pool reads the store the controller writes; an edge's target
 reads its own store, which takes an escalated window's rounds from the
-store its source pool reads. A router between the entry store and
+store each source pool reads. A router between the entry store and
 several pools makes each of them an entry pool: they share that store,
 each over a hop of its own, and the first wired is the entry
 (windows/routers.py). Two pools no edge joins trade boundaries on a hop
@@ -174,7 +175,6 @@ def _shape(machine: graph.Machine) -> _Shape:
         return _Shape(machine, (), (), {}, ())
     entries = _entry_pools(machine, pools, edges, router)
     ordered_pools, ordered_edges = _from_the_entries(entries, pools, edges)
-    _refuse_an_edge_from_a_later_entry(entries, ordered_edges)
     store_by_pool = {}
     for pool in ordered_pools:
         store_by_pool[pool.name] = _store_read_by(machine, pool)
@@ -290,30 +290,25 @@ def _refuse_entries_the_router_misses(entries: list, routed: tuple) -> None:
 
 
 def _from_the_entries(entries: tuple, pools: list, edges: list) -> tuple:
-    """The pools and edges from the entries, each edge in written order."""
+    """The pools from the entries, breadth first, each pool and edge once.
+
+    A target several edges reach, a strong pool shared by weak ones, is
+    laid out where the first of them reaches it.
+    """
     ordered_pools = list(entries)
     ordered_edges = []
     for pool in ordered_pools:
         leaving = _edges_leaving(pool, edges)
         ordered_edges.extend(leaving)
         for edge in leaving:
-            ordered_pools.append(edge.target)
+            _add_once(ordered_pools, edge.target)
     _refuse_the_unreached(entries[0], pools, ordered_pools)
     return tuple(ordered_pools), tuple(ordered_edges)
 
 
-def _refuse_an_edge_from_a_later_entry(entries: tuple, edges: tuple) -> None:
-    """Only the first entry pool escalates yet."""
-    later = {pool.name for pool in entries[1:]}
-    for edge in edges:
-        if edge.source.name not in later:
-            continue
-        raise graph.GraphError(
-            f"{edge.part.name} escalates from {edge.source.name}, an entry "
-            "pool past the first: an escalate edge from such a pool is not "
-            "implemented yet, its boundaries being the first's; "
-            f"{refusals.REFUSALS}"
-        )
+def _add_once(ordered_pools: list, pool: graph.Part) -> None:
+    if pool not in ordered_pools:
+        ordered_pools.append(pool)
 
 
 def _edges_leaving(pool: graph.Part, edges: list) -> list:
@@ -465,14 +460,12 @@ def _store_plan(shape: _Shape, pool: graph.Part) -> layout_module.StorePlan:
     intake_shape = _intake_shape(shape, pool)
     controller_name = _controller_name(shape.machine)
     write_hop = _hop(controller_name, store.name)
-    controller_write = receiver_module.Hop(write_hop, CONTROLLER_LABEL)
-    escalation = _escalation_hop(shape, pool)
+    controller_write = transfer_records.StoreHop(write_hop, CONTROLLER_LABEL)
     intake = receiver_module.StoreIntake(
         name=store.name,
         seat=store.name,
         shape=intake_shape,
         controller_write=controller_write,
-        escalation=escalation,
     )
     pool_settings = pool.settings
     read_hop = _hop(store.name, pool.name)
@@ -506,22 +499,6 @@ def _with_other_readers(
         )
         readers.append(reader)
     return dataclasses.replace(entry_store, other_readers=tuple(readers))
-
-
-def _escalation_hop(
-    shape: _Shape, pool: graph.Part
-) -> Optional[receiver_module.Hop]:
-    """The hop an escalated region lands in a target's store over.
-
-    The region is carried from the store its source pool reads.
-    """
-    entering = [edge for edge in shape.edges if edge.target.name == pool.name]
-    if not entering:
-        return None
-    edge = entering[0]
-    carried_from = shape.store_by_pool[edge.source.name]
-    forward = _hop(edge.source.name, pool.name)
-    return receiver_module.Hop(forward, carried_from.name)
 
 
 def _edge_plan(

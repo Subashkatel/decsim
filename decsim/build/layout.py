@@ -148,6 +148,18 @@ class Layout:
         """Every pool that decodes the planner's windows, first first."""
         return self.pools[: self.entry_count]
 
+    def is_entry(self, pool: window_records.PoolId) -> bool:
+        """Whether the pool decodes the planner's windows first."""
+        entry_ids = [plan.pool for plan in self.entry_pools]
+        return pool in entry_ids
+
+    def edge_leaving(self, pool: window_records.PoolId) -> Optional[EdgePlan]:
+        """The edge a pool escalates on; None for a pool that keeps all."""
+        for edge in self.edges:
+            if edge.hops.source == pool:
+                return edge
+        return None
+
     def pool(self, pool: window_records.PoolId) -> PoolPlan:
         """The plan of one pool."""
         for plan in self.pools:
@@ -237,18 +249,23 @@ class Layout:
     def entry_switching(
         self,
     ) -> Optional[escalation_settings.SwitchingSettings]:
-        """The entry edge's switching record, at the task; None for none."""
+        """The first entry edge's switching record; None for none.
+
+        Every edge out of an entry pool agrees with it on what the plan
+        and a shot's record read (build/escalation.py).
+        """
         if not self.edges:
             return None
         entry_edge = self.edges[0]
         return entry_edge.settings
 
-    def entry_escalation_hop(self) -> Optional[str]:
-        """The hop the entry edge escalates a window over; None for none."""
-        if not self.edges:
-            return None
-        entry_edge = self.edges[0]
-        return entry_edge.hops.forward
+    def entry_escalation_hops(self) -> tuple:
+        """The hop each edge out of an entry pool escalates a window over."""
+        hops = []
+        for edge in self.edges:
+            if self.is_entry(edge.hops.source):
+                hops.append(edge.hops.forward)
+        return tuple(hops)
 
     def statistics_path_by_pool(self) -> dict:
         """The path each pool's statistics sit at."""
@@ -273,10 +290,7 @@ class Layout:
         edge_hops = []
         for edge in self.edges:
             edge_hops.append(edge.hops)
-        entry = self.entry_pool
-        return routes_build.generated(
-            tuple(pool_hops), tuple(edge_hops), entry.pool
-        )
+        return routes_build.generated(tuple(pool_hops), tuple(edge_hops))
 
     def formation_paths(self) -> tuple:
         """The seats a round passes from the controller to each pool.
@@ -284,21 +298,25 @@ class Layout:
         Each entry pool reads the store the controller writes; an edge's
         target reads its own store, which takes an escalated window's
         rounds from the store the edge carries them from, so a round
-        reaches a pool down a chain through every store before it.
+        reaches a pool down its entry pool's chain through every store
+        before it. A target several chains share is reached once down
+        each, and two entry pools that read one store give one path.
         """
-        stores_by_pool = {}
         paths = []
         for entry in self.entry_pools:
-            entry_stores = (CONTROLLER_SEAT, entry.store)
-            stores_by_pool[entry.pool] = entry_stores
-            entry_path = (*entry_stores, entry.names.seat)
-            paths.append(entry_path)
-        for edge in self.edges:
-            hops = edge.hops
-            target = self.pool(hops.target)
-            carried = stores_by_pool[hops.source]
-            stores = (*carried, target.store)
-            stores_by_pool[hops.target] = stores
-            path = (*stores, target.names.seat)
-            paths.append(path)
+            stores = (CONTROLLER_SEAT, entry.store)
+            _add_once(paths, (*stores, entry.names.seat))
+            edge = self.edge_leaving(entry.pool)
+            while edge is not None:
+                target = self.pool(edge.hops.target)
+                stores = (*stores, target.store)
+                _add_once(paths, (*stores, target.names.seat))
+                edge = self.edge_leaving(target.pool)
         return tuple(paths)
+
+
+def _add_once(paths: list, path: tuple) -> None:
+    """Append the path unless it is already listed."""
+    if path in paths:
+        return
+    paths.append(path)

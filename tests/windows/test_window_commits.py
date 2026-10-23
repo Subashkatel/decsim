@@ -24,6 +24,7 @@ import decsim.windows.revision_rules as revision_rules
 import decsim.windows.window_commits as window_commits
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
+import tests.one_entry as one_entry
 
 
 def _reference_layout():
@@ -192,12 +193,14 @@ class _Fixture:
         committer.decoder_output = decoder_output
         committer.results = self.results
         committer.edges = edges
+        committer.router = one_entry.router()
         self.committer = committer
         self.verdict = window_commits.WindowVerdict(
             self.engine, window_records.WEAK_POOL_ID
         )
         self.verdict.planner = planner
         self.verdict.tracker = tracker
+        self.verdict.router = one_entry.router()
         self.verdict.edges = edges
         self.verdict.decode_queue = self.decode_queue
         self.verdict.committer = committer

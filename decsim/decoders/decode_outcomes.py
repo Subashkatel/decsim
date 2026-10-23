@@ -105,11 +105,12 @@ class DecodeOutcomes:
         by window).
         """
         self.manager.strong_requests.finish_service(job)
+        # a strong decode runs on a pool an edge targets, and each such
+        # pool's manager has a learner (build/escalation.py)
         learner = self.manager.strong_result_learner
         for held in deliveries:
-            if learner is not None:
-                window_key = held.request_job.strong_decode_for
-                learner.learn_from_strong_result(window_key, held.result)
+            window_key = held.request_job.strong_decode_for
+            learner.learn_from_strong_result(window_key, held.result)
         for held in deliveries:
             self.complete_strong(held)
 

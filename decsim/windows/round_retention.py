@@ -844,9 +844,7 @@ class RoundRetention:
         return self._held_stores(edge)
 
     def _held_stores(self, edge: RetainedEdge) -> tuple:
-        """The edge's two stores when the run keeps strong context."""
-        if not self.is_strong_context_retained:
-            return ()
+        """The edge's two stores; a run with an edge keeps strong context."""
         return (edge.carried_from, edge.landed_in)
 
     def _chain_of(

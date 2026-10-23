@@ -59,7 +59,8 @@ RANDOM_GRAPH_SEED = decoder_corpus.RANDOM_GRAPH_SEED
 RANDOM_GRAPH_COUNT = decoder_corpus.RANDOM_GRAPH_COUNT
 
 # the decoder corpus's points, with the shots a Python walk of each
-# point affords: one distance nine window costs the oracle seconds
+# point affords: a distance seven window costs the oracle a second and
+# a distance nine one five
 CORPUS_POINTS = (
     (3, 0.001, 40),
     (3, 0.005, 40),
@@ -67,8 +68,8 @@ CORPUS_POINTS = (
     (5, 0.001, 40),
     (5, 0.005, 40),
     (5, 0.01, 40),
-    (7, 0.005, 8),
-    (9, 0.005, 8),
+    (7, 0.005, 4),
+    (9, 0.005, 2),
 )
 
 SANITIZED_GRAPH_COUNT = 40

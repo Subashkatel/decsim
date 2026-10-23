@@ -97,8 +97,9 @@ A maker that runs elsewhere writes its two outputs to disk, and
 
 ```python
 operations_path = pathlib.Path("merge.json")
-# a finite circuit with each measurement index's round, or
-# fragments_path, a folder of the four live fragments
+# a finite circuit with each measurement index's round (left out when
+# its DETECTOR time coordinates give the rounds), or fragments_path, a
+# folder of the four live fragments
 circuit_path = pathlib.Path("history.stim")
 measurement_rounds_path = pathlib.Path("rounds.json")
 workload = workload_files.read_workload(
@@ -130,7 +131,10 @@ MEASURE, INJECT or GENERIC),
 `circuit` (the operation's own
 `.stim`, relative to the operations file). A key left out takes the
 default of `records/program.py` `Operation`. `measurement_rounds` maps
-each measurement index, as a string, to its one-based round. A
+each measurement index, as a string, to its one-based round; without
+it, each measurement takes the round its DETECTOR group announces, the
+time coordinate plus one, and a circuit with an untimed detector is
+refused. A
 `fragments` folder holds `first_round.stim`, `repeated_round.stim`,
 `final_round.stim`, `single_round.stim` and `physical.json`, which holds
 `round_period_microseconds`, the period the fragments' noise was built
@@ -184,6 +188,40 @@ You write the operations; decsim fills in what follows from them
   region in which the stream's patches keep measuring while the
   operations after the last segment wait.
 
+## Decode a lattice-surgery circuit on real syndromes
+
+Run the whole circuit as one operation. A tqec circuit (tqec 0.2.0,
+Apache-2.0) times its detectors by coordinate, so it needs no rounds
+file. The operations file holds one operation over every patch:
+
+```json
+{
+  "schema": "decsim.ops/1",
+  "operations": [{"id": 1, "name": "cnot", "patches": [0, 1, 2]}]
+}
+```
+
+and the run file reads it beside the circuit:
+
+```python
+workload = workload_files.read_workload(
+    pathlib.Path("cnot.json"), circuit_path=pathlib.Path("cnot.stim")
+)
+machine = machines.weak_baseline(3, 0.002, 1.0)
+machine = machine.with_held(
+    "workload", workload_settings.WorkloadSettings.running(workload)
+)
+```
+
+`decsim run` then writes each shot's `logical_failure` to `shots.csv`:
+the windows slide over the whole program's rounds, and a shot fails
+when any of the circuit's observables is wrong. Beside whole-circuit
+PyMatching on the same 4000 shots, with sliding windows, decsim's
+prediction is the same on every shot of a tqec ZZ merge and of a
+T teleport's Clifford part, and on 3999 of a CNOT (364 failures
+against 363). With one window over every round it is the same shot
+for shot (tests/frontends/test_circuit_frontend.py).
+
 ## Limits
 
 decsim never builds a merged circuit. For real syndromes across a
@@ -191,3 +229,7 @@ merge, the maker supplies one circuit for the whole history and gives
 every operation that emits detector data its round range in it, a
 `stream_id` and a `stream_offset`. A circuit shared by several
 operations without those ranges is refused with a sentence.
+
+Not supported yet on real syndromes: a decode stream per patch (patch
+streams are timing only), a wait on a decode inside a finite circuit,
+whose timeline is fixed, and switching on region windows.

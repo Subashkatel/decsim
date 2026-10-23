@@ -7,6 +7,9 @@ and Toshio's N_window weak decoders over a single strong one
 fpga_b, both on the chip, and both escalate every window to strong on
 the host. Each answer that goes back through the weak chip goes to the
 chip that asked.
+
+On real syndromes (tests/patch_pools.py) a shared strong pool is a
+question of where and when a window decodes, never of its answer.
 """
 
 import dataclasses
@@ -26,6 +29,7 @@ import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.escalation.test_switching_mode as switching_mode
+import tests.patch_pools as patch_pools
 
 
 def _shared_strong(
@@ -325,6 +329,34 @@ def test_both_pools_windows_start_deep_beside_the_shared_strong_decode():
     }
 
 
+def test_a_shared_strong_pool_answers_as_one_weak_and_strong_pair():
+    one_pair = patch_pools.one_pair()
+    shared = patch_pools.shared_strong_per_patch()
+    one_pair_shot = patch_pools.shot(one_pair)
+    shared_shot = patch_pools.shot(shared)
+
+    shared_answers = patch_pools.answers(shared_shot)
+    one_pair_answers = patch_pools.answers(one_pair_shot)
+
+    committing = patch_pools.committing_pools(shared_shot)
+    assert committing == {"weak", "w1", "w2", "strong"}
+    assert shared_answers == one_pair_answers
+
+
+def test_a_shared_strong_pool_answers_as_a_strong_pool_per_patch():
+    shared = patch_pools.shared_strong_per_patch()
+    apart = _strong_pool_per_patch()
+    shared_shot = patch_pools.shot(shared)
+    apart_shot = patch_pools.shot(apart)
+
+    shared_answers = patch_pools.answers(shared_shot)
+    apart_answers = patch_pools.answers(apart_shot)
+
+    committing = patch_pools.committing_pools(apart_shot)
+    assert committing == {"weak", "w1", "w2", "strong", "s1", "s2"}
+    assert shared_answers == apart_answers
+
+
 def _deep_started_during_strong(machine) -> dict:
     """Each window's: did deep's decode start before strong's ended."""
     starts = {}
@@ -344,3 +376,21 @@ def _deep_started_during_strong(machine) -> dict:
         strong_end = ends[("strong", stream_id, window_id)]
         started[(stream_id, window_id)] = deep_start < strong_end
     return started
+
+
+def _strong_pool_per_patch():
+    """A weak pool per patch, each escalating to a strong pool of its own."""
+    one_pair = patch_pools.one_pair()
+    routed = patch_pools.pool_per_patch(one_pair)
+    slot = routed.part(machines.SWITCHING)
+    strong = routed.part(machines.STRONG_POOL)
+    for index in (1, 2):
+        routed = machines.with_escalation(
+            routed,
+            f"w{index}",
+            f"s{index}",
+            strong.settings,
+            slot.settings,
+            switching_name=f"w{index}_to_s{index}",
+        )
+    return routed

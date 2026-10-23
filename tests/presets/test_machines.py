@@ -10,7 +10,9 @@ strong window's shape (window_settings.switching_windows).
 A router, or a router before the stores, that names only the entry pool
 runs shot for shot as the machine without it: the referent is the
 regression suite's whole-shot digest (tests/regression), recorded
-before a router could sit in front of a pool.
+before a router could sit in front of a pool. With a pool and a store
+per patch, every window still reads the rounds it read from the one
+store, so it answers as it did (tests/patch_pools.py).
 """
 
 import dataclasses
@@ -31,6 +33,7 @@ import tests.controller.test_patch_streams as patch_stream_tests
 import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
 import tests.frontends.test_patch_lives as patch_lives_tests
+import tests.patch_pools as patch_pools
 import tests.regression.test_shot_results as regression
 import tests.topology.test_graph_layout as layout_tests
 
@@ -287,6 +290,25 @@ def test_a_store_per_pool_sends_the_factorys_decodes_to_the_pool_named():
 
     router = stored.part(machines.ROUTER)
     assert router.settings.factory_pool == "fpga_b"
+
+
+def test_a_store_per_pool_answers_every_window_as_one_shared_store_does():
+    """Three patches escalating to one strong pool, its rounds carried.
+
+    An escalated window's strong decode reads the rounds kept in the
+    store of the pool that escalated it, here one of three stores.
+    """
+    shared_store = patch_pools.shared_strong_per_patch()
+    store_per_pool = patch_pools.shared_strong_per_patch(True)
+    shared_shot = patch_pools.shot(shared_store)
+    per_pool_shot = patch_pools.shot(store_per_pool)
+
+    shared_answers = patch_pools.answers(shared_shot)
+    per_pool_answers = patch_pools.answers(per_pool_shot)
+
+    committing = patch_pools.committing_pools(per_pool_shot)
+    assert committing == {"weak", "w1", "w2", "strong"}
+    assert per_pool_answers == shared_answers
 
 
 def _routed(shape):

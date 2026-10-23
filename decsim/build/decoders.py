@@ -66,6 +66,8 @@ class Decoders:
     pools: tuple
     managers: tuple
     strong_requests: strong_requests_module.StrongRequests
+    # (plan, slots) of each shared device
+    devices: tuple = ()
 
     @classmethod
     def build(
@@ -75,10 +77,13 @@ class Decoders:
         engine: engine_module.Engine,
         pools: tuple,
         target_by_source: dict,
+        devices: tuple = (),
     ) -> "Decoders":
         """Each manager over its pool, bound to its pool's unit.
 
-        target_by_source names the pool each source escalates to.
+        target_by_source names the pool each source escalates to;
+        devices are the layout's DevicePlans, whose slots every pool at
+        the device's site shares.
         """
         clocked_manager = config.with_machine_clock(
             manager_settings, machine_clock
@@ -95,10 +100,13 @@ class Decoders:
             manager.decoder = pool.unit
             manager.strong_requests = strong_requests
             managers.append(manager)
+        built_devices = _built_devices(devices, engine)
+        _place_on_devices(pools, managers, built_devices)
         return cls(
             pools=pools,
             managers=tuple(managers),
             strong_requests=strong_requests,
+            devices=built_devices,
         )
 
     def read_program(self, operations: tuple) -> None:
@@ -151,6 +159,8 @@ class Decoders:
             queues.append(manager.queue)
         over_pools = run_statistics.group(MANAGERS_PATH, MANAGERS_STATISTICS)
         _count_the_jobs_waiting_over_pools(over_pools.queued, queues)
+        for plan, slots in self.devices:
+            run_statistics.attach(slots, plan.name)
 
     def start(self) -> None:
         """Let each manager hear its units before any window model exists."""
@@ -161,6 +171,8 @@ class Decoders:
         """Every decode each manager admitted has finished."""
         for manager in self.managers:
             manager.check_decode_work_settled()
+        for _plan, slots in self.devices:
+            slots.check_settled()
 
     def seed_roots(self) -> tuple:
         """This part's stochastic owners, each by the name its seed hashes.
@@ -262,6 +274,14 @@ def refuse_timing_only_redo(
             )
 
 
+def batches_each_member(layout: layout_module.Layout) -> bool:
+    """Whether any pool decodes its merged batches member by member."""
+    for plan in layout.pools:
+        if _batching_of(plan) is not None:
+            return True
+    return False
+
+
 def _returns_values(unit: ports.Decoder) -> bool:
     """Whether the unit returns logical values.
 
@@ -270,14 +290,6 @@ def _returns_values(unit: ports.Decoder) -> bool:
     """
     requirement = unit.fault_model_requirement
     return bool(requirement.representations)
-
-
-def batches_each_member(layout: layout_module.Layout) -> bool:
-    """Whether any pool decodes its merged batches member by member."""
-    for plan in layout.pools:
-        if _batching_of(plan) is not None:
-            return True
-    return False
 
 
 def _pool(
@@ -518,3 +530,23 @@ def _note_jobs_waiting(queued, queues: list, tick: int, depth: int) -> None:
     depths = [queue.statistics.queued.level for queue in queues]
     total = sum(depths)
     queued.set(total)
+
+
+def _built_devices(devices: tuple, engine: engine_module.Engine) -> tuple:
+    """(plan, slots) of each device the layout holds."""
+    built = []
+    for plan in devices:
+        slots = plan.settings.build(engine)
+        built.append((plan, slots))
+    return tuple(built)
+
+
+def _place_on_devices(pools: tuple, managers: list, devices: tuple) -> None:
+    """Each pool at a device's site runs its decodes in that device's slots."""
+    slots_by_site = {}
+    for plan, slots in devices:
+        slots_by_site[plan.site] = slots
+    for pool, manager in zip(pools, managers, strict=True):
+        slots = slots_by_site.get(pool.plan.hops.site)
+        if slots is not None:
+            manager.place_on(slots)

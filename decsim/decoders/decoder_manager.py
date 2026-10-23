@@ -98,6 +98,10 @@ class DecoderManager:
         )
         self.outcomes = decode_outcomes.DecodeOutcomes(engine, self)
 
+    def place_on(self, device: ports.ExecutionSlots) -> None:
+        """The pool's decodes run in the slots of a device it shares."""
+        self.service.device = device
+
     def attach_statistics(
         self, run_statistics: statistics_registry.Registry, path: str
     ) -> None:

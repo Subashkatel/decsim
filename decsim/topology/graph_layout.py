@@ -77,6 +77,7 @@ _POOL_KIND = "decoder_pool"
 _STORE_KIND = "syndrome_buffer"
 _SWITCHING_KIND = "switching"
 _ROUTER_KIND = "router"
+_DEVICE_KIND = "device"
 
 
 def layout_of(machine: graph.Machine) -> layout_module.Layout:
@@ -112,6 +113,7 @@ def layout_of(machine: graph.Machine) -> layout_module.Layout:
         edges.append(edge_plan)
     router = shape.router_settings()
     entry_count = len(shape.entries)
+    devices = _devices(machine, shape)
     return layout_module.Layout(
         tuple(pools),
         tuple(stores),
@@ -120,6 +122,44 @@ def layout_of(machine: graph.Machine) -> layout_module.Layout:
         router=router,
         entry_count=entry_count,
         frame_site=frame_site,
+        devices=devices,
+    )
+
+
+def _devices(machine: graph.Machine, shape: "_Shape") -> tuple:
+    """Each device part, at its site: one per site, and a pool there."""
+    pool_sites = {_site(pool) for pool in shape.pools}
+    plans = []
+    sites = []
+    for part in machine.parts_of(_DEVICE_KIND):
+        site = _site(part)
+        _refuse_a_second_device_at(site, sites, part)
+        _refuse_a_device_with_no_pool(site, pool_sites, part)
+        sites.append(site)
+        plan = layout_module.DevicePlan(part.name, site, part.settings)
+        plans.append(plan)
+    return tuple(plans)
+
+
+def _refuse_a_second_device_at(
+    site: str, sites: list, part: graph.Part
+) -> None:
+    if site not in sites:
+        return
+    raise graph.GraphError(
+        f"device {part.name} sits at {site}, where another device already "
+        "sits: a site's pools share one device's slots"
+    )
+
+
+def _refuse_a_device_with_no_pool(
+    site: str, pool_sites: set, part: graph.Part
+) -> None:
+    if site in pool_sites:
+        return
+    raise graph.GraphError(
+        f"device {part.name} sits at {site}, where no pool sits: a device's "
+        "slots are shared by the pools placed at its site"
     )
 
 

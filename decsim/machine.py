@@ -192,6 +192,7 @@ class Machine:
             engine,
             pools,
             target_by_source,
+            layout.devices,
         )
         return cls.assemble(
             graph,

@@ -17,6 +17,10 @@ belief matching on a host unit. The parts share their names, so
                        pool, a chain grown one edge at a time
     with_router        a machine whose entry store feeds a router to
                        its entry pool and more, a decoder per patch
+    with_store_per_pool  a machine whose router sits before the stores,
+                       one per entry pool
+    with_device        a machine whose pools at a site share a device's
+                       execution slots
     memory_workload    one memory shot of Stim's rotated surface code
 """
 
@@ -27,6 +31,7 @@ import decsim.config as config
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.belief_matching.decoder as belief_matching
+import decsim.decoders.execution_slots as execution_slots
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as detection_event_settings
@@ -463,6 +468,19 @@ def with_store_per_pool(
             correction_wire = graph.Wire(f"{name}.corrections", corrections)
             wires.append(correction_wire)
     return grown.with_wires(*wires)
+
+
+def with_device(
+    machine: graph.Machine, name: str, slot_count: int, site: str
+) -> graph.Machine:
+    """The machine with a device at site whose slot_count slots its pools share.
+
+    Every pool placed at site runs its decodes in the device's slots, as
+    decoder replicas share one GPU (decoders/execution_slots.py).
+    """
+    settings = execution_slots.ExecutionSlots.Settings(slot_count)
+    device = graph.Part(name, settings, site)
+    return machine.with_part(device)
 
 
 def memory_workload(

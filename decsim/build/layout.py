@@ -105,6 +105,19 @@ class StoreReader:
 
 
 @dataclasses.dataclass(frozen=True)
+class DevicePlan:
+    """One device: the site it sits at and its execution slots' record.
+
+    Every pool placed at the site runs its decodes in the device's
+    slots (decoders/execution_slots.py); name is its statistics path.
+    """
+
+    name: str
+    site: str
+    settings: Any
+
+
+@dataclasses.dataclass(frozen=True)
 class EdgePlan:
     """One escalate edge: its switching settings and its hops.
 
@@ -131,6 +144,7 @@ class Layout:
     (windows/routers.py). card prices every hop the
     machine rides. frame_site is where the Pauli frame sits, which a
     message to it crosses the wall to reach from any other site.
+    devices are the shared devices, one at most per site.
     """
 
     pools: tuple
@@ -140,6 +154,7 @@ class Layout:
     router: Optional[Any] = None
     entry_count: int = 1
     frame_site: str = route_records.FRIDGE
+    devices: tuple = ()
 
     @property
     def entry_pool(self) -> PoolPlan:

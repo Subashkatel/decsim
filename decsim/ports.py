@@ -401,6 +401,20 @@ class SyndromeRoundReceiver(Protocol):
 
 
 @runtime_checkable
+class ExecutionSlots(Protocol):
+    """The slots a device's decodes run in (decoders/execution_slots.py)."""
+
+    def take(self, job: decoding_records.DecodeJob, start: Callable) -> bool:
+        """A slot now, True; else the decode waits and start runs later."""
+
+    def give_back(self, job: decoding_records.DecodeJob) -> None:
+        """The decode's compute ended; its slot goes to the oldest waiting."""
+
+    def withdraw(self, job: decoding_records.DecodeJob) -> None:
+        """A waiting decode left its unit before it started."""
+
+
+@runtime_checkable
 class StreamRouting(Protocol):
     """Which entry pool decodes a stream (windows/routers.py Router)."""
 

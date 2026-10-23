@@ -21,6 +21,7 @@ import decsim.presets.machines as machines
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
+import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
 import decsim.topology.graph_layout as graph_layout
 import decsim.windows.routers as routers
@@ -306,8 +307,10 @@ def _store_per_pool_chain() -> graph.Machine:
 
 
 def test_a_router_before_the_stores_gives_each_entry_pool_a_written_store():
-    layout = laid_out(_store_per_pool_chain())
-    routed = layout.pool(window_records.PoolId(_ROUTED_POOL))
+    stored = _store_per_pool_chain()
+    layout = laid_out(stored)
+    routed_id = window_records.PoolId(_ROUTED_POOL)
+    routed = layout.pool(routed_id)
     routed_store = layout.store(routed.store)
     entry_stores = layout.entry_stores()
 
@@ -321,11 +324,39 @@ def test_a_router_before_the_stores_gives_each_entry_pool_a_written_store():
 
 def test_a_router_that_feeds_both_a_store_and_a_pool_is_refused():
     stored = _store_per_pool_chain()
-    loose = graph.Part("loose", stored.part(machines.WEAK_POOL).settings)
+    weak = stored.part(machines.WEAK_POOL)
+    loose = graph.Part("loose", weak.settings)
     grown = stored.with_part(loose)
-    mixed = grown.with_wires(
-        graph.Wire(f"{machines.ROUTER}.windows", "loose.rounds")
-    )
+    wire = graph.Wire(f"{machines.ROUTER}.windows", "loose.rounds")
+    mixed = grown.with_wires(wire)
 
     with pytest.raises(graph.GraphError, match="both stores and pools"):
         laid_out(mixed)
+
+
+def test_a_device_shared_by_a_sites_pools_is_laid_out_at_that_site():
+    chain = chain_machine()
+    shared = machines.with_device(chain, "gpu", 2, fabrics.HOST)
+
+    layout = laid_out(shared)
+
+    (device,) = layout.devices
+    assert (device.name, device.site) == ("gpu", fabrics.HOST)
+    assert device.settings.slot_count == 2
+
+
+def test_a_second_device_at_one_site_is_refused():
+    chain = chain_machine()
+    shared = machines.with_device(chain, "gpu", 2, fabrics.HOST)
+    doubled = machines.with_device(shared, "cpu", 4, fabrics.HOST)
+
+    with pytest.raises(graph.GraphError, match="another device already sits"):
+        laid_out(doubled)
+
+
+def test_a_device_at_a_site_with_no_pool_is_refused():
+    chain = chain_machine()
+    lone = machines.with_device(chain, "gpu", 2, "rack")
+
+    with pytest.raises(graph.GraphError, match="where no pool sits"):
+        laid_out(lone)

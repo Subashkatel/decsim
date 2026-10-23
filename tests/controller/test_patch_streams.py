@@ -30,6 +30,7 @@ import decsim.records.identity as identity_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
+import decsim.topology.fabrics as fabrics
 import decsim.windows.coupling_orders as coupling_orders
 import decsim.windows.region_layout as region_layout
 import decsim.windows.release_rules as release_rules
@@ -496,3 +497,58 @@ def _copies_into(transfers: list, store_name: str, stream_json) -> list:
         if span["stream_id"] == stream_json:
             rounds.append(span["round_lo"])
     return rounds
+
+
+# each patch's stream to a pool of its own on the fridge's board
+PER_PATCH = (((0, 0), "weak"), ((0, 1), "fpga_b"), ((1, 0), "fpga_b"))
+
+
+def test_pools_sharing_a_one_slot_device_never_decode_at_once(tmp_path):
+    """Pools weak and fpga_b decode at once alone; one slot serializes them.
+
+    Decoder replicas on one GPU share its compute (CUDA-Q QEC's
+    interchangeable pool of streams; decoders/execution_slots.py).
+    """
+    graph = _t_gate_by_patch(tmp_path, PER_PATCH, (FPGA_B,))
+    shared = machines.with_device(graph, "gpu", 1, fabrics.FRIDGE)
+    alone_machine = machine_module.Machine.build(graph, 0)
+    shared_machine = machine_module.Machine.build(shared, 0)
+
+    alone_result = alone_machine.run()
+    shared_result = shared_machine.run()
+
+    assert alone_result.terminal_status == "complete"
+    assert shared_result.terminal_status == "complete"
+    assert _decodes_at_once(alone_machine) > 0
+    assert _decodes_at_once(shared_machine) == 0
+
+
+def test_pools_on_a_device_with_a_slot_per_unit_decode_as_with_none(tmp_path):
+    graph = _t_gate_by_patch(tmp_path, PER_PATCH, (FPGA_B,))
+    shared = machines.with_device(graph, "gpu", 2, fabrics.FRIDGE)
+    alone_machine = machine_module.Machine.build(graph, 0)
+    shared_machine = machine_module.Machine.build(shared, 0)
+
+    alone_machine.run()
+    shared_machine.run()
+
+    assert _decode_spans(shared_machine) == _decode_spans(alone_machine)
+
+
+def _decode_spans(machine) -> list:
+    """(start, end, unit, stream) of each decode's algorithm stage."""
+    spans = []
+    for record in machine.observation.stages.records:
+        if record.stage != "algorithm":
+            continue
+        span = (record.start_ticks, record.end_ticks)
+        spans.append((*span, record.unit_name, record.stream_id))
+    return sorted(spans)
+
+
+def _decodes_at_once(machine) -> int:
+    """How many decodes started before the one started before them ended."""
+    spans = _decode_spans(machine)
+    # each decode beside the one that started next
+    pairs = zip(spans, spans[1:], strict=False)
+    return sum(later[0] < earlier[1] for earlier, later in pairs)

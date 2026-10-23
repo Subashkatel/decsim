@@ -273,6 +273,16 @@ As a gem5 FUPool takes its units as one parameter (src/cpu/o3/FUPool.py:49). nam
 | `members` | `tuple` | `()` |
 | `pooling` | `PoolingSettings` | `MostLikely.Settings()` |
 
+### `ExecutionSlots.Settings`
+
+`decsim/decoders/execution_slots.py`. slot_count decodes may run at once on the device.
+
+A device part placed at a site holds this record; every pool at that site shares the slots.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `slot_count` | `int` | required |
+
 ### `FifoScheduler.Settings`
 
 `decsim/decoders/schedulers.py`. FIFO's settings: the rule has no knob.

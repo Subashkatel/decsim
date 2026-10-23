@@ -21,6 +21,7 @@ from typing import Any, Optional, Union
 
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
+import decsim.decoders.execution_slots as execution_slots
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as detection_event_settings
 import decsim.escalation.settings as escalation_settings
@@ -149,8 +150,10 @@ _PAULI_FRAME_PORTS = (
     Port("decisions", OUTPUT, DECISIONS),
 )
 # The parts off the path hold no port: their records set how the parts
-# on it behave. The defaults are a timing-only run of distance-three
-# surface code patches with no frame.
+# on it behave. A device is one: placed at a site, its slots are shared
+# by every pool placed there (decoders/execution_slots.py). The defaults
+# are a timing-only run of distance-three surface code patches with no
+# frame.
 _DEFAULT_QPU = qpu_settings.QpuSettings()
 _DEFAULT_CONTROLLER = controller_settings.ControllerSettings()
 _DEFAULT_IDLE_POLICY = idle_policies.SeparateDecodeJobsSettings()
@@ -218,6 +221,7 @@ KINDS = (
         is_many=True,
     ),
     PartKind("router", routers.Router.Settings, _ROUTER_PORTS),
+    PartKind("device", execution_slots.ExecutionSlots.Settings, is_many=True),
     PartKind(
         WORKLOAD,
         Union[workload_settings.WorkloadSettings, ports.WorkloadMakerSettings],

@@ -95,9 +95,30 @@ fabric = fabrics.SiteLinks((shared,), base_fabric)
 ```
 
 Every hop from `fridge` into `gpu0` then queues on one channel,
-`fridge_to_gpu0`, and every hop back on `gpu0_to_fridge`. The pools on
-the device share its links, not its compute: each pool keeps its own
-units.
+`fridge_to_gpu0`, and every hop back on `gpu0_to_fridge`.
+
+Links are all an FPGA's or an ASIC's pools share: each decoder instance
+there is logic of its own (DecoNet 2504.11805 p7-p10), so each pool
+keeps its own units. Pools on a GPU or a CPU host also share its
+compute. CUDA-Q QEC runs N decoder replicas as N streams on one GPU,
+"an interchangeable pool" (cudaqx host_side_dispatcher_design.md line
+27), and Google decodes in real time only "when
+provided exclusive access to a subset of CPUs" (2408.13687 p15). Give
+the site a device with that many execution slots:
+
+```python
+shared = machines.with_device(machine, "gpu0", 2, "gpu0")
+```
+
+A decode takes a slot when it starts and gives it back when its compute
+ends. One with no free slot waits with its input landed, and the oldest
+waiting decode on the device starts when a slot frees, whichever pool
+it is from. A pool's `unit_count` still caps the pool, so a device with
+a slot for each unit of its pools changes nothing. The device keeps a
+`slot_wait` distribution at its name. A site holds at most one device,
+and a device at a site no pool sits at is refused. No slowdown with
+load is modelled; one measured curve exists, for batches, not for
+concurrent streams (`specs/decoder-resources/data-landing.md`).
 
 ## 7. Give each pool its own store
 

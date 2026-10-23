@@ -28,6 +28,7 @@ that reads it sees a waiting unit as freeing sooner than it will.
 import collections
 import dataclasses
 from collections.abc import Callable
+from typing import Optional
 
 import decsim.engine as engine_module
 import decsim.records.decoding as decoding_records
@@ -96,10 +97,10 @@ class ExecutionSlots:
         return False
 
     def give_back(self, job: decoding_records.DecodeJob) -> None:
-        """The decode's compute ended: its slot goes to the oldest waiting."""
-        if not _holds(self.running, job):
-            return
-        _remove(self.running, job)
+        """The decode's unit freed: its slot goes to the oldest waiting."""
+        index = _index_of(self.running, job)
+        assert index is not None, f"{job.label} gave back a slot it never took"
+        del self.running[index]
         self._start_the_oldest_waiting()
 
     def withdraw(self, job: decoding_records.DecodeJob) -> None:
@@ -132,17 +133,9 @@ class ExecutionSlots:
             start(job)
 
 
-def _holds(jobs: list, job: decoding_records.DecodeJob) -> bool:
-    """Whether this very job is among the jobs (jobs compare by identity)."""
-    for held in jobs:
-        if held is job:
-            return True
-    return False
-
-
-def _remove(jobs: list, job: decoding_records.DecodeJob) -> None:
-    """Remove this very job from the list."""
+def _index_of(jobs: list, job: decoding_records.DecodeJob) -> Optional[int]:
+    """Where this very job sits in the list (jobs compare by identity)."""
     for index, held in enumerate(jobs):
         if held is job:
-            del jobs[index]
-            return
+            return index
+    return None

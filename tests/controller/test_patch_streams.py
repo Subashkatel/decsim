@@ -20,6 +20,7 @@ import pytest
 
 import decsim.config as config
 import decsim.decoders.decoders as decoders
+import decsim.decoders.execution_slots as execution_slots
 import decsim.decoders.settings as decoder_settings
 import decsim.frontends.lattice_surgery as lattice_surgery
 import decsim.frontends.settings as workload_settings
@@ -31,6 +32,7 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
 import decsim.topology.fabrics as fabrics
+import decsim.topology.graph as topology_graph
 import decsim.windows.coupling_orders as coupling_orders
 import decsim.windows.region_layout as region_layout
 import decsim.windows.release_rules as release_rules
@@ -87,7 +89,8 @@ def _preset_pool(decode_microseconds: float):
 
 # a second chip pool on the weak pool's row, and a slower row of its own
 FPGA_B = ("fpga_b", _preset_pool(T_GATE_DECODE_MICROSECONDS))
-SLOW = ("slow", _preset_pool(2 * T_GATE_DECODE_MICROSECONDS))
+SLOW_DECODE_MICROSECONDS = 2 * T_GATE_DECODE_MICROSECONDS
+SLOW = ("slow", _preset_pool(SLOW_DECODE_MICROSECONDS))
 
 
 def rounds_by_stream(machine) -> dict:
@@ -510,7 +513,9 @@ def test_pools_sharing_a_one_slot_device_never_decode_at_once(tmp_path):
     interchangeable pool of streams; decoders/execution_slots.py).
     """
     graph = _t_gate_by_patch(tmp_path, PER_PATCH, (FPGA_B,))
-    shared = machines.with_device(graph, "gpu", 1, fabrics.FRIDGE)
+    slots = execution_slots.ExecutionSlots.Settings(1)
+    device = topology_graph.Part("gpu", slots, fabrics.FRIDGE)
+    shared = graph.with_part(device)
     alone_machine = machine_module.Machine.build(graph, 0)
     shared_machine = machine_module.Machine.build(shared, 0)
 
@@ -525,7 +530,9 @@ def test_pools_sharing_a_one_slot_device_never_decode_at_once(tmp_path):
 
 def test_pools_on_a_device_with_a_slot_per_unit_decode_as_with_none(tmp_path):
     graph = _t_gate_by_patch(tmp_path, PER_PATCH, (FPGA_B,))
-    shared = machines.with_device(graph, "gpu", 2, fabrics.FRIDGE)
+    slots = execution_slots.ExecutionSlots.Settings(2)
+    device = topology_graph.Part("gpu", slots, fabrics.FRIDGE)
+    shared = graph.with_part(device)
     alone_machine = machine_module.Machine.build(graph, 0)
     shared_machine = machine_module.Machine.build(shared, 0)
 

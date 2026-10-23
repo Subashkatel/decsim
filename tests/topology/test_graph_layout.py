@@ -12,6 +12,7 @@ import dataclasses
 import pytest
 
 import decsim.confidence.cluster as cluster
+import decsim.decoders.execution_slots as execution_slots
 import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.settings as escalation_settings
@@ -336,7 +337,9 @@ def test_a_router_that_feeds_both_a_store_and_a_pool_is_refused():
 
 def test_a_device_shared_by_a_sites_pools_is_laid_out_at_that_site():
     chain = chain_machine()
-    shared = machines.with_device(chain, "gpu", 2, fabrics.HOST)
+    slots = execution_slots.ExecutionSlots.Settings(2)
+    device = graph.Part("gpu", slots, fabrics.HOST)
+    shared = chain.with_part(device)
 
     layout = laid_out(shared)
 
@@ -347,8 +350,11 @@ def test_a_device_shared_by_a_sites_pools_is_laid_out_at_that_site():
 
 def test_a_second_device_at_one_site_is_refused():
     chain = chain_machine()
-    shared = machines.with_device(chain, "gpu", 2, fabrics.HOST)
-    doubled = machines.with_device(shared, "cpu", 4, fabrics.HOST)
+    slots = execution_slots.ExecutionSlots.Settings(2)
+    gpu = graph.Part("gpu", slots, fabrics.HOST)
+    cpu = graph.Part("cpu", slots, fabrics.HOST)
+    shared = chain.with_part(gpu)
+    doubled = shared.with_part(cpu)
 
     with pytest.raises(graph.GraphError, match="another device already sits"):
         laid_out(doubled)
@@ -356,7 +362,9 @@ def test_a_second_device_at_one_site_is_refused():
 
 def test_a_device_at_a_site_with_no_pool_is_refused():
     chain = chain_machine()
-    lone = machines.with_device(chain, "gpu", 2, "rack")
+    slots = execution_slots.ExecutionSlots.Settings(2)
+    device = graph.Part("gpu", slots, "rack")
+    lone = chain.with_part(device)
 
     with pytest.raises(graph.GraphError, match="where no pool sits"):
         laid_out(lone)

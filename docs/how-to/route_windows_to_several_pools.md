@@ -107,7 +107,12 @@ provided exclusive access to a subset of CPUs" (2408.13687 p15). Give
 the site a device with that many execution slots:
 
 ```python
-shared = machines.with_device(machine, "gpu0", 2, "gpu0")
+import decsim.decoders.execution_slots as execution_slots
+import decsim.topology.graph as graph
+
+slots = execution_slots.ExecutionSlots.Settings(2)
+device = graph.Part("gpu0", slots, "gpu0")
+shared = machine.with_part(device)
 ```
 
 A decode takes a slot when it starts and gives it back when its unit

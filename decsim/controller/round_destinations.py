@@ -52,9 +52,9 @@ class RoundDestinations:
     # which entry pool decodes a stream, so which store is a round's own
     router = ports.Port(ports.StreamRouting)
     # the run's former seats, told when a round left every store it went
-    # to; bound only with several entry stores, which tell these
-    # destinations rather than the seats
-    detection_events = ports.Port(ports.RoundRetirement, optional=True)
+    # to; bound only with several entry stores, the only ones that tell
+    # these destinations rather than the seats
+    detection_events = ports.Port(ports.RoundRetirement)
 
     def __init__(self, side_by_pool: dict) -> None:
         self.side_by_pool = side_by_pool
@@ -107,8 +107,7 @@ class RoundDestinations:
             self.stores_left_by_round[round_key] = stores_left - 1
             return
         del self.stores_left_by_round[round_key]
-        if self.detection_events is not None:
-            self.detection_events.retire_round(round_key)
+        self.detection_events.retire_round(round_key)
 
     def last_round_written(
         self,

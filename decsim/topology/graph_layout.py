@@ -302,6 +302,7 @@ def _routed_entries(
     """The pools the router feeds, once each pool no edge reaches is one."""
     routed = _routed_pools(machine, router)
     _refuse_entries_the_router_misses(entries, routed)
+    _refuse_a_routed_pool_an_edge_reaches(entries, routed)
     return routed
 
 
@@ -363,6 +364,25 @@ def _refuse_entries_the_router_misses(entries: list, routed: tuple) -> None:
         f"the pools {missed} are reached by no escalate edge and no "
         "router: with a router, the planner's windows are decoded on the "
         "pools it feeds"
+    )
+
+
+def _refuse_a_routed_pool_an_edge_reaches(entries: list, routed: tuple) -> None:
+    """A pool is an entry pool or a target, never both.
+
+    An entry pool's edge out joins no results of its own, so a pool both
+    fed by the router and reached by an edge would pass the results it
+    decodes as a target on unjoined; no source routes windows to a pool
+    another pool also escalates to.
+    """
+    entry_names = {pool.name for pool in entries}
+    reached = [pool.name for pool in routed if pool.name not in entry_names]
+    if not reached:
+        return
+    raise graph.GraphError(
+        f"the pools {reached} are fed by the router and reached by an "
+        "escalate edge: a pool decodes the planner's windows or another "
+        "pool's escalations, not both"
     )
 
 

@@ -368,3 +368,24 @@ def test_a_device_at_a_site_with_no_pool_is_refused():
 
     with pytest.raises(graph.GraphError, match="where no pool sits"):
         laid_out(lone)
+
+
+def test_a_pool_the_router_feeds_and_an_edge_reaches_is_refused():
+    routed = _routed_chain()
+    both = machines.with_escalation_to(
+        routed,
+        DEEP_POOL,
+        _ROUTED_POOL,
+        DEEP_SWITCHING_SLOT,
+        switching_name="deep_to_fpga_b",
+    )
+
+    with pytest.raises(graph.GraphError, match="fed by the router and reached"):
+        laid_out(both)
+
+
+def test_the_tier_measures_over_two_entry_pools_are_refused():
+    layout = laid_out(_routed_chain())
+
+    with pytest.raises(NotImplementedError, match="over 2 entry pools"):
+        layout.tier_pools()

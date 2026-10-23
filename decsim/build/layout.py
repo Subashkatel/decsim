@@ -22,6 +22,7 @@ import decsim.links.settings as link_settings
 import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.refusals as refusals
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 
 # where every round's path to a decoder starts
@@ -198,9 +199,12 @@ class Layout:
         The weak tier is the entry pool and the strong one its entry
         edge's target, whatever their parts are named. An entry pool whose
         rounds land in its store, as a host pool's do, is a strong tier
-        with no weak one. A run with no store has neither. The retention
-        and the reports read the two tiers off this one rule.
+        with no weak one. A run with no store has neither. The reports
+        read the two tiers off this one rule; with several entry pools a
+        weak tier is no one pool, so they are refused rather than read off
+        the first, and each pool's own statistics stay at its path.
         """
+        _refuse_tiers_over_several_entry_pools(self.entry_pools)
         if not self.stores:
             return (None, None)
         entry = self.entry_pool
@@ -372,4 +376,15 @@ def _refuse_a_pool_not_held(
     raise ValueError(
         f"router.factory_pool names {pool.word!r}, which is no pool of "
         f"this machine; its pools are {names}"
+    )
+
+
+def _refuse_tiers_over_several_entry_pools(entry_pools: tuple) -> None:
+    if len(entry_pools) < 2:
+        return
+    raise NotImplementedError(
+        f"the weak and strong tier measures over {len(entry_pools)} entry "
+        "pools are not implemented yet: they would describe the first pool "
+        "alone; each pool's own statistics are kept at its path; "
+        f"{refusals.REFUSALS}"
     )

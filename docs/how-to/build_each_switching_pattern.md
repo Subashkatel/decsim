@@ -71,13 +71,15 @@ verdict. The edge counts `rescues` and `misses`.
 ## What is refused for now
 
 Each of these raises "not implemented yet", with its reason and a pointer
-to this table, when the machine is built:
+to this table, when the machine is built (the tier measures, when a run's
+rows are measured):
 
 | Refused | Why |
 |---|---|
 | `double_window` on an edge past the entry pool | Toshio defines it over the entry pool's sliding chain; a pool past it decodes only what it is sent. A `redo_window` there redoes the double region. |
 | `double_window` beside a router | it absorbs neighbouring windows, which a router may send to two pools |
 | more than one router | |
+| the weak and strong tier measures (queue peaks, busy fractions, growth rates, the decoder kind) over several entry pools | a weak tier is no one pool; read each pool's own statistics, kept at its path |
 | a VQD scheduler over a stream | a stream's critical point is a segment's end, which the scheduler does not read |
 | likelihood pooling over members of two fault representations | Harmony prices a matching's hyperedge errors by an edge decomposition |
 | an ensemble member, or a pool's batching, over a strong backend row | the device prices each decode as it runs it, and an ensemble or a batch does not take its time from there yet |

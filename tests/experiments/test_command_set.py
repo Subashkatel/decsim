@@ -621,6 +621,27 @@ def test_a_module_whose_wheel_lists_no_top_level_is_found_by_its_files(
     assert versions["example_wheel"] == "1.2.3"
 
 
+def test_the_installed_distributions_are_read_once_per_search_path(
+    monkeypatch,
+):
+    """A process running many units reads the installed files once."""
+    reads = []
+    read_distributions = importlib.metadata.distributions
+
+    def counted(**context):
+        reads.append(context)
+        return read_distributions(**context)
+
+    monkeypatch.setattr(importlib.metadata, "distributions", counted)
+    collect._distributions_by_module.cache_clear()
+
+    first = collect.imported_module_versions()
+    second = collect.imported_module_versions()
+
+    assert first == second
+    assert len(reads) == 1
+
+
 def test_the_standard_library_and_submodules_are_left_out():
     versions = collect.imported_module_versions()
 

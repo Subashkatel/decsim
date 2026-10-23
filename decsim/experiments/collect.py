@@ -17,6 +17,7 @@ handed on the moment it ends, so a caller saves it while others run.
 import collections
 import dataclasses
 import enum
+import functools
 import hashlib
 import importlib.metadata
 import inspect
@@ -235,7 +236,8 @@ def imported_module_versions() -> dict:
     against the module beside it; one that states none (relay_bp) is named
     by its distribution.
     """
-    distributions_by_module = _distributions_by_module()
+    search_path = tuple(sys.path)
+    distributions_by_module = _distributions_by_module(search_path)
     versions = {}
     for name in sorted(sys.modules):
         version = _module_version(name, distributions_by_module)
@@ -366,20 +368,26 @@ def _module_version(
     return importlib.metadata.version(distributions[0])
 
 
-def _distributions_by_module() -> dict:
-    """Each top-level module, the distributions that install it.
+@functools.cache
+def _distributions_by_module(search_path: tuple) -> dict:
+    """Each top-level module the search path installs, its distributions.
 
     Python 3.11's packages_distributions infers a module from the
     distribution's files when it has no top_level.txt, which a maturin
     wheel such as relay-bp's does not write; 3.10's reads only that file.
-    The inference is done here, the same on every Python.
+    The inference is done here, the same on every Python. Reading every
+    distribution's file list takes a third of a second, and each unit a
+    process runs asks again, so the answer is kept per search path: what
+    is installed on a path does not change while a run reads it.
     """
     found = collections.defaultdict(list)
-    for distribution in importlib.metadata.distributions():
+    paths = list(search_path)
+    installed = importlib.metadata.distributions(path=paths)
+    for distribution in installed:
         name = distribution.metadata["Name"]
         for module in _top_level_modules(distribution):
             found[module].append(name)
-    return found
+    return dict(found)
 
 
 def _top_level_modules(distribution: importlib.metadata.Distribution) -> set:

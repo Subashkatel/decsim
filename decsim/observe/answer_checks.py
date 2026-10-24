@@ -51,8 +51,12 @@ class AnswerCheck:
 
     weak_gap is the weak answer's confidence in nats, None when it gave
     none. weak_failed and strong_failed are each answer's check, None
-    when a window of it answered no observable. would_escalate is the
-    machine's verdict on the weak answer, its threshold copied then.
+    when a window of it answered no observable. same_logical_class is
+    whether the two answers carry the same observables for the window
+    itself, None when one carries none. When they do, only the boundary
+    each hands on can make one check fail and the other pass, through
+    the windows the check cuts. would_escalate is the machine's verdict
+    on the weak answer, its threshold copied then.
     """
 
     window_index: int
@@ -60,6 +64,7 @@ class AnswerCheck:
     weak_gap: Optional[float]
     weak_failed: Optional[bool]
     strong_failed: Optional[bool]
+    same_logical_class: Optional[bool]
     would_escalate: bool
     kept: str
 
@@ -339,12 +344,14 @@ def _keep(
     strong_failed = closing_windows.failed(strong_prediction, snapshot)
     kept = _kept_answer(path, weak_failed, strong_failed)
     weak_gap = _gap_of(pair.weak)
+    same_logical_class = _same_logical_class(pair)
     check = AnswerCheck(
         window_index=window_index,
         check_round=snapshot.round_index,
         weak_gap=weak_gap,
         weak_failed=weak_failed,
         strong_failed=strong_failed,
+        same_logical_class=same_logical_class,
         would_escalate=pair.would_escalate,
         kept=kept,
     )
@@ -375,6 +382,19 @@ def _let_go_before(by_round: dict, first_round: int) -> None:
     old = [round_index for round_index in by_round if round_index < first_round]
     for round_index in old:
         del by_round[round_index]
+
+
+def _same_logical_class(
+    pair: closing_decisions.AnswerPair,
+) -> Optional[bool]:
+    """Whether both answers carry the same observables for the window."""
+    if pair.weak is None or pair.strong is None:
+        return None
+    weak = pair.weak.logical_observables
+    strong = pair.strong.logical_observables
+    if weak is None or strong is None:
+        return None
+    return weak == strong
 
 
 def _gap_of(result) -> Optional[float]:

@@ -182,6 +182,16 @@ def test_a_row_holds_the_check_round_the_weak_gap_and_the_verdict():
     ]
 
 
+def test_a_row_says_whether_the_two_answers_share_a_logical_class():
+    listener = _scripted_listener()
+
+    rows = {row["path"]: row for row in listener.rows()}
+
+    best = rows["best_of_two"]["windows"][0]
+    classes = [row["same_logical_class"] for row in best]
+    assert classes == [True, False, True, False]
+
+
 def test_a_stream_lets_go_of_the_rounds_and_copies_its_checks_passed():
     listener = _scripted_listener()
 

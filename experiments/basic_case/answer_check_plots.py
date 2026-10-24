@@ -8,8 +8,10 @@ FOLDER holds answer_check.py's json lines. Writes into FOLDER/plots/:
     per-shot best-of-two line (both alone failed) and the per-window
     line (the best-of-two chain), each rate with its exact 95% interval;
   - confidence_d{d}_p{p}.png: against the weak gap, how often the weak
-    answer fails where the strong one passes, the reverse, and both,
-    with the 20 dB threshold marked (decsim/experiments/answer_check_bins.py).
+    answer fails where the strong one passes in another logical class,
+    the reverse, both, and, faint, one fails and the other passes in the
+    same class (the boundary decides), with the 20 dB threshold marked
+    (decsim/experiments/answer_check_bins.py).
 """
 
 import collections
@@ -38,10 +40,18 @@ FIELDS = ("d", "p", "shots") + tuple(
     for run in RUNS
     for part in ("failures", "rate", "low", "high")
 )
+# each curve's bin field, label, color and opacity: the boundary's
+# curve is faint, as it says nothing of the window's own class
 CURVES = (
-    ("weak_only", "weak fails, strong passes", "tab:red"),
-    ("strong_only", "strong fails, weak passes", "tab:blue"),
-    ("both", "both fail", "tab:gray"),
+    ("weak_only", "weak fails, strong passes", "tab:red", 1.0),
+    ("strong_only", "strong fails, weak passes", "tab:blue", 1.0),
+    (
+        "boundary_decides",
+        "one fails, same class: the boundary",
+        "tab:purple",
+        0.35,
+    ),
+    ("both", "both fail", "tab:gray", 1.0),
 )
 
 
@@ -71,13 +81,13 @@ def write_table(rows: list, out: pathlib.Path) -> None:
 
 
 def plot_confidence(point: tuple, lines: list, out: pathlib.Path) -> None:
-    """The three rates against the weak gap, on the best-of-two chain."""
+    """The four rates against the weak gap, on the best-of-two chain."""
     distance, probability = point
     streams = [line["windows"]["best_of_two"] for line in lines]
     bins = answer_check_bins.gap_bins(streams, GAP_EDGES)
     figure, axis = plt.subplots(figsize=(6.0, 4.0))
     plotted = False
-    for name, label, color in CURVES:
+    for name, label, color, opacity in CURVES:
         centers, rates, lows, highs = _curve(bins, name)
         plotted = plotted or bool(rates)
         errors = [
@@ -90,6 +100,7 @@ def plot_confidence(point: tuple, lines: list, out: pathlib.Path) -> None:
             yerr=errors,
             label=label,
             color=color,
+            alpha=opacity,
             marker="o",
             markersize=3,
             capsize=2,

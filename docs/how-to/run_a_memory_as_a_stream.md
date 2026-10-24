@@ -191,13 +191,19 @@ check's round, are decided as in a checkpoint. A row of
 - `weak_gap` is the weak answer's confidence in nats, or null when it
   gave none.
 - `weak_failed` and `strong_failed` are each answer's check.
+- `same_logical_class` says whether the two answers flip the same
+  logical observables on the window, or null when one gave no answer.
 - `would_escalate` is the machine's verdict on the weak answer, on a
   copy of the threshold at that time.
 - `kept` is the answer the chain kept.
 
 `decsim/experiments/answer_check_bins.py` bins the rows by the weak
-gap, for the confidence plots: in each bin, how often the weak answer
-fails where the strong one passes, the reverse, and both.
+gap, for the confidence plots. In each bin it gives how often the
+weak answer fails where the strong one passes in another logical class,
+the reverse, one fails and the other passes in the same class, and both
+fail. Two answers in the same class differ only in the boundary they
+hand on, so the windows the check cuts decide which one fails: this is
+not a fault in the weak answer's class.
 
 ## What a stream does not build yet
 

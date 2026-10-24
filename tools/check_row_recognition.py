@@ -63,6 +63,7 @@ PORTS = frozenset(
         "RunSeedComposite",
         "RunSeedConsumer",
         "seeding.RunSeedComposite",
+        "seeding.RunSeedConsumer",
     }
 )
 

@@ -20,6 +20,7 @@ import decsim.decoders.decoder_pool as decoder_pool
 import decsim.engine as engine_module
 import decsim.links.settings as link_settings
 import decsim.observe.checkpoints as checkpoints_module
+import decsim.observe.closing_decisions as closing_decisions
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
@@ -41,11 +42,10 @@ import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
 import decsim.observe.window_outcomes as window_outcomes_module
 import decsim.ports as ports
+import decsim.refusals as refusals
+import decsim.seeding as seeding
 import decsim.statistics.registry as statistics_registry
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
-from decsim.decoders.minimum_weight_perfect_matching import (
-    decoder as minimum_weight_perfect_matching,
-)
 
 
 def observe(
@@ -123,9 +123,7 @@ def observe(
             region_of_interest.round_read_out
         )
     frame_corrections = _frame_corrections(control.pauli_frame, keeps_records)
-    checkpoints = _checkpoints(
-        observation, qpu, window_manager, decoder_managers
-    )
+    checkpoints = _checkpoints(observation, qpu, windows, decoders)
     return observation_module.Observation(
         log=log,
         windows=window_ledger,
@@ -576,24 +574,79 @@ def _connect_window_outcomes(
 
 def _checkpoints(
     observation: observe_settings.ObservationSettings,
-    qpu,
-    window_manager,
-    decoder_managers: tuple,
+    qpu: qpu_part.Qpu,
+    windows: windows_part.Windows,
+    decoders: decoders_part.Decoders,
 ) -> Optional[checkpoints_module.Checkpoints]:
     """The streams' checkpoints, only when the section spaces them.
 
-    The referee is PyMatching, one fixed decoder whatever the machine
-    decodes with, so checkpoints of two machines are closed alike. A
-    checkpoint is the outcome of a separate stream of its rounds only
-    when the machine decodes its last window with PyMatching too.
+    Each closes on the machine's own decoders, edges and threshold
+    (observe/closing_decisions.py), so a checkpoint is the machine's
+    answer had the run ended there.
     """
     every_rounds = observation.checkpoint_every_rounds
     if every_rounds is None:
         return None
-    referee = minimum_weight_perfect_matching.PyMatchingDecoder()
-    checkpoints = checkpoints_module.Checkpoints(every_rounds, referee)
-    _connect_checkpoints(checkpoints, qpu, window_manager, decoder_managers)
+    closer = _closing_decisions(windows, decoders)
+    checkpoints = checkpoints_module.Checkpoints(every_rounds, closer)
+    window_manager = windows.window_manager
+    managers = _decoder_managers(decoders)
+    _connect_checkpoints(checkpoints, qpu, window_manager, managers)
     return checkpoints
+
+
+def _closing_decisions(
+    windows: windows_part.Windows, decoders: decoders_part.Decoders
+) -> closing_decisions.ClosingDecisions:
+    """A fresh decoder per pool, and each edge's source signal."""
+    edges = windows.window_manager.edges
+    decoder_by_pool = {}
+    for pool in decoders.pools:
+        settings = pool.plan.settings
+        if settings is not None:
+            decoder_by_pool[pool.plan.pool] = settings.algorithm.build()
+    signal_by_pool = {}
+    for edge in edges.edges:
+        _refuse_a_closing_edge(windows.router, edge)
+        join = windows.join_of(edge.source)
+        signal_by_pool[edge.source] = join.signal
+    _refuse_closing_draws(decoder_by_pool, edges)
+    requirement = windows.models.requirement()
+    return closing_decisions.ClosingDecisions(
+        windows.router, edges, decoder_by_pool, signal_by_pool, requirement
+    )
+
+
+def _refuse_a_closing_edge(router, edge: ports.EscalateEdge) -> None:
+    """An edge past the entry pool joins its solves where no closer reads."""
+    if router.is_entry(edge.source):
+        return
+    raise NotImplementedError(
+        "observation.checkpoint_every_rounds beside an escalate edge "
+        f"past the entry pool ({edge.source.word} to {edge.target.word}) "
+        f"is not implemented yet; {refusals.REFUSALS}"
+    )
+
+
+def _refuse_closing_draws(decoder_by_pool: dict, edges) -> None:
+    """A closing window drawing from the run's seed would change the run."""
+    verdicts = [edge.policy.verdict for edge in edges.edges]
+    deciders = [*decoder_by_pool.values(), *verdicts]
+    drawing = [
+        decider
+        for decider in deciders
+        if isinstance(decider, seeding.RunSeedConsumer)
+    ]
+    if not drawing:
+        return
+    first_type = type(drawing[0])
+    name = first_type.__name__
+    raise NotImplementedError(
+        "observation.checkpoint_every_rounds decides each closing window "
+        f"as the machine does, and {name} draws from the run's seed, so a "
+        "checkpoint would draw again and change the run: not implemented "
+        f"yet; {refusals.REFUSALS}"
+    )
 
 
 def _connect_checkpoints(

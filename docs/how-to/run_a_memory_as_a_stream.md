@@ -91,15 +91,28 @@ K rounds:
 decsim stream run.py --rounds 2000 --seed 1 --set observation.checkpoint_every_rounds=50 --out s1.json
 ```
 
-At each checkpoint the source copies its state and reads the copy out
-without noise (`decsim/records/checkpoints.py`). The windows that read
-only earlier rounds keep their final answers, because they are the
-same in a stream that ends there. PyMatching decodes the rest of the
-rounds as one last window, with the copy's readout and the boundary
-the last kept window hands on (`decsim/observe/checkpoints.py`). This
-takes no simulated time, and no decoder or threshold reads it. Tan et
-al. measure their per-round rates the same way (2209.09219, Section
-S3 C).
+A checkpoint's outcome is the machine's own answer if the stream had
+ended at that round. Tan et al. measure their per-round rates the same
+way (2209.09219, Section S3 C):
+
+- The source copies its state and reads the copy out without noise
+  (`decsim/records/checkpoints.py`).
+- The windows that read only earlier rounds keep their final answers,
+  because they are the same in a stream that ends there.
+- The windows after them that commit a round up to the checkpoint are
+  the stream's last windows, each cut to end at the checkpoint. Each
+  one gets the boundary the window before it hands on, and the copy's
+  readout.
+- The machine's own decoders decide each of these last windows, as
+  they decide a final window: the entry pool's decoder, then the
+  verdict on its confidence and, on an escalation, the strong
+  decoder's answer on the same window
+  (`decsim/observe/closing_decisions.py`).
+
+This takes no simulated time. The verdict reads a copy of the
+threshold, so the threshold learns nothing and no audit runs, and each
+decoder is a fresh one, so the stream's numbers are the same with
+checkpoints and without.
 
 Each row of `checkpoints` holds:
 
@@ -110,16 +123,15 @@ Each row of `checkpoints` holds:
 - `windows` and `escalated_windows` count the kept windows and the
   ones the policy sent to the strong decoder. Their ratio is the
   escalated share up to that round.
+- `threshold` holds, for each patch, the threshold its escalate edge
+  read when the checkpoint closed, in nats, or null with no edge. It
+  comes from the same summary as the record's `online_threshold`.
 
-A checkpoint's outcome is that of a separate stream of its rounds,
-seed by seed, only when the machine decodes its last window with
-PyMatching, as the referee does. A machine with another decoder there
-gets a different outcome on some seeds, and that includes the
-checkpoint at the stream's last round. In the basic case at d = 5,
-p = 0.003, the switching machine (union-find, with belief matching
-redoing weak windows) failed 46 of 1500 checkpoints at round 15 and 28
-of 1500 separate streams of 15 rounds, on the same seeds. The
-checkpoints measure the referee's last window, not the machine's.
+On the same seed, a checkpoint at round t has the outcome of a separate
+stream of t rounds. One difference can remain: a separate stream's
+moving threshold learns from its next-to-last window before it decides
+its last one, and a checkpoint decides all of its last windows on the
+threshold of its close.
 
 Give the memory noiseless time boundaries
 (`noiseless_time_boundaries`), so that the stream's own last readout is
@@ -140,8 +152,8 @@ fit = failure_statistics.per_round_rate_over_checkpoints(rounds, failed)
 95 percent interval (`decsim/experiments/failure_statistics.py`). A
 checkpoint round with no failure in any stream is refused, so leave the
 early rounds out. With a moving threshold, the rate is the average over
-the rounds fitted, and `online_threshold` gives the threshold at each
-window count.
+the rounds fitted, and each row's `threshold` gives the threshold at
+that round.
 
 ## What a stream does not build yet
 
@@ -158,7 +170,9 @@ Each of these is refused, "not implemented yet", with its reason:
 - the double window on a stream, which absorbs windows a stream has not
   laid yet;
 - a logical failure counted inside the stream other than at a
-  checkpoint (section 4).
+  checkpoint (section 4);
+- checkpoints beside an escalate edge past the entry pool, or beside a
+  decoder or a verdict that draws from the run's seed.
 
 [How to build each switching pattern](build_each_switching_pattern.md#what-is-refused-for-now)
 lists every refusal.

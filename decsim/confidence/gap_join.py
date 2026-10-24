@@ -101,12 +101,7 @@ class WindowGapJoin:
         back yet, so the unit that produced the evidence carries the
         signal's work.
         """
-        solves = []
-        for solve in held:
-            solves.append(solve.result)
-        computation = self.signal.compute(tuple(solves))
-        answer = _answering_solve(held)
-        answer.result.soft_output = computation.soft_output
+        answer, computation = joined_answer(self.signal, held)
         gap_text = _gap_text(computation.soft_output)
         self.engine.log(
             log_sources.DECODER_MANAGER,
@@ -131,6 +126,18 @@ class WindowGapJoin:
                     solve.job, solve.result
                 )
         self.verdict.accept_revision(answer.job, answer.result)
+
+
+def joined_answer(signal: ports.ConfidenceSignal, held: list) -> tuple:
+    """(the answering solve, the signal's computation) of a window's solves.
+
+    The soft output goes on the answering solve's result.
+    """
+    solves = [solve.result for solve in held]
+    computation = signal.compute(tuple(solves))
+    answer = _answering_solve(held)
+    answer.result.soft_output = computation.soft_output
+    return answer, computation
 
 
 def _answering_solve(held: list) -> HeldSolve:

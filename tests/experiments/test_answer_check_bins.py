@@ -39,18 +39,20 @@ def test_each_bin_counts_its_windows_by_which_answer_failed():
     assert bins[1].weak_only.rate is None
 
 
-def test_rows_after_a_kept_answer_that_failed_are_left_out():
-    """The second row's kept weak answer fails; the third would count both."""
+def test_a_row_whose_window_before_kept_a_failing_answer_is_left_out():
+    """Row 2 follows a failed check; row 3 follows a passing one again."""
     stream = [
         _row(1.0, False, False),
         _row(1.0, True, True),
-        _row(1.0, True, True),
+        _row(1.0, False, False),
+        _row(1.0, True, False, kept="strong"),
     ]
 
     bins = answer_check_bins.gap_bins([stream], EDGES)
 
-    assert bins[0].windows == 2
-    assert bins[0].both.rate == 0.5
+    assert bins[0].windows == 3
+    assert bins[0].both.rate == 1 / 3
+    assert bins[0].weak_only.rate == 1 / 3
 
 
 def test_a_row_with_no_gap_counts_in_no_bin_and_keeps_the_rows_after_it():

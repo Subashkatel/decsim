@@ -13,8 +13,11 @@ same shots: they agree to within the growth's weight step.
 import math
 import statistics
 
+import pytest
+
 import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
+import decsim.config as config
 import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.decoders.union_find.decoder as union_find
 import decsim.records.decoder_evidence as evidence_records
@@ -31,6 +34,8 @@ SHOTS = 30
 SEED = 7
 HOST_TIME = cycle_count_module.HostMeasuredTime()
 HOST_TIMED_UNION_FIND = union_find.UnionFindDecoder.Settings(timing=HOST_TIME)
+# a clock of ten ticks a cycle, so a cycle count reads off its ticks
+TEST_CLOCK = config.Clock(10)
 
 
 def _window_model():
@@ -110,6 +115,54 @@ def test_the_gap_walks_against_an_oracle_built_from_the_paper_alone_property():
         assert _same_gap(inside, outside), shot
         walked += 1
     assert walked == 8
+
+
+def test_one_decode_prices_the_walk_as_the_units_own_decode_property():
+    """walk_decodes = 1 charges the decode's own cycles on the unit's clock.
+
+    The oracle is the cycle count's cycles times the clock period, the
+    time the unit takes for that decode from an edge; two decodes cost
+    twice as much, and the price moves with each window's growth.
+    """
+    circuit, model = _window_model()
+    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
+    count = cycle_count_module.CycleCount(TEST_CLOCK, delay_cycles=3)
+    one = cluster.ClusterGap(walk_decodes=1.0, decode_timing=count)
+    two = cluster.ClusterGap(walk_decodes=2.0, decode_timing=count)
+    events, _observables = windows.sampled_shots(circuit, SHOTS, SEED)
+    prices = set()
+    for shot in events:
+        job = windows.job_for(model, shot)
+        result = row.decode(job)
+        cycles = count.cycles(result.cluster_evidence)
+        decode_ticks = cycles * TEST_CLOCK.period_ticks
+        one_walk = one.compute((result,))
+        two_walks = two.compute((result,))
+        assert one_walk.ticks == decode_ticks
+        assert two_walks.ticks == 2 * decode_ticks
+        prices.add(decode_ticks)
+    assert len(prices) > 1
+
+
+def test_walk_decodes_builds_on_the_weak_rows_timing():
+    count = cycle_count_module.CycleCount(TEST_CLOCK, delay_cycles=3)
+    weak = union_find.UnionFindDecoder.Settings(timing=count)
+    record = cluster.ClusterGap.Settings(walk_decodes=1.0)
+
+    built = record.build(weak, 2.0)
+
+    assert built.decode_timing is count
+    assert built.walk_decodes == 1.0
+
+
+def test_the_walk_has_one_price():
+    with pytest.raises(ValueError, match="not both"):
+        cluster.ClusterGap.Settings(walk_microseconds=1.0, walk_decodes=1.0)
+
+
+def test_walk_decodes_refuses_a_negative_count():
+    with pytest.raises(ValueError, match="walk_decodes must be finite"):
+        cluster.ClusterGap.Settings(walk_decodes=-1.0)
 
 
 def _oracle_gap(evidence) -> float:

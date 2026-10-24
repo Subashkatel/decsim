@@ -64,7 +64,7 @@ belief_matching:
 
 escalation:
   confidence:
-    walk: 1us                        # the cluster gap's walk on the weak unit, a chosen value (2602.03336 lines 17-19)
+    walk_decodes: 1                  # the cluster gap's walk costs one more decode on the weak unit, its own cycle count (2602.03336 lines 17-19: about the union-find decode's work or more)
   threshold:
     threshold: 20dB                  # Fig. 15's g_th, for both gaps (2510.25222 Sec. IV)
   edge:

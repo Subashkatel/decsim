@@ -80,6 +80,7 @@ class StimDevice(seeding.AtomicRunSeedConsumer):
     operation_circuit_scope = "per_operation"
     emits_bit_values = True
     errors_sampled = trace_source.SILENT
+    checkpoint_reached = trace_source.SILENT
 
     def __init__(
         self,

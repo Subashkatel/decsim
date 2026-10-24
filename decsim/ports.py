@@ -1577,6 +1577,10 @@ class SyndromeSource(Protocol):
     errors_sampled(operation, fired_errors) fires once per shot from a
     source that keeps the errors it drew, the truth a window's label is
     read from; every other source carries the silent source.
+    checkpoint_reached(snapshot) fires after each round, while someone
+    listens, from a source that can copy its state: the stream as if its
+    readout came then (records/checkpoints.py); every other source
+    carries the silent source.
     emits_bit_values says whether payloads carry measured values or
     their sizes alone.
     """
@@ -1587,6 +1591,9 @@ class SyndromeSource(Protocol):
     emits_bit_values: bool
     shot_sampled: Union[trace_source.TraceSource, trace_source.SilentSource]
     errors_sampled: Union[trace_source.TraceSource, trace_source.SilentSource]
+    checkpoint_reached: Union[
+        trace_source.TraceSource, trace_source.SilentSource
+    ]
 
     def declare_stream(
         self,

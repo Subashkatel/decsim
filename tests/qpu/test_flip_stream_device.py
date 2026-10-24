@@ -5,7 +5,9 @@ rollover changes no bit, so every round's raw bits, the detection events
 formed from them and the observables' flips must equal those of one
 FlipSimulator.do over the whole assembled circuit under the same seed
 (probes p2 and p4, Adroit config_proto/probes5). The tables must be the
-live source's, which reads them off the circuit run so far.
+live source's, which reads them off the circuit run so far. A checkpoint
+after round t must equal Stim's own generated circuit of t rounds whose
+readout is noiseless, run under the same seed.
 """
 
 import dataclasses
@@ -97,6 +99,55 @@ def test_the_stream_gives_the_whole_circuits_bits_events_and_truth(
     assert _formed(table, packets) == detectors
     assert history.truth() == observables
     assert sum(detectors) > 0 or round_count < 9
+
+
+@pytest.mark.parametrize("rollover_rounds", [1, 3, 1000])
+def test_a_checkpoint_is_stims_circuit_of_its_rounds_read_out_noiseless(
+    rollover_rounds: int,
+):
+    program = _program()
+    plan = flip_stream_device.RoundPlan(program, rollover_rounds)
+    history = flip_stream_device.FlipHistory(plan, SEED, False)
+
+    snapshots = [_checkpoint_after_a_round(history) for _ in range(24)]
+
+    # Stim writes a REPEAT block from three rounds on
+    closed = [
+        (snapshot.readout_events, snapshot.observable_flips)
+        for snapshot in snapshots[2:]
+    ]
+    referents = [_noiseless_readout_run(rounds) for rounds in range(3, 25)]
+    truths = [truth for _events, truth in referents]
+    assert closed == referents
+    assert (0,) in truths
+    assert (1,) in truths
+
+
+def test_the_last_checkpoint_is_the_real_readout():
+    program = _program()
+    history, _packets = _streamed(program, 9, 3)
+
+    snapshot = history.snapshot(100)
+
+    _raw, detectors, observables = _whole_circuit_run(program, 9)
+    readout_count = len(snapshot.readout_events)
+    assert snapshot.is_final
+    assert list(snapshot.readout_events) == detectors[-readout_count:]
+    assert snapshot.observable_flips == observables
+
+
+def test_a_checkpoint_fires_after_every_round_while_someone_listens():
+    program = _program()
+    owner = program_records.Operation(100, "memory", (0,), patches=(0,))
+    device = flip_stream_device.FlipStreamDevice({100: program}, seed=SEED)
+    device.declare_stream(owner, 0)
+    heard = []
+    device.checkpoint_reached.connect(heard.append)
+
+    _run_device_rounds(device, owner, 5)
+
+    rounds = [(snapshot.round_index, snapshot.is_final) for snapshot in heard]
+    assert rounds == [(1, False), (2, False), (3, False), (4, False), (5, True)]
 
 
 def test_its_tables_are_the_live_sources_round_by_round():
@@ -241,6 +292,52 @@ def test_a_drift_to_no_noise_repeats_each_round_from_two_after_it():
     repeated = bits[5:11]
     assert all(round_bits == repeated[0] for round_bits in repeated)
     assert bits[0:4] != [bits[0]] * 4
+
+
+def _checkpoint_after_a_round(history):
+    """The next round run, then the stream as if read out after it."""
+    history.run_round(False)
+    return history.snapshot(100)
+
+
+def _noiseless_readout_run(round_count: int) -> tuple:
+    """(readout events, observable flips) of Stim's circuit, read noiseless.
+
+    Stim's generated memory of round_count rounds, its rounds as written
+    and the instructions after its REPEAT block, the readout, without
+    noise, run by one FlipSimulator under the stream's seed.
+    """
+    circuit = memory_programs.memory_circuit(round_count, 3, "Z", NOISY)
+    instructions = list(circuit)
+    repeat_index = [instruction.name for instruction in instructions].index(
+        "REPEAT"
+    )
+    rounds = circuit[: repeat_index + 1]
+    readout = circuit[repeat_index + 1 :]
+    quiet_readout = readout.without_noise()
+    simulator = stim.FlipSimulator(
+        batch_size=1, seed=SEED, disable_stabilizer_randomization=True
+    )
+    simulator.do(rounds)
+    simulator.do(quiet_readout)
+    detectors = simulator.get_detector_flips()
+    observables = simulator.get_observable_flips()
+    readout_count = quiet_readout.num_detectors
+    events = detectors[detectors.shape[0] - readout_count :, 0]
+    return (
+        tuple(int(bit) for bit in events),
+        tuple(int(bit) for bit in observables[:, 0]),
+    )
+
+
+def _run_device_rounds(device, owner, round_count: int) -> None:
+    """Run the stream's rounds on the device, the last its readout."""
+    after_last_round = round_count + 1
+    for round_index in range(1, after_last_round):
+        is_final = round_index == round_count
+        device.idle_round_payloads(
+            owner, 100, round_index, is_final=is_final, round_period_ticks=1
+        )
 
 
 def _run_plan(plan, round_count: int) -> list:

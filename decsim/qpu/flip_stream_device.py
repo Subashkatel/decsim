@@ -34,9 +34,19 @@ reference"). The formation table is the template's, moved in time
 (detector_error_model/periodic_formation.py). The truth is the
 observables' flips, kept across rollovers. A window's model is a short
 circuit's, moved in time likewise (moved_stream_models.py).
+
+While someone listens to checkpoint_reached, each round also closes a
+copy of the frame and the records the readout reads with the readout
+fragment, noiseless, as Tan et al.'s copies end a run early
+(2209.09219 lines 1003-1037): the stream as if it ended there
+(records/checkpoints.py). Probe: the copy's readout detectors and
+observables equal Stim's own circuit of that many rounds, with a
+noiseless readout, bit for bit (studies a_virtual_readout_probe.py,
+200 of 200 seeds).
 """
 
 import dataclasses
+import functools
 import math
 from collections.abc import Mapping
 from typing import Any, Optional
@@ -51,6 +61,7 @@ import decsim.ports as ports
 import decsim.qpu.moved_stream_models as moved_stream_models
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.records.checkpoints as checkpoint_records
 import decsim.records.circuits as circuit_records
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.formation as formation_records
@@ -75,7 +86,8 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
 
     Programs are keyed by stream, as the live source's are. It keeps no
     whole shot, so shot_sampled is silent and a reference decode of the
-    whole shot has nothing to read.
+    whole shot has nothing to read. checkpoint_reached(snapshot) fires
+    after each round while someone listens.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -145,6 +157,7 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
         self._programs = dict(programs)
         self._streams_by_id: dict = {}
         self._models_by_stream_id: dict = {}
+        self.checkpoint_reached = trace_source.TraceSource()
 
     def declare_stream(
         self,
@@ -343,6 +356,10 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
             raise RuntimeError("a flip stream runs its rounds in order")
         self._mark_stochastic_use()
         bits = history.run_round(is_final)
+        # a copy costs a FlipSimulator and a readout, so only for a listener
+        if self.checkpoint_reached.has_listeners:
+            snapshot = history.snapshot(stream_id)
+            self.checkpoint_reached.fire(snapshot)
         payload = round_records.QPUReadout(
             stream_id,
             stream.owner.patches,
@@ -406,6 +423,61 @@ class FlipHistory:
         flips_over_the_stream = _xor_lists(self.observable_flips, current)
         return tuple(flips_over_the_stream)
 
+    def snapshot(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> checkpoint_records.CheckpointSnapshot:
+        """The stream as if its readout came after the round just run.
+
+        After the real readout it is that readout's. Before, a copy runs
+        the noiseless readout and the stream runs on untouched.
+        """
+        if self.is_final:
+            readout_count = self.plan.readout.num_detectors
+            events = _last_detector_flips(self.simulator, readout_count)
+            truth = self.truth()
+        else:
+            events, truth = self._closed_copy()
+        return checkpoint_records.CheckpointSnapshot(
+            stream_id,
+            self.round_count,
+            events,
+            truth,
+            self.is_final,
+            self.plan.template.program,
+        )
+
+    def _closed_copy(self) -> tuple:
+        """The readout's events and the truth, off a copy read out.
+
+        The copy holds the frame and the records the readout reads, the
+        rollover's own steps, with no random frame of its own; the
+        readout is noiseless, so the copy draws nothing.
+        """
+        simulator = self.simulator
+        frame_x, frame_z = _frame_of(simulator)
+        flips = simulator.get_measurement_flips()
+        reach = self.plan.readout_reach
+        read = flips[flips.shape[0] - reach :]
+        copy = stim.FlipSimulator(
+            batch_size=1,
+            num_qubits=simulator.num_qubits,
+            disable_stabilizer_randomization=True,
+            seed=0,
+        )
+        copy.broadcast_pauli_errors(pauli="X", mask=frame_x)
+        copy.broadcast_pauli_errors(pauli="Z", mask=frame_z)
+        copy.append_measurement_flips(read)
+        copy.do(self.plan.readout)
+        detectors = copy.get_detector_flips()
+        observables = copy.get_observable_flips()
+        events = tuple(int(bit) for bit in detectors[:, 0])
+        read_out = [int(flip) for flip in observables[:, 0]]
+        stream_truth = self.truth()
+        stream_flips = list(stream_truth)
+        truth = _xor_lists(stream_flips, read_out)
+        return events, tuple(truth)
+
     def _roll_over(self) -> None:
         """Let go of the past, keeping the frame and the records reached."""
         simulator = self.simulator
@@ -463,6 +535,20 @@ class RoundPlan:
     def rolls_over_after(self, round_index: int) -> bool:
         """Whether the simulator lets go of its past after this round."""
         return round_index % self.rollover_rounds == 0
+
+    @functools.cached_property
+    def readout(self) -> stim.Circuit:
+        """The final round's readout, noiseless: what follows its round.
+
+        Made when a checkpoint first asks, so a program whose final
+        round is not its repeated round and a readout runs unasked.
+        """
+        return _noiseless_readout(self.template.program)
+
+    @functools.cached_property
+    def readout_reach(self) -> int:
+        """The measurements before the readout that it reads."""
+        return detector_formation.measurements_read_back(self.readout)
 
 
 def scaled_noise(circuit: stim.Circuit, factor: float) -> stim.Circuit:
@@ -580,6 +666,31 @@ def _reference_by_round(program, round_count: int, is_final: bool) -> tuple:
     ):
         by_round[round_index] = sample[start:end]
     return by_round, list(by_round)
+
+
+def _noiseless_readout(
+    program: circuit_records.RepeatedStimCircuit,
+) -> stim.Circuit:
+    """The instructions the final round adds to the repeated round."""
+    repeated = program.repeated_round
+    final = program.final_round
+    length = len(repeated)
+    head = final[:length]
+    if head != repeated:
+        raise ValueError(
+            "not implemented yet: a checkpoint closes a copy with the "
+            "readout the final round adds to the repeated round, and this "
+            "program's final round does not begin with its repeated round"
+        )
+    readout = final[length:]
+    return readout.without_noise()
+
+
+def _last_detector_flips(simulator: stim.FlipSimulator, count: int) -> tuple:
+    """The flips of the last count detectors the simulator ran."""
+    detectors = simulator.get_detector_flips()
+    last = detectors[detectors.shape[0] - count :, 0]
+    return tuple(int(bit) for bit in last)
 
 
 def _frame_of(simulator: stim.FlipSimulator) -> tuple:

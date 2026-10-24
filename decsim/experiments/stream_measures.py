@@ -95,6 +95,9 @@ class StreamMeasurement:
     statistics: list
     statistic_values: list
     escalation_series: list
+    # one row a checkpoint round, when the run closes checkpoints
+    # (observe/checkpoints.py Checkpoints.rows)
+    checkpoints: list
 
 
 class StreamMeasures:
@@ -232,6 +235,7 @@ class StreamMeasures:
             "link_totals": link_totals,
             "statistics": rows,
             "statistic_values": value_counts,
+            "checkpoints": _checkpoint_rows(observation),
         }
 
     def _connect(self, machine: machine_module.Machine) -> None:
@@ -704,6 +708,13 @@ def _unread_windows(windows: dict) -> list:
         for window in windows.values()
         if window.published_request_key is None
     ]
+
+
+def _checkpoint_rows(observation) -> list:
+    """The checkpoints' rows; none when the run closes no checkpoint."""
+    if observation.checkpoints is None:
+        return []
+    return observation.checkpoints.rows()
 
 
 def _scored_owners(result: result_records.RunResult) -> tuple:

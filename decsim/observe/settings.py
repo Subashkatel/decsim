@@ -77,6 +77,14 @@ class ObservationSettings:
     (ErrorModelStimDevice), for window_outcomes.csv
     (observe/window_outcomes.py).
 
+    checkpoint_every_rounds closes a checkpoint of each stream every
+    that many rounds and at its last round: the logical outcome had the
+    stream been read out there, a source copy read out without noise and
+    decoded to the end by a fixed referee at no simulated time (Tan et
+    al. 2209.09219 lines 1003-1037; observe/checkpoints.py). Its rows
+    give the logical error rate of runs of every length from one run
+    (experiments/failure_statistics.py). None, the default, closes none.
+
     The log and the trace are labels (compare=False) and no part of a
     task's id, as sinter keeps output options out of a task's strong id
     (sinter/_data/_task.py:167-204): the writers schedule nothing. The
@@ -100,6 +108,7 @@ class ObservationSettings:
     reaction_deadline_microseconds: Optional[float] = None
     warmup_rounds: int = config.added_field(0)
     folds_windows: bool = config.added_field(False)
+    checkpoint_every_rounds: Optional[int] = config.added_field(None)
 
     def __post_init__(self) -> None:
         """Every value checked, with the sentence the caller reads."""
@@ -141,6 +150,12 @@ class ObservationSettings:
             config.check_microseconds(
                 "observation.reaction_deadline_microseconds",
                 self.reaction_deadline_microseconds,
+            )
+        if self.checkpoint_every_rounds is not None:
+            config.check_whole_count(
+                "observation.checkpoint_every_rounds",
+                self.checkpoint_every_rounds,
+                "rounds",
             )
 
     def records_round(self, round_index: int) -> bool:

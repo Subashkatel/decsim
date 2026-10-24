@@ -7,6 +7,7 @@ from a component. A listener a study did not ask for is None.
 import dataclasses
 from typing import Optional
 
+import decsim.observe.checkpoints as checkpoints_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
@@ -59,3 +60,5 @@ class Observation:
     region_of_interest: Optional[region_of_interest_module.RegionOfInterest] = (
         None
     )
+    # None unless the run closes checkpoints of its streams
+    checkpoints: Optional[checkpoints_module.Checkpoints] = None

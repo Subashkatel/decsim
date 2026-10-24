@@ -84,8 +84,19 @@ class MovedStimModels:
         self, window: window_records.Window
     ) -> fault_models.WindowErrorModel:
         """One window's model: its short circuit's, moved to its rounds."""
-        geometry = self._geometry_of(window)
-        placement = self._placement_of(geometry)
+        return self.for_window_ending_at(window, self.final_round_count)
+
+    def for_window_ending_at(
+        self, window: window_records.Window, final_round: Optional[int]
+    ) -> fault_models.WindowErrorModel:
+        """The window's model in the stream read out at final_round.
+
+        A checkpoint reads a stream out early (records/checkpoints.py),
+        so its last window's model is the one this stream would have had
+        ending there; None is a stream whose end is not known.
+        """
+        geometry = self._geometry_of(window, final_round)
+        placement = self._placement_of(geometry, final_round)
         local = geometry.moved(-placement.shift)
         key = (placement.round_count, local)
         model = self.models.get(
@@ -100,8 +111,9 @@ class MovedStimModels:
         prior_faults: Optional[dict],
     ) -> fault_models.WindowErrorModel:
         """A strong window's model, its priors named as the weak commits."""
-        geometry = self._geometry_of(window)
-        placement = self._placement_of(geometry)
+        final = self.final_round_count
+        geometry = self._geometry_of(window, final)
+        placement = self._placement_of(geometry, final)
         local = geometry.moved(-placement.shift)
         frame = self.frames.frame(placement.round_count)
         exclusions = _moved_ranges(fault_exclusion_ranges, -placement.shift)
@@ -122,12 +134,13 @@ class MovedStimModels:
         named = frame.named(model)
         return self._moved(named, placement.shift)
 
-    def _geometry_of(self, window: window_records.Window) -> "_Geometry":
+    def _geometry_of(
+        self, window: window_records.Window, final: Optional[int]
+    ) -> "_Geometry":
         if window.closed_temporal_boundaries:
             raise ValueError(
                 "live Stim streams require trailing-buffer feedback"
             )
-        final = self.final_round_count
         last_buffer_round = window.buffer_hi
         if final is not None:
             last_buffer_round = min(last_buffer_round, final)
@@ -140,7 +153,9 @@ class MovedStimModels:
             is_last=is_last,
         )
 
-    def _placement_of(self, geometry: "_Geometry") -> "_Placement":
+    def _placement_of(
+        self, geometry: "_Geometry", final: Optional[int]
+    ) -> "_Placement":
         """The short circuit a window is sliced on, and the move to it.
 
         Its faults lie in the rounds from lowest to highest. The first
@@ -151,7 +166,6 @@ class MovedStimModels:
         lowest = geometry.start_round - self.span
         highest = geometry.last_buffer_round + self.span
         first_repeated_only = self.template.prefix_rounds + 2
-        final = self.final_round_count
         near_end = final is not None and highest >= final
         if lowest <= first_repeated_only:
             return _unmoved_placement(highest, final, near_end)

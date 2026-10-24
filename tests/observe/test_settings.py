@@ -52,6 +52,11 @@ PYTHON_REFUSALS = [
         {"folds_windows": True, "record_window_outcomes": True},
         "not implemented yet: observation.record_window_outcomes keeps",
     ),
+    (
+        {"checkpoint_every_rounds": 0},
+        "observation.checkpoint_every_rounds must be a whole number of "
+        "rounds, at least 1",
+    ),
 ]
 
 

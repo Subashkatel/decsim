@@ -19,6 +19,7 @@ import decsim.build.windows as windows_part
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.engine as engine_module
 import decsim.links.settings as link_settings
+import decsim.observe.checkpoints as checkpoints_module
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
@@ -42,6 +43,9 @@ import decsim.observe.window_outcomes as window_outcomes_module
 import decsim.ports as ports
 import decsim.statistics.registry as statistics_registry
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 
 def observe(
@@ -119,6 +123,9 @@ def observe(
             region_of_interest.round_read_out
         )
     frame_corrections = _frame_corrections(control.pauli_frame, keeps_records)
+    checkpoints = _checkpoints(
+        observation, qpu, window_manager, decoder_managers
+    )
     return observation_module.Observation(
         log=log,
         windows=window_ledger,
@@ -140,6 +147,7 @@ def observe(
         round_events=round_events,
         confidence=confidence,
         region_of_interest=region_of_interest,
+        checkpoints=checkpoints,
     )
 
 
@@ -564,6 +572,51 @@ def _connect_window_outcomes(
     results.trace.contributions_delivered.connect(
         window_outcomes.contributions_delivered
     )
+
+
+def _checkpoints(
+    observation: observe_settings.ObservationSettings,
+    qpu,
+    window_manager,
+    decoder_managers: tuple,
+) -> Optional[checkpoints_module.Checkpoints]:
+    """The streams' checkpoints, only when the section spaces them.
+
+    The referee is PyMatching, one fixed decoder whatever the machine
+    decodes with, so checkpoints of two machines are closed alike.
+    """
+    every_rounds = observation.checkpoint_every_rounds
+    if every_rounds is None:
+        return None
+    referee = minimum_weight_perfect_matching.PyMatchingDecoder()
+    checkpoints = checkpoints_module.Checkpoints(every_rounds, referee)
+    _connect_checkpoints(checkpoints, qpu, window_manager, decoder_managers)
+    return checkpoints
+
+
+def _connect_checkpoints(
+    checkpoints: checkpoints_module.Checkpoints,
+    qpu,
+    window_manager,
+    decoder_managers: tuple,
+) -> None:
+    """The source's copies, the rounds, the windows and every decode."""
+    source = qpu.syndrome_source
+    source.checkpoint_reached.connect(checkpoints.checkpoint_reached)
+    if not source.checkpoint_reached.has_listeners:
+        raise ValueError(
+            "observation.checkpoint_every_rounds needs a source that copies "
+            "its state each round, the flip stream "
+            "(qpu/flip_stream_device.py); this run's source copies none"
+        )
+    qpu.device.trace.round_emitted.connect(checkpoints.round_emitted)
+    sources = window_manager.window_sources()
+    sources.window_planned.connect(checkpoints.window_planned)
+    sources.window_final.connect(checkpoints.window_final)
+    for manager in decoder_managers:
+        outcomes = manager.outcomes.trace
+        outcomes.request_ended.connect(checkpoints.request_ended)
+        outcomes.verdict_given.connect(checkpoints.verdict_given)
 
 
 def _frame_corrections(

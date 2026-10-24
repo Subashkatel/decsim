@@ -23,8 +23,8 @@ each pool's own row, and the logical outcome of the end readouts, a
 failure when any patch's is wrong; and, for a task whose
 threshold moves (collect.Task.online_threshold), that source's summary
 and its trajectory of (windows, threshold in nats, event). A logical failure
-inside the stream is not counted: no source defines one inside an
-unbounded stream.
+inside the stream is a checkpoint's (observation.checkpoint_every_rounds,
+observe/checkpoints.py): the outcome had the stream been read out there.
 
 A shape a stream does not build yet is refused, each "not implemented
 yet" with its reason: a workload other than decoded Stim memory

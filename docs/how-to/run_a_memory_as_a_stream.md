@@ -69,6 +69,7 @@ warmup, the seed, and the measurement
 | `pool_rows` | each pool's own queue peak, busy fraction, offered load, committed and escalated windows past the warmup, as `shot_pools.csv` holds for a shot |
 | `statistics` | every part's statistic rows over the region of interest |
 | `escalation_series` | every hundredth committed window: the windows committed, the escalated among them and its first committed round |
+| `checkpoints` | one row a checkpoint, when the run closes checkpoints (section 4); empty otherwise |
 
 A task whose threshold moves (a `RateThreshold` or `OnlineThreshold`)
 adds `online_threshold`: the source's summary and its trajectory of
@@ -78,6 +79,59 @@ The means are exactly those `decsim run` reports for the same windows,
 and so is every other number both compute (`escalation_series` is the
 stream's alone)
 (`tests/experiments/test_stream_measures.py`).
+
+## 4. Measure the logical error rate during the stream
+
+A stream has one readout, so it has one logical outcome. A checkpoint
+gives the outcome the stream would have had if it had been read out at
+an earlier round, and the stream goes on unchanged. Ask for one every
+K rounds:
+
+```
+decsim stream run.py --rounds 2000 --seed 1 --set observation.checkpoint_every_rounds=50 --out s1.json
+```
+
+At each checkpoint the source copies its state and reads the copy out
+without noise (`decsim/records/checkpoints.py`). The windows that read
+only earlier rounds keep their final answers, because they are the
+same in a stream that ends there. PyMatching decodes the rest of the
+rounds as one last window, with the copy's readout and the boundary
+the last kept window hands on (`decsim/observe/checkpoints.py`). This
+takes no simulated time, and no decoder or threshold reads it. Tan et
+al. measure their per-round rates the same way (2209.09219, Section
+S3 C).
+
+Each row of `checkpoints` holds:
+
+- `round` is the checkpoint's round. The stream's last round is always
+  a checkpoint, and that row's outcome is the stream's own.
+- `failed` holds one outcome for each patch, true when the prediction
+  was wrong, or null when a kept window gave no prediction.
+- `windows` and `escalated_windows` count the kept windows and the
+  ones the policy sent to the strong decoder. Their ratio is the
+  escalated share up to that round.
+
+Give the memory noiseless time boundaries
+(`noiseless_time_boundaries`), so that the stream's own last readout is
+as clean as the checkpoints' readouts. Then run many seeds and fit the
+per-round rate with its interval. The interval comes from a bootstrap
+over whole streams, because the checkpoints of one stream share its
+rounds:
+
+```python
+streams = [json.loads(path.read_text()) for path in sorted(folder.glob("s*.json"))]
+rows = [stream["measurement"]["checkpoints"] for stream in streams]
+rounds = [row["round"] for row in rows[0]]
+failed = [[any(row["failed"]) for row in stream_rows] for stream_rows in rows]
+fit = failure_statistics.per_round_rate_over_checkpoints(rounds, failed)
+```
+
+`fit.per_round_rate` is the rate, and `fit.low` and `fit.high` bound its
+95 percent interval (`decsim/experiments/failure_statistics.py`). A
+checkpoint round with no failure in any stream is refused, so leave the
+early rounds out. With a moving threshold, the rate is the average over
+the rounds fitted, and `online_threshold` gives the threshold at each
+window count.
 
 ## What a stream does not build yet
 
@@ -93,7 +147,8 @@ Each of these is refused, "not implemented yet", with its reason:
   measures do not read;
 - the double window on a stream, which absorbs windows a stream has not
   laid yet;
-- a logical failure counted inside the stream, which no source defines.
+- a logical failure counted inside the stream other than at a
+  checkpoint (section 4).
 
 [How to build each switching pattern](build_each_switching_pattern.md#what-is-refused-for-now)
 lists every refusal.

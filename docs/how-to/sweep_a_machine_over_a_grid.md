@@ -187,3 +187,8 @@ the shots the pair failed and the strong decoder alone did not
 repaired more times than the fast decoder alone, and `repairs.p_value`
 is McNemar's exact test of those two counts. Only the shots all three
 runs scored are compared.
+
+`repairs.best_of_two_failures` counts the shots that the fast decoder
+alone and the strong one alone both failed. A pair that chose the
+right decoder for every shot fails only these shots, so this count is
+the lowest line for the pair: plot it beside `repairs.pair_failures`.

@@ -9,6 +9,12 @@ the observable truth, tune.py lines 76-99, studies/adaptive-threshold):
 - broken: the fast decoder alone did not fail it and the pair did;
 - missed: the pair failed it and the strong decoder alone did not.
 
+The best-of-two line is the shots both decoders alone failed: a pair
+that chose the right decoder for every shot fails only those, so no
+choice per shot between the two fails fewer. It is the ensemble
+decoder that is right when at least one of its decoders is (Sheth et
+al. 1905.02345 lines 186-196, equation 1).
+
 Over the same shots the pair fails broken - repaired more times than
 the fast decoder alone, and McNemar's exact test reads those two
 counts (failure_statistics.exact_mcnemar). The runs are read from
@@ -27,14 +33,17 @@ import decsim.experiments.fold as fold
 class PairedRepairs:
     """The pair's effect on the shots all three runs scored.
 
-    p_value is McNemar's exact two-sided p that the pair and the fast
-    decoder alone fail as often, read off repaired and broken.
+    best_of_two_failures is the best-of-two line: the shots the fast
+    decoder alone and the strong one alone both failed. p_value is
+    McNemar's exact two-sided p that the pair and the fast decoder alone
+    fail as often, read off repaired and broken.
     """
 
     shots: int
     fast_failures: int
     strong_failures: int
     pair_failures: int
+    best_of_two_failures: int
     repaired: int
     broken: int
     missed: int
@@ -70,12 +79,14 @@ def paired_repairs(
     repaired = fast_failed - pair_failed
     broken = pair_failed - fast_failed
     missed = pair_failed - strong_failed
+    both_failed = fast_failed & strong_failed
     p_value = failure_statistics.exact_mcnemar(len(repaired), len(broken))
     return PairedRepairs(
         shots=len(seeds),
         fast_failures=len(fast_failed),
         strong_failures=len(strong_failed),
         pair_failures=len(pair_failed),
+        best_of_two_failures=len(both_failed),
         repaired=len(repaired),
         broken=len(broken),
         missed=len(missed),

@@ -51,11 +51,23 @@ def test_a_hand_made_set_of_shots_counts_each_kind_on_the_shared_seeds():
         fast_failures=3,
         strong_failures=1,
         pair_failures=3,
+        best_of_two_failures=1,
         repaired=1,
         broken=1,
         missed=2,
         p_value=1.0,
     )
+
+
+def test_the_best_of_two_line_is_under_each_decoder_alone_property():
+    generator = numpy.random.default_rng(seed=11)
+    for _ in range(200):
+        fast = _random_outcomes(generator)
+        strong = _random_outcomes(generator)
+        pair = _random_outcomes(generator)
+        repairs = paired_shots.paired_repairs(fast, strong, pair)
+        fewer_alone = min(repairs.fast_failures, repairs.strong_failures)
+        assert repairs.best_of_two_failures <= fewer_alone
 
 
 def test_the_pair_fails_broken_minus_repaired_more_than_fast_alone_property():

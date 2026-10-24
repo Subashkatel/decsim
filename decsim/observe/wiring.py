@@ -583,7 +583,9 @@ def _checkpoints(
     """The streams' checkpoints, only when the section spaces them.
 
     The referee is PyMatching, one fixed decoder whatever the machine
-    decodes with, so checkpoints of two machines are closed alike.
+    decodes with, so checkpoints of two machines are closed alike. A
+    checkpoint is the outcome of a separate stream of its rounds only
+    when the machine decodes its last window with PyMatching too.
     """
     every_rounds = observation.checkpoint_every_rounds
     if every_rounds is None:

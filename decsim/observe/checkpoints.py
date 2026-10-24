@@ -16,7 +16,10 @@ ends the decoding there, at zero simulated time, by one law:
   that ends the stream, by a fixed referee: PyMatching on the model the
   stream would have had ending there (qpu/moved_stream_models.py).
 
-The checkpoint fails when that prediction is not the copy's truth. No
+The checkpoint fails when that prediction is not the copy's truth. It
+is the outcome of a separate stream of its rounds, seed by seed, when
+the machine decodes its last window with PyMatching too; a machine
+with another decoder there fails some other seeds. No
 component reads any of this; the listener hears the source, the device,
 the window side and the decoder managers through their trace sources.
 """

@@ -104,12 +104,22 @@ S3 C).
 Each row of `checkpoints` holds:
 
 - `round` is the checkpoint's round. The stream's last round is always
-  a checkpoint, and that row's outcome is the stream's own.
+  a checkpoint.
 - `failed` holds one outcome for each patch, true when the prediction
   was wrong, or null when a kept window gave no prediction.
 - `windows` and `escalated_windows` count the kept windows and the
   ones the policy sent to the strong decoder. Their ratio is the
   escalated share up to that round.
+
+A checkpoint's outcome is that of a separate stream of its rounds,
+seed by seed, only when the machine decodes its last window with
+PyMatching, as the referee does. A machine with another decoder there
+gets a different outcome on some seeds, and that includes the
+checkpoint at the stream's last round. In the basic case at d = 5,
+p = 0.003, the switching machine (union-find, with belief matching
+redoing weak windows) failed 46 of 1500 checkpoints at round 15 and 28
+of 1500 separate streams of 15 rounds, on the same seeds. The
+checkpoints measure the referee's last window, not the machine's.
 
 Give the memory noiseless time boundaries
 (`noiseless_time_boundaries`), so that the stream's own last readout is

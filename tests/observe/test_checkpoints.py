@@ -1,9 +1,10 @@
 """Each checkpoint of a stream, closed as if the stream ended there.
 
-The referent is the stream's own end: at its last round a checkpoint
-reads the real readout, and with no buffer the window that closes it
-is the stream's own last window, decoded by the same PyMatching, so its
-outcome must be the stream's, seed by seed. A checkpoint keeps the
+The referents are the stream's own end and separate streams of each
+checkpoint's rounds, on the same seed. The machine decodes every window
+with PyMatching, as the referee does, so the window that closes a
+checkpoint is the separate stream's last window, from the same noise,
+and the outcomes must be the same, seed by seed. A checkpoint keeps the
 windows that read only rounds before it (Tan et al. 2209.09219 lines
 1003-1037), the closing window reads the boundary the last of them
 hands on, as the next window would (windows/decode_requests.py), and a
@@ -33,6 +34,8 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 # p = 0.01 at d = 3 fails about one stream of 40 rounds in three
 PROBABILITY = 0.01
 ROUNDS = 40
+# the checkpoints before the end of a stream checkpointed every 10
+EARLY_CHECKPOINTS = (10, 20, 30)
 
 
 def _task(buffer_rounds: int, every_rounds) -> decsim.Task:
@@ -57,6 +60,22 @@ def _measurement(task: decsim.Task, seed: int) -> dict:
     return record["measurement"]
 
 
+def _early_failures(measurement: dict) -> list:
+    rows = measurement["checkpoints"][:-1]
+    return [row["failed"][0] for row in rows]
+
+
+def _separate_failures(task: decsim.Task, seed: int) -> list:
+    """The outcomes of separate streams of the early checkpoints' rounds."""
+    return [_stream_failed(task, rounds, seed) for rounds in EARLY_CHECKPOINTS]
+
+
+def _stream_failed(task: decsim.Task, rounds: int, seed: int) -> bool:
+    record = stream_command.stream_record(task, rounds, 0, seed)
+    measurement = record["measurement"]
+    return measurement["logical_failure"]
+
+
 def test_the_last_checkpoint_is_the_streams_own_end_outcome():
     task = _task(0, 10)
 
@@ -69,6 +88,22 @@ def test_the_last_checkpoint_is_the_streams_own_end_outcome():
     ]
     assert [False] in ends
     assert [True] in ends
+
+
+def test_a_checkpoint_is_a_separate_stream_of_its_rounds_seed_by_seed():
+    """A buffer of d rounds: the closing window is the separate one's last."""
+    checkpointed_task = _task(3, 10)
+    plain_task = _task(3, None)
+    seeds = range(8)
+
+    measurements = [_measurement(checkpointed_task, seed) for seed in seeds]
+    separate = [_separate_failures(plain_task, seed) for seed in seeds]
+
+    early = [_early_failures(measurement) for measurement in measurements]
+    assert early == separate
+    assert [False, False, False] in separate
+    assert [True, True, True] in separate
+    assert [False, True, True] in separate
 
 
 @pytest.mark.parametrize(

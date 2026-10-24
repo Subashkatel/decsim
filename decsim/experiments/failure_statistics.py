@@ -6,7 +6,8 @@ no earlier than a minimum shot count, or at a cap. The intervals are
 exact for that rule. The per-round rate over runs of several lengths
 is a fit, with a normal interval (per_round_rate_over_lengths), or over
 many streams' checkpoints, with a bootstrap interval
-(per_round_rate_over_checkpoints).
+(per_round_rate_over_checkpoints). Two runs of the same shots are
+compared by McNemar's exact test (exact_mcnemar).
 """
 
 import dataclasses
@@ -268,6 +269,22 @@ def per_round_rate_over_checkpoints(
     low = float(interval.low)
     high = float(interval.high)
     return DecayFit(fit.per_round_rate, low, high, fit.boundary_rate)
+
+
+def exact_mcnemar(first_only: int, second_only: int) -> float:
+    """McNemar's exact two-sided p of two runs over the same shots.
+
+    first_only and second_only are the shots only one run failed. Under
+    the hypothesis that both fail as often, each such shot is a fair
+    coin, so the p is the two-sided binomial test of first_only in their
+    sum at one half (scipy.stats.binomtest; the basic case's
+    window_check_plots.py sums the same tail). No such shot gives 1.
+    """
+    discordant = first_only + second_only
+    if discordant == 0:
+        return 1.0
+    test = scipy.stats.binomtest(first_only, discordant, 0.5)
+    return float(test.pvalue)
 
 
 def _rate_of_columns(rounds: Sequence[int], *columns: numpy.ndarray) -> float:

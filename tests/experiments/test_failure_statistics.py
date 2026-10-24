@@ -10,7 +10,8 @@
 - Decay fit over several lengths: Stim's rotated memory circuits decoded
   whole by PyMatching, a long one against short ones; the closed form of
   Tan et al. 2209.09219 eq. S4; and its coverage on counts numpy draws
-  from that law, apart and as checkpoints of shared runs.
+  from that law, apart and as checkpoints of shared runs, the last with
+  Tan's conservative variance and with scipy's bootstrap over streams.
 """
 
 import math
@@ -286,21 +287,48 @@ def test_checkpoints_of_shared_runs_hold_the_true_rate_property():
     """Every length a checkpoint of the same 4,000 runs: Tan's eq. S9."""
     generator = numpy.random.default_rng(6)
     shots = [4_000] * len(DECAY_LENGTHS)
-    gaps = numpy.diff(DECAY_LENGTHS, prepend=0)
     held = 0
     for _ in range(DECAY_DRAWS):
-        flips = generator.binomial(gaps, DECAY_PER_ROUND, size=(4_000, 5))
-        parities = numpy.cumsum(flips, axis=1) % 2
-        # each checkpoint's own readout flips it once, apart from the rest
-        readouts = generator.random((4_000, 5)) < DECAY_BOUNDARY
-        wrong = parities ^ readouts
-        failures = numpy.sum(wrong, axis=0)
+        failed = _checkpointed_streams(generator, 4_000)
+        failures = numpy.sum(failed, axis=0)
         fit = failure_statistics.per_round_rate_over_lengths(
             DECAY_LENGTHS, failures, shots, lengths_share_runs=True
         )
         held += fit.low <= DECAY_PER_ROUND <= fit.high
 
     assert held / DECAY_DRAWS >= 0.95
+
+
+def test_a_bootstrap_over_streams_holds_the_rate_95_times_in_100_property():
+    """100 draws of 4,000 checkpointed streams, 200 resamples each."""
+    generator = numpy.random.default_rng(7)
+    held = 0
+    for _ in range(100):
+        failed = _checkpointed_streams(generator, 4_000)
+        fit = failure_statistics.per_round_rate_over_checkpoints(
+            DECAY_LENGTHS, failed, resamples=200, seed=1
+        )
+        held += fit.low <= DECAY_PER_ROUND <= fit.high
+
+    assert 0.88 <= held / 100 <= 0.99
+
+
+def test_the_checkpoint_fit_is_the_fit_over_the_summed_failures():
+    generator = numpy.random.default_rng(8)
+    failed = _checkpointed_streams(generator, 4_000)
+
+    fit = failure_statistics.per_round_rate_over_checkpoints(
+        DECAY_LENGTHS, failed, resamples=50
+    )
+
+    failures = numpy.sum(failed, axis=0)
+    shots = [4_000] * 5
+    summed = failure_statistics.per_round_rate_over_lengths(
+        DECAY_LENGTHS, failures, shots
+    )
+    assert fit.per_round_rate == summed.per_round_rate
+    assert fit.boundary_rate == summed.boundary_rate
+    assert fit.low < fit.per_round_rate < fit.high
 
 
 def test_a_fit_refuses_a_length_with_no_failure():
@@ -354,6 +382,20 @@ def _memory_failures(rounds):
     wrong = predictions != observables
     failures = numpy.sum(wrong)
     return int(failures)
+
+
+def _checkpointed_streams(generator, stream_count: int):
+    """Each stream's failure at each decay length, one run checkpointed.
+
+    The rounds between two lengths flip the stream with the decay law's
+    rate; each checkpoint's own readout flips it once, apart.
+    """
+    gaps = numpy.diff(DECAY_LENGTHS, prepend=0)
+    shape = (stream_count, len(DECAY_LENGTHS))
+    flips = generator.binomial(gaps, DECAY_PER_ROUND, size=shape)
+    parities = numpy.cumsum(flips, axis=1) % 2
+    readouts = generator.random(shape) < DECAY_BOUNDARY
+    return parities ^ readouts
 
 
 def _decay_probabilities(lengths):

@@ -4,11 +4,14 @@ Pure functions over failure counts. A task stops by a truncated inverse
 binomial rule: at the shot where its scored failures reach the target,
 no earlier than a minimum shot count, or at a cap. The intervals are
 exact for that rule. The per-round rate over runs of several lengths
-is a fit, with a normal interval (per_round_rate_over_lengths).
+is a fit, with a normal interval (per_round_rate_over_lengths), or over
+many streams' checkpoints, with a bootstrap interval
+(per_round_rate_over_checkpoints).
 """
 
 import dataclasses
 import enum
+import functools
 import math
 from collections.abc import Sequence
 from typing import Optional
@@ -226,6 +229,53 @@ def per_round_rate_over_lengths(
     boundary = _flip_rate_of(intercept)
     floored_low = max(low, 0.0)
     return DecayFit(per_round, floored_low, high, boundary)
+
+
+def per_round_rate_over_checkpoints(
+    rounds: Sequence[int],
+    failed_by_stream: Sequence[Sequence[bool]],
+    resamples: int = 1000,
+    seed: int = 0,
+) -> DecayFit:
+    """The decay fit over many streams' checkpoints, its interval by bootstrap.
+
+    failed_by_stream holds one row a stream, one entry a checkpoint at
+    the matching rounds (observe/checkpoints.py). A stream's checkpoints
+    share its rounds, so their failures are correlated, and the streams
+    are independent: the fit is per_round_rate_over_lengths over the
+    failures summed across streams, and its interval is the 2.5 and
+    97.5 percentiles of the same fit over streams drawn again with
+    replacement, a whole stream at a time (scipy.stats.bootstrap,
+    paired, the percentile method).
+    """
+    failed = numpy.asarray(failed_by_stream, dtype=int)
+    stream_count = failed.shape[0]
+    failures = numpy.sum(failed, axis=0)
+    shots = [stream_count] * len(rounds)
+    fit = per_round_rate_over_lengths(rounds, failures, shots)
+    rate_of = functools.partial(_rate_of_columns, rounds)
+    columns = tuple(failed.T)
+    result = scipy.stats.bootstrap(
+        columns,
+        rate_of,
+        n_resamples=resamples,
+        paired=True,
+        vectorized=False,
+        method="percentile",
+        rng=seed,
+    )
+    interval = result.confidence_interval
+    low = float(interval.low)
+    high = float(interval.high)
+    return DecayFit(fit.per_round_rate, low, high, fit.boundary_rate)
+
+
+def _rate_of_columns(rounds: Sequence[int], *columns: numpy.ndarray) -> float:
+    """The fitted rate of one resample, a column a checkpoint."""
+    failures = [numpy.sum(column) for column in columns]
+    shots = [len(column) for column in columns]
+    fit = per_round_rate_over_lengths(rounds, failures, shots)
+    return fit.per_round_rate
 
 
 def _check_lengths(

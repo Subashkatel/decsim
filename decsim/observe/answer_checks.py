@@ -174,7 +174,6 @@ class _StreamChecks:
         # the laid windows not checked yet, in index order
         self.windows: list = []
         self.final_keys: set = set()
-        self.final_round: Optional[int] = None
         self.chains = {path: _Chain() for path in paths}
         # made at the first copy, which carries the stream's program
         self.closing: Optional[closing_windows.ClosingWindows] = None
@@ -190,8 +189,6 @@ class _StreamChecks:
                 snapshot.program, closer
             )
         self.snapshots[snapshot.round_index] = snapshot
-        if snapshot.is_final:
-            self.final_round = snapshot.round_index
 
     def check_ready(self) -> None:
         """Check the windows in order while the next one can be."""
@@ -217,13 +214,27 @@ class _StreamChecks:
             return None
         after_last_read = window.buffer_hi + 1
         check_round = after_last_read
-        if self.final_round is not None:
-            check_round = min(after_last_read, self.final_round)
+        final_round = self._final_round()
+        if final_round is not None:
+            check_round = min(after_last_read, final_round)
         if check_round not in self.snapshots:
             return None
         if check_round not in self.packets:
             return None
         return check_round
+
+    def _final_round(self) -> Optional[int]:
+        """The stream's last round once its readout ran, else None.
+
+        The copy of the last round is never let go: no check comes after
+        it.
+        """
+        if not self.snapshots:
+            return None
+        latest = max(self.snapshots)
+        if self.snapshots[latest].is_final:
+            return latest
+        return None
 
     def _tail_after(self, check_round: int) -> Optional[list]:
         """The laid windows after it that commit a round up to the check's.
@@ -249,7 +260,7 @@ class _StreamChecks:
         deciding = window
         if window.buffer_hi >= check_round:
             deciding = closing_windows.ending_on(window, check_round)
-        is_last = not tail and check_round == self.final_round
+        is_last = not tail and check_round == self._final_round()
         answered_by_boundary: dict = {}
         for path, chain in self.chains.items():
             boundary_ids = chain.boundary_ids

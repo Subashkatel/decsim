@@ -132,3 +132,36 @@ as its source.
 
 An assignment that only changes a value the cells share, such as
 `--set weak.unit_count=2` under a distance sweep, is kept.
+
+## 6. Fit the per-round rate over several lengths
+
+The per-round rate of one length mixes in the flip that preparation
+and the final readout add once. Tan et al. remove it with a fit over
+several lengths: 1 - 2 P(n) = (1 - 2 q)(1 - 2 e)^n (2209.09219,
+equations S3 to S6). Sweep the length as an axis:
+
+```python
+grid={
+    "workload.rounds_per_distance": [None],
+    "workload.rounds": [6, 12, 18, 24, 30],
+},
+```
+
+Then fit the folded counts of `sweep.csv`, one task for each length:
+
+```python
+rows = list(csv.DictReader(open("results/sweep.csv")))
+fit = failure_statistics.per_round_rate_over_lengths(
+    [int(row["workload.rounds"]) for row in rows],
+    [int(row["prefix_failures"]) for row in rows],
+    [int(row["prefix_scored_shots"]) for row in rows],
+)
+```
+
+`fit.per_round_rate` is e, `fit.low` and `fit.high` bound its 95
+percent interval, and `fit.boundary_rate` is q
+(`decsim/experiments/failure_statistics.py`). A length with no failure,
+or with failures at one half or above, is refused. Tan et al. fit the
+lengths from 2 (d + 1) to 5 (d + 1) rounds, and leave out the shorter
+ones, where the decay is not yet steady. With several patches, a shot
+fails when any patch does, so the fit gives the rate of that union.

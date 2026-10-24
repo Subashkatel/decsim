@@ -3,20 +3,25 @@
 Pure functions over failure counts. A task stops by a truncated inverse
 binomial rule: at the shot where its scored failures reach the target,
 no earlier than a minimum shot count, or at a cap. The intervals are
-exact for that rule.
+exact for that rule. The per-round rate over runs of several lengths
+is a fit, with a normal interval (per_round_rate_over_lengths).
 """
 
 import dataclasses
 import enum
 import math
+from collections.abc import Sequence
 from typing import Optional
 
+import numpy
 import scipy.stats
 
 # The 95 percent intervals put 2.5 percent on each side (NIST/SEMATECH
 # e-Handbook 7.2.4.1).
 LOWER_QUANTILE = 0.025
 UPPER_QUANTILE = 0.975
+# The normal quantile of a two-sided 95 percent interval, about 1.96.
+NORMAL_UPPER_QUANTILE = scipy.stats.norm.ppf(UPPER_QUANTILE)
 
 
 class StopKind(enum.Enum):
@@ -164,6 +169,151 @@ def per_output_round_rate(shot_rate: float, outputs: int, rounds: int) -> float:
     output_log_survival = math.log1p(-shot_rate) / outputs
     output_rate = -math.expm1(output_log_survival)
     return per_round_rate(output_rate, rounds)
+
+
+@dataclasses.dataclass(frozen=True)
+class DecayFit:
+    """The per-round failure rate that runs of several lengths give.
+
+    Each round flips the outcome with probability per_round_rate (e),
+    and preparation and the final readout flip it once more with
+    probability boundary_rate (q), so a run of n rounds fails with a
+    probability P(n) where 1 - 2 P(n) = (1 - 2 q)(1 - 2 e)^n (Tan et
+    al. 2209.09219 eq. S4). low and high bound e's 95 percent interval.
+    """
+
+    per_round_rate: float
+    low: float
+    high: float
+    boundary_rate: float
+
+
+def per_round_rate_over_lengths(
+    rounds: Sequence[int],
+    failures: Sequence[int],
+    shots: Sequence[int],
+    lengths_share_runs: bool = False,
+) -> DecayFit:
+    """The fit of 1 - 2 P(n) = (1 - 2 q)(1 - 2 e)^n over the lengths.
+
+    Tan et al. eq. S5-S8: a weighted least squares line through
+    y = log(1 - 2 P) against n, each length weighted by one over
+    Var(y) = (2 / (2 P - 1))^2 P (1 - P) / N. Its slope is log(1 - 2 e)
+    and its intercept log(1 - 2 q). Runs drawn apart for each length
+    give the slope the usual variance, one over the sum of w x^2, with
+    x the length less the weighted mean length. Checkpoints of one run
+    share their rounds, so their rates are correlated, and
+    lengths_share_runs takes Tan's conservative variance (eq. S9). The
+    interval is the slope plus or minus 1.96 standard deviations, as
+    in Tan's Fig. S8, mapped to e.
+    """
+    _check_lengths(rounds, failures, shots)
+    rates = numpy.divide(failures, shots)
+    doubled = 2 * rates
+    logs = numpy.log1p(-doubled)
+    weights = _decay_weights(rates, shots)
+    line = _fitted_line(rounds, logs, weights, lengths_share_runs)
+    slope, intercept, deviation = line
+    margin = NORMAL_UPPER_QUANTILE * deviation
+    steeper = slope - margin
+    shallower = slope + margin
+    # e falls as the slope rises, so the shallower slope gives e's low
+    # end; a rate is not below zero, where data too few to tell e from
+    # zero would put it
+    per_round = _flip_rate_of(slope)
+    low = _flip_rate_of(shallower)
+    high = _flip_rate_of(steeper)
+    boundary = _flip_rate_of(intercept)
+    floored_low = max(low, 0.0)
+    return DecayFit(per_round, floored_low, high, boundary)
+
+
+def _check_lengths(
+    rounds: Sequence[int], failures: Sequence[int], shots: Sequence[int]
+) -> None:
+    if not len(rounds) == len(failures) == len(shots):
+        raise ValueError(
+            "a decay fit takes one failure count and one shot count for "
+            f"each length; got {len(rounds)} lengths, {len(failures)} "
+            f"failure counts and {len(shots)} shot counts"
+        )
+    if len(set(rounds)) < 2:
+        raise ValueError(
+            "a decay fit needs runs of at least two lengths to draw a "
+            f"line; got the lengths {list(rounds)}"
+        )
+    for length, failed, count in zip(rounds, failures, shots, strict=True):
+        _check_rate(length, failed, count)
+
+
+def _check_rate(length: int, failed: int, count: int) -> None:
+    # no failure gives a variance of zero and so an infinite weight; at
+    # one half or above, log(1 - 2 P) is not defined
+    if failed == 0:
+        raise ValueError(
+            f"the runs of {length} rounds have no failure in {count} "
+            "shots, which gives no variance to weigh them by; run more "
+            "shots or leave that length out"
+        )
+    if 2 * failed >= count:
+        raise ValueError(
+            f"the runs of {length} rounds fail {failed} times in {count} "
+            "shots, at least one half, where log(1 - 2 P) is not "
+            "defined; fit shorter lengths"
+        )
+
+
+def _decay_weights(rates: numpy.ndarray, shots: Sequence[int]) -> numpy.ndarray:
+    # Tan et al. eq. S7-S8: the binomial variance of P, carried to
+    # log(1 - 2 P) by the delta method
+    rate_variance = rates * (1 - rates) / numpy.asarray(shots)
+    log_derivative = 2 / (2 * rates - 1)
+    log_variance = log_derivative**2 * rate_variance
+    return 1 / log_variance
+
+
+def _fitted_line(
+    rounds: Sequence[int],
+    logs: numpy.ndarray,
+    weights: numpy.ndarray,
+    lengths_share_runs: bool,
+) -> tuple:
+    """The line's slope, its intercept and the slope's deviation."""
+    lengths = numpy.asarray(rounds, dtype=float)
+    mean_length = numpy.average(lengths, weights=weights)
+    mean_log = numpy.average(logs, weights=weights)
+    offsets = lengths - mean_length
+    weighted_offsets = weights * offsets
+    spread = numpy.dot(weighted_offsets, offsets)
+    slope = numpy.dot(weighted_offsets, logs) / spread
+    intercept = mean_log - slope * mean_length
+    deviation = _slope_deviation(weights, offsets, spread, lengths_share_runs)
+    return float(slope), float(intercept), deviation
+
+
+def _slope_deviation(
+    weights: numpy.ndarray,
+    offsets: numpy.ndarray,
+    spread: float,
+    lengths_share_runs: bool,
+) -> float:
+    if not lengths_share_runs:
+        variance = 1 / spread
+        return math.sqrt(variance)
+    # Tan et al. eq. S9: the slope's deviation if every length's error
+    # moved together, the sum of |x| w sqrt(Var(y)) over the sum of w x^2;
+    # w sqrt(Var(y)) is sqrt(w)
+    magnitudes = numpy.abs(offsets)
+    roots = numpy.sqrt(weights)
+    together = numpy.dot(magnitudes, roots)
+    deviation = together / spread
+    return float(deviation)
+
+
+def _flip_rate_of(log_survival: float) -> float:
+    # 1 - 2 e = exp(log_survival), in the form that keeps a small rate's
+    # digits (per_round_rate)
+    return -math.expm1(log_survival) / 2
 
 
 def _upper_limit(

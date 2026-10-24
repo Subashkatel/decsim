@@ -17,7 +17,7 @@ ends the decoding there, at zero simulated time, by one law:
   (windows/region_streams.py RegionStream.close_tail). In order, each
   folds in the boundary the one before hands on, reads the copy's
   readout as its last detectors, and has the model it would have had
-  ending there (qpu/moved_stream_models.py). The machine's own decoders
+  ending there (observe/closing_windows.py). The machine's own decoders
   decide each as they decide a final window, at zero time and learning
   nothing (observe/closing_decisions.py).
 
@@ -31,7 +31,7 @@ import dataclasses
 from typing import Any, Optional
 
 import decsim.observe.closing_decisions as closing_decisions
-import decsim.qpu.moved_stream_models as moved_stream_models
+import decsim.observe.closing_windows as closing_windows
 import decsim.records.checkpoints as checkpoint_records
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
@@ -175,9 +175,9 @@ class _StreamCheckpoints:
         self.packets: dict = {}
         self.pending: list = []
         self.chain = _WindowChain()
-        # the decision of a closing window, made at the first checkpoint,
+        # the stream's closing windows, made at the first checkpoint,
         # which carries the stream's program
-        self.tail: Optional[_TailDecoder] = None
+        self.closing: Optional[closing_windows.ClosingWindows] = None
 
     def wait_for(
         self,
@@ -185,8 +185,10 @@ class _StreamCheckpoints:
         closer: closing_decisions.ClosingDecisions,
     ) -> None:
         """Keep the checkpoint until its windows are final."""
-        if self.tail is None:
-            self.tail = _TailDecoder(snapshot.program, closer)
+        if self.closing is None:
+            self.closing = closing_windows.ClosingWindows(
+                snapshot.program, closer
+            )
         self.pending.append(snapshot)
 
     def close_oldest(self) -> Optional[CheckpointOutcome]:
@@ -195,16 +197,21 @@ class _StreamCheckpoints:
         round_index = snapshot.round_index
         if round_index not in self.packets:
             return None
-        closing = self.chain.closing_at(round_index)
-        if closing is None:
+        kept_and_tail = self.chain.closing_at(round_index)
+        if kept_and_tail is None:
             return None
-        kept, tail = closing
+        kept, tail = kept_and_tail
         self.pending.pop(0)
-        observables = self.tail.observables(snapshot, kept, tail, self.packets)
-        threshold = self.tail.closer.threshold_of(self.stream_id)
+        first_round = tail[0].start_round
+        events = self.closing.events(snapshot, first_round, self.packets)
+        observables = self.closing.tail_observables(
+            snapshot, events, kept.boundary_ids, tail
+        )
+        threshold = self.closing.closer.threshold_of(self.stream_id)
         first_after_kept = kept.commit_hi + 1
         self._let_go_before(first_after_kept)
-        failed = _failed(kept.observables, observables, snapshot)
+        prediction = closing_windows.xor_or_none(kept.observables, observables)
+        failed = closing_windows.failed(prediction, snapshot)
         return CheckpointOutcome(
             self.stream_id,
             round_index,
@@ -216,7 +223,7 @@ class _StreamCheckpoints:
 
     def _let_go_before(self, first_round: int) -> None:
         """Every later checkpoint closes from first_round or after."""
-        reach = self.tail.reach
+        reach = self.closing.reach
         earliest = first_round - reach
         let_go = [
             round_index
@@ -318,168 +325,10 @@ class _WindowChain:
         kept.escalated_windows += window.key in self.escalated
         self.escalated.discard(window.key)
         kept.commit_hi = window.commit_hi
-        kept.observables = _xor_or_none(
+        kept.observables = closing_windows.xor_or_none(
             kept.observables, result.logical_observables
         )
-        kept.boundary_ids = _boundary_ids_of(result)
-
-
-class _TailDecoder:
-    """A checkpoint's tail windows, decided as a stream's last ones."""
-
-    def __init__(
-        self, program, closer: closing_decisions.ClosingDecisions
-    ) -> None:
-        requirement = closer.requirement
-        self.models = moved_stream_models.MovedStimModels(program, requirement)
-        self.closer = closer
-        # how many rounds back a round's detectors read, and one more
-        self.reach = self.models.template.prefix_rounds
-
-    def observables(
-        self,
-        snapshot: checkpoint_records.CheckpointSnapshot,
-        kept: _Kept,
-        tail: list,
-        packets: dict,
-    ) -> Optional[tuple]:
-        """The tail's observables, each window folding the last's boundary."""
-        first_round = tail[0].start_round
-        events = self._events(snapshot, first_round, packets)
-        observables = ()
-        boundary_ids = kept.boundary_ids
-        for window in tail:
-            ending = _ending_on(window, snapshot.round_index)
-            result = self._decided(snapshot, ending, events, boundary_ids)
-            if result is None:
-                return None
-            answer = result.logical_observables
-            observables = _xor_or_none(observables, answer)
-            boundary_ids = _boundary_ids_of(result)
-        return observables
-
-    def _decided(
-        self,
-        snapshot: checkpoint_records.CheckpointSnapshot,
-        window: window_records.Window,
-        events: dict,
-        boundary_ids: tuple,
-    ) -> Optional[decoding_records.DecodeResult]:
-        """One tail window's final result, its boundary folded in."""
-        last_round = snapshot.round_index
-        folded = dict(events)
-        for detector_id in boundary_ids:
-            if detector_id in folded:
-                folded[detector_id] ^= 1
-        model = self.models.for_window_ending_at(window, last_round)
-        syndrome = [folded[detector_id] for detector_id in model.detector_ids]
-        payload = round_records.QPUReadout(
-            snapshot.stream_id, (), window.start_round, bits=syndrome
-        )
-        job = decoding_records.DecodeJob(
-            snapshot.stream_id,
-            window.window_index,
-            window.round_count,
-            detector_error_model=model,
-            payloads=[payload],
-            window=window,
-            label=f"checkpoint {last_round} W{window.window_index}",
-        )
-        return self.closer.decide(job)
-
-    def _events(
-        self,
-        snapshot: checkpoint_records.CheckpointSnapshot,
-        first_round: int,
-        packets: dict,
-    ) -> dict:
-        """Detector id -> event, of the rounds and the copy's readout.
-
-        The readout's detectors are the last of its round, in detector
-        order, as the final fragment appends them to the repeated round.
-        """
-        last_round = snapshot.round_index
-        table = self.models.template.table(
-            last_round, is_final=True, live_reach=None
-        )
-        recipes = []
-        for round_index in range(first_round, last_round):
-            round_recipes = table.detectors_of_round(round_index)
-            recipes.extend(round_recipes)
-        last_recipes = table.detectors_of_round(last_round)
-        readout_count = len(snapshot.readout_events)
-        round_count = len(last_recipes) - readout_count
-        recipes.extend(last_recipes[:round_count])
-        events = {}
-        for recipe in recipes:
-            events[recipe.detector_index] = _formed(recipe, packets)
-        readout_recipes = last_recipes[round_count:]
-        readout = zip(readout_recipes, snapshot.readout_events, strict=True)
-        for recipe, event in readout:
-            events[recipe.detector_index] = event
-        return events
-
-
-def _ending_on(
-    window: window_records.Window, last_round: int
-) -> window_records.Window:
-    """The window as a stream ending on the round lays it: clipped there.
-
-    A window holding the round commits through it; every window reads
-    no round after it.
-    """
-    commit_hi = min(window.commit_hi, last_round)
-    buffer_hi = min(window.buffer_hi, last_round)
-    rounds_after_start = buffer_hi - window.start_round
-    round_count = rounds_after_start + 1
-    return window_records.Window(
-        window.stream_id,
-        window.window_index,
-        window.commit_lo,
-        commit_hi,
-        buffer_hi,
-        round_count,
-        buffer_lo=window.buffer_lo,
-    )
-
-
-def _formed(recipe, packets: dict) -> int:
-    """A recipe's event: its reference parity XOR the raw bits it reads."""
-    parity = recipe.reference_parity
-    for round_index, slot in recipe.records:
-        bits = packets[round_index]
-        parity ^= int(bits[slot])
-    return parity
-
-
-def _failed(
-    kept_observables: Optional[tuple],
-    closing_observables: Optional[tuple],
-    snapshot: checkpoint_records.CheckpointSnapshot,
-) -> Optional[bool]:
-    prediction = _xor_or_none(kept_observables, closing_observables)
-    if prediction is None:
-        return None
-    return prediction != snapshot.observable_flips
-
-
-def _xor_or_none(
-    first: Optional[tuple], second: Optional[tuple]
-) -> Optional[tuple]:
-    """Two observable tuples XORed; an empty one is all zeros, None stays."""
-    if first is None or second is None:
-        return None
-    if not first:
-        return tuple(second)
-    pairs = zip(first, second, strict=True)
-    return tuple(left ^ right for left, right in pairs)
-
-
-def _boundary_ids_of(result: decoding_records.DecodeResult) -> tuple:
-    boundary = result.boundary_data
-    if boundary is None:
-        return ()
-    return tuple(boundary.detector_ids)
+        kept.boundary_ids = closing_windows.boundary_ids_of(result)
 
 
 def _row(round_index: int, outcomes: list) -> dict:

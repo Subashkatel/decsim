@@ -11,6 +11,9 @@ LOG_MODES = ("off", "print", "file", "both")
 CHROME_TRACE = "chrome"
 # the narrator's words: they name the log, never a trace file
 NARRATOR_MODES = ("print", "file", "both")
+# the chains an answer check keeps (observe/answer_checks.py): every weak
+# answer, every strong answer, or the one of each window that passes
+ANSWER_CHECK_PATHS = ("weak", "strong", "best_of_two")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -80,10 +83,18 @@ class ObservationSettings:
     checkpoint_every_rounds closes a checkpoint of each stream every
     that many rounds and at its last round: the logical outcome had the
     stream been read out there, a source copy read out without noise and
-    decoded to the end by a fixed referee at no simulated time (Tan et
-    al. 2209.09219 lines 1003-1037; observe/checkpoints.py). Its rows
-    give the logical error rate of runs of every length from one run
-    (experiments/failure_statistics.py). None, the default, closes none.
+    decoded to the end on the machine's own path at no simulated time
+    (Tan et al. 2209.09219 lines 1003-1037; observe/checkpoints.py). Its
+    rows give the logical error rate of runs of every length from one
+    run (experiments/failure_statistics.py). None, the default, closes
+    none.
+
+    answer_check_paths checks each window's weak and strong answers
+    against the truth, each at the checkpoint after the window, and
+    keeps one chain of answers a path named: weak, strong or best_of_two
+    (observe/answer_checks.py). One switching run then gives each
+    decoder alone and the per-window best-of-two line on the same shots.
+    Empty, the default, checks nothing.
 
     The log and the trace are labels (compare=False) and no part of a
     task's id, as sinter keeps output options out of a task's strong id
@@ -109,6 +120,7 @@ class ObservationSettings:
     warmup_rounds: int = config.added_field(0)
     folds_windows: bool = config.added_field(False)
     checkpoint_every_rounds: Optional[int] = config.added_field(None)
+    answer_check_paths: tuple = config.added_field(())
 
     def __post_init__(self) -> None:
         """Every value checked, with the sentence the caller reads."""
@@ -157,6 +169,7 @@ class ObservationSettings:
                 self.checkpoint_every_rounds,
                 "rounds",
             )
+        _check_answer_check_paths(self.answer_check_paths)
 
     def records_round(self, round_index: int) -> bool:
         """Whether the latency statistics take a sample of this round."""
@@ -199,6 +212,19 @@ def _check_folding_keeps_no_outcomes(
             "every window's answer, and observation.folds_windows lets each "
             "window go once it is final"
         )
+
+
+def _check_answer_check_paths(paths) -> None:
+    """A tuple of distinct paths, each one of ANSWER_CHECK_PATHS."""
+    is_tuple = isinstance(paths, tuple)
+    known = is_tuple and all(path in ANSWER_CHECK_PATHS for path in paths)
+    distinct = known and len(set(paths)) == len(paths)
+    if distinct:
+        return
+    raise ValueError(
+        "observation.answer_check_paths must be a tuple of distinct paths "
+        f"from {ANSWER_CHECK_PATHS}, got {paths!r}"
+    )
 
 
 def _check_log(log) -> None:

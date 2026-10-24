@@ -31,6 +31,20 @@ import decsim.windows.routers as routers
 ESCALATE = decoding_records.Verdict.ESCALATE
 
 
+@dataclasses.dataclass(frozen=True)
+class AnswerPair:
+    """A window's answer on its entry pool and on that pool's edge target.
+
+    weak carries the entry pool's confidence (its soft_output);
+    would_escalate is the edge's verdict on it, the threshold copied at
+    its value now. A pool with no decoder answers None.
+    """
+
+    weak: Optional[decoding_records.DecodeResult]
+    strong: Optional[decoding_records.DecodeResult]
+    would_escalate: bool
+
+
 class ClosingDecisions:
     """The machine's path for a closing window, taken at zero time.
 
@@ -65,6 +79,19 @@ class ClosingDecisions:
             result = self._decoded(pool, job)
             edge = self.edges.leaving(pool)
         return result
+
+    def answer_pair(self, job: decoding_records.DecodeJob) -> AnswerPair:
+        """Both answers of the window, whatever the verdict.
+
+        The stream's entry pool must have an edge leaving it; the wiring
+        refuses a machine without one (observe/wiring.py).
+        """
+        pool = self.router.pool_of_stream(job.stream_id)
+        edge = self.edges.leaving(pool)
+        weak = self._decoded(pool, job)
+        strong = self._decoded(edge.target, job)
+        would_escalate = self._escalates(edge, job, weak)
+        return AnswerPair(weak, strong, would_escalate)
 
     def threshold_of(self, stream_id: Any) -> Optional[float]:
         """The threshold the stream's entry edge reads now; None for no edge."""

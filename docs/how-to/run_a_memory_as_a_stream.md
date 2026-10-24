@@ -155,6 +155,50 @@ early rounds out. With a moving threshold, the rate is the average over
 the rounds fitted, and each row's `threshold` gives the threshold at
 that round.
 
+## 5. Check each window's weak and strong answers
+
+A switching machine keeps the weak decoder's answer on a window, or
+the strong decoder decodes the window again. Ask for each window's two
+answers checked against the truth, on a switching machine:
+
+```
+decsim stream run.py --rounds 70 --seed 1 --set 'observation.answer_check_paths=("weak", "strong", "best_of_two")' --out s1.json
+```
+
+A window's check is a checkpoint (section 4) at the round after the
+last round the window reads, or at the stream's last round if the
+window reads it. At that round, a stream that ended there keeps the
+window's own answer. The listener keeps its own chain of answers for
+each path, takes no simulated time, and never changes the machine
+(`decsim/observe/answer_checks.py`):
+
+- `weak` keeps every weak answer, so its outcome is the weak decoder
+  alone on the same shot.
+- `strong` keeps every strong answer, so its outcome is the strong
+  decoder alone.
+- `best_of_two` keeps the weak answer unless that answer fails its
+  check and the strong answer passes. It is a perfect chooser of each
+  window: the per-window best-of-two line. Compare it with the
+  machine's own `logical_failure`.
+
+Each window's two answers come from the machine's own decoders, with
+the chain's boundary folded in. The windows after it, up to the
+check's round, are decided as in a checkpoint. A row of
+`answer_checks` holds one path, and for each patch its outcome
+(`failed`) and its windows' rows (`windows`):
+
+- `window_index` and `check_round` name the window and its check.
+- `weak_gap` is the weak answer's confidence in nats, or null when it
+  gave none.
+- `weak_failed` and `strong_failed` are each answer's check.
+- `would_escalate` is the machine's verdict on the weak answer, on a
+  copy of the threshold at that time.
+- `kept` is the answer the chain kept.
+
+`decsim/experiments/answer_check_bins.py` bins the rows by the weak
+gap, for the confidence plots: in each bin, how often the weak answer
+fails where the strong one passes, the reverse, and both.
+
 ## What a stream does not build yet
 
 Each of these is refused, "not implemented yet", with its reason:
@@ -171,8 +215,11 @@ Each of these is refused, "not implemented yet", with its reason:
   laid yet;
 - a logical failure counted inside the stream other than at a
   checkpoint (section 4);
-- checkpoints beside an escalate edge past the entry pool, or beside a
-  decoder or a verdict that draws from the run's seed.
+- checkpoints or answer checks beside an escalate edge past the entry
+  pool, or beside a decoder or a verdict that draws from the run's
+  seed;
+- answer checks on a machine whose entry pool has no escalate edge to
+  a pool that decodes.
 
 [How to build each switching pattern](build_each_switching_pattern.md#what-is-refused-for-now)
 lists every refusal.

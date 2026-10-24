@@ -995,7 +995,9 @@ folds_windows is a stream's: the run keeps no run-long ledger of windows, frame 
 
 record_window_outcomes keeps each window's committed answer, and its true label when the source keeps its errors (ErrorModelStimDevice), for window_outcomes.csv (observe/window_outcomes.py).
 
-checkpoint_every_rounds closes a checkpoint of each stream every that many rounds and at its last round: the logical outcome had the stream been read out there, a source copy read out without noise and decoded to the end by a fixed referee at no simulated time (Tan et al. 2209.09219 lines 1003-1037; observe/checkpoints.py). Its rows give the logical error rate of runs of every length from one run (experiments/failure_statistics.py). None, the default, closes none.
+checkpoint_every_rounds closes a checkpoint of each stream every that many rounds and at its last round: the logical outcome had the stream been read out there, a source copy read out without noise and decoded to the end on the machine's own path at no simulated time (Tan et al. 2209.09219 lines 1003-1037; observe/checkpoints.py). Its rows give the logical error rate of runs of every length from one run (experiments/failure_statistics.py). None, the default, closes none.
+
+answer_check_paths checks each window's weak and strong answers against the truth, each at the checkpoint after the window, and keeps one chain of answers a path named: weak, strong or best_of_two (observe/answer_checks.py). One switching run then gives each decoder alone and the per-window best-of-two line on the same shots. Empty, the default, checks nothing.
 
 The log and the trace are labels (compare=False) and no part of a task's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add or shape a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows, record_window_outcomes the window_outcomes rows, the interval the latency columns, the deadline the deadline columns.
 
@@ -1015,6 +1017,7 @@ The log and the trace are labels (compare=False) and no part of a task's id, as 
 | `warmup_rounds` | `int` | `config.added_field(0)` |
 | `folds_windows` | `bool` | `config.added_field(False)` |
 | `checkpoint_every_rounds` | `Optional[int]` | `config.added_field(None)` |
+| `answer_check_paths` | `tuple` | `config.added_field(())` |
 
 ## decsim/pauli_frame
 

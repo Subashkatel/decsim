@@ -9,6 +9,7 @@ re-decode, and the decoder manager owns the units and cancellation.
 
 from typing import Optional
 
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.escalation.verdicts as verdicts
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
@@ -98,6 +99,26 @@ class Switching:
     ) -> None:
         """The threshold source hears the strong tier's answer."""
         self.threshold.learn_from_strong_result(window_key, result)
+
+    def verdict_without_learning(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> decoding_records.Verdict:
+        """The verdict row's decision now, on a copy of the threshold.
+
+        The copy is fixed at the threshold now, so the source learns
+        nothing and audits nothing, as a predictor's lookup leaves it
+        untaught (gem5 src/cpu/pred/conditional.hh).
+        """
+        threshold_now = self.threshold_now()
+        frozen = threshold_sources.FixedThreshold(threshold_now)
+        return self.verdict.decide(job, result, frozen)
+
+    def threshold_now(self) -> float:
+        """The threshold the next verdict reads, in nats."""
+        summary = self.threshold.summary()
+        return summary["threshold"]
 
     def _refuse_absorbing_window_contradictions(
         self, plan: decoding_records.RunShape

@@ -663,3 +663,34 @@ def test_an_online_source_under_a_verdict_that_reads_no_threshold_is_refused():
 
     with pytest.raises(ValueError, match="reads no threshold"):
         policies.Switching(online, False, status, reads_threshold=False)
+
+
+def test_a_verdict_without_learning_reads_a_moving_threshold_and_moves_it_not():
+    """A checkpoint's closing window asks; the rate tracker hears nothing.
+
+    The tracker starts at 15 dB; a gap under it escalates, one over it
+    is kept, as the learning verdict decides on the same threshold.
+    """
+    rate = threshold_sources.RateThreshold.Settings(15.0, 0.1)
+    source = rate.for_task({})
+    policy = policies.Switching(threshold=source)
+    threshold = threshold_sources.decibels_to_nats(15.0)
+    gap_below = threshold - 0.5
+    gap_above = threshold + 0.5
+    below = _result(gap_below)
+    above = _result(gap_above)
+    summary_before = source.summary()
+
+    escalated = policy.verdict_without_learning(JOB, below)
+    kept = policy.verdict_without_learning(JOB, above)
+
+    assert escalated is decoding_records.Verdict.ESCALATE
+    assert kept is decoding_records.Verdict.KEEP
+    assert source.summary() == summary_before
+    assert policy.threshold_now() == pytest.approx(threshold)
+
+
+def test_a_fixed_threshold_summary_is_its_threshold():
+    source = threshold_sources.FixedThreshold(2.0)
+
+    assert source.summary() == {"threshold": 2.0}

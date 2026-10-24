@@ -2081,6 +2081,21 @@ class EscalationPolicy(Protocol):
         first window's key.
         """
 
+    def verdict_without_learning(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> decoding_records.Verdict:
+        """The verdict now, with the threshold copied: nothing learns.
+
+        A checkpoint decides its closing window by it
+        (observe/closing_decisions.py), and the run goes on as if it
+        were never asked.
+        """
+
+    def threshold_now(self) -> float:
+        """The threshold the next verdict reads, in nats."""
+
 
 class StrongResultLearner(Protocol):
     """Where a target pool's manager tells a strong result.
@@ -2159,6 +2174,12 @@ class ThresholdSource(Protocol):
         self, window_key: tuple, result: decoding_records.DecodeResult
     ) -> None:
         """The strong tier answered for the window; the source may learn."""
+
+    def summary(self) -> dict:
+        """Its counters, and under threshold the one it keeps on, in nats.
+
+        Reading it learns nothing.
+        """
 
 
 @runtime_checkable

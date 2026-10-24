@@ -126,6 +126,10 @@ class FixedThreshold:
         del window_key
         del result
 
+    def summary(self) -> dict:
+        """The threshold, which never moves."""
+        return {"threshold": self.threshold_nats}
+
 
 class TableThreshold(FixedThreshold):
     """The calibration table's g_th for this task.

@@ -23,8 +23,9 @@ class Switching:
 
     verdict keeps or escalates each weak result (verdicts.py), by
     default on its gap against the threshold, where a result without a
-    soft output escalates. run_both_at_once starts a speculative strong
-    decode with the weak job and cancels it on a keep (Step 1);
+    soft output escalates. reads_threshold says whether that row decides
+    on the threshold at all. run_both_at_once starts a speculative
+    strong decode with the weak job and cancels it on a keep (Step 1);
     otherwise the strong re-decode starts at the verdict, after the
     edge's forward hop. check_plan refuses, once at
     build, a run shape the escalation cannot serve.
@@ -54,6 +55,7 @@ class Switching:
         self.threshold = threshold
         self.run_both_at_once = run_both_at_once
         self.verdict = verdict
+        self.reads_threshold = reads_threshold
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse a run shape the escalation cannot serve."""
@@ -111,9 +113,18 @@ class Switching:
         nothing and audits nothing, as a predictor's lookup leaves it
         untaught (gem5 src/cpu/pred/conditional.hh).
         """
-        threshold_now = self.threshold_now()
-        frozen = threshold_sources.FixedThreshold(threshold_now)
-        return self.verdict.decide(job, result, frozen)
+        threshold_nats = self.threshold_now()
+        return self.verdict_at(job, result, threshold_nats)
+
+    def verdict_at(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        threshold_nats: float,
+    ) -> decoding_records.Verdict:
+        """The verdict row's decision at a fixed threshold: nothing learns."""
+        fixed = threshold_sources.FixedThreshold(threshold_nats)
+        return self.verdict.decide(job, result, fixed)
 
     def threshold_now(self) -> float:
         """The threshold the next verdict reads, in nats."""

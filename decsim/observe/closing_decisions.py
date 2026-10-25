@@ -93,6 +93,24 @@ class ClosingDecisions:
         would_escalate = self._escalates(edge, job, weak)
         return AnswerPair(weak, strong, would_escalate)
 
+    def escalates_at(
+        self,
+        job: decoding_records.DecodeJob,
+        weak: Optional[decoding_records.DecodeResult],
+        threshold_nats: float,
+    ) -> bool:
+        """The entry edge's verdict on the weak answer at a fixed threshold.
+
+        The verdict row is the machine's own; only the threshold is
+        fixed (EscalationPolicy.verdict_at).
+        """
+        pool = self.router.pool_of_stream(job.stream_id)
+        edge = self.edges.leaving(pool)
+        if edge is None or weak is None:
+            return False
+        verdict = edge.policy.verdict_at(job, weak, threshold_nats)
+        return verdict is ESCALATE
+
     def threshold_of(self, stream_id: Any) -> Optional[float]:
         """The threshold the stream's entry edge reads now; None for no edge."""
         pool = self.router.pool_of_stream(stream_id)

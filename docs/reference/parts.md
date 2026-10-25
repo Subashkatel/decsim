@@ -1002,6 +1002,8 @@ checkpoint_every_rounds closes a checkpoint of each stream every that many round
 
 answer_check_paths checks each window's weak and strong answers against the truth, each at the checkpoint after the window, and keeps one chain of answers a path named: weak, strong or best_of_two (observe/answer_checks.py). One switching run then gives each decoder alone and the per-window best-of-two line on the same shots. Empty, the default, checks nothing.
 
+answer_check_thresholds keeps one more chain a threshold named, in decibels: a static chain, which keeps the weak answer unless the machine's own verdict row escalates it at that fixed threshold, and then keeps the strong one. Only its outcome and its escalated and decided windows are kept, so one switching run gives the failure rate and escalated share of every static threshold on the same shots. Empty, the default, keeps none.
+
 The log and the trace are labels (compare=False) and no part of a task's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add or shape a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows, record_window_outcomes the window_outcomes rows, the interval the latency columns, the deadline the deadline columns.
 
 | Field | Type | Default |
@@ -1021,6 +1023,7 @@ The log and the trace are labels (compare=False) and no part of a task's id, as 
 | `folds_windows` | `bool` | `config.added_field(False)` |
 | `checkpoint_every_rounds` | `Optional[int]` | `config.added_field(None)` |
 | `answer_check_paths` | `tuple` | `config.added_field(())` |
+| `answer_check_thresholds` | `tuple` | `config.added_field(())` |
 
 ## decsim/pauli_frame
 

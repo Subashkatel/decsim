@@ -205,6 +205,33 @@ fail. Two answers in the same class differ only in the boundary they
 hand on, so the windows the check cuts decide which one fails: this is
 not a fault in the weak answer's class.
 
+### Static chains, one a threshold
+
+Ask for one more chain at each fixed threshold, in decibels:
+
+```
+decsim stream run.py --rounds 70 --seed 1 --set 'observation.answer_check_thresholds=(0.0, 10.0, 20.0)' --out s1.json
+```
+
+A static chain keeps the weak answer unless the machine's own verdict
+row escalates it at the chain's threshold, and then keeps the strong
+answer. Only the threshold is fixed: the row is the machine's. Static
+chains share each window's answers with the paths on the same boundary.
+A static chain is checked only at its last window, so it closes no
+windows after a check and keeps no window rows. A row of
+`threshold_checks` holds one threshold (`threshold_decibels`), and for
+each patch:
+
+- `failed` is the chain's outcome;
+- `escalated_windows` counts the windows the row escalated;
+- `window_count` counts the windows the chain decided.
+
+One switching run then gives the failure rate and the escalated share
+of every static threshold on the same shots. The chain at the machine's
+own fixed threshold ends and escalates as the machine does. A run with
+static chains is refused when the edge's verdict row reads no
+threshold, such as `status`, `always` or `never`.
+
 ## What a stream does not build yet
 
 Each of these is refused, "not implemented yet", with its reason:

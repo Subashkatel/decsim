@@ -4,6 +4,7 @@ import dataclasses
 from typing import Optional
 
 import decsim.config as config
+import decsim.escalation.threshold_sources as threshold_sources
 
 LOG_MODES = ("off", "print", "file", "both")
 # the trace's own word for "name the file yourself", so a study asks for
@@ -96,6 +97,14 @@ class ObservationSettings:
     decoder alone and the per-window best-of-two line on the same shots.
     Empty, the default, checks nothing.
 
+    answer_check_thresholds keeps one more chain a threshold named, in
+    decibels: a static chain, which keeps the weak answer unless the
+    machine's own verdict row escalates it at that fixed threshold, and
+    then keeps the strong one. Only its outcome and its escalated and
+    decided windows are kept, so one switching run gives the failure
+    rate and escalated share of every static threshold on the same
+    shots. Empty, the default, keeps none.
+
     The log and the trace are labels (compare=False) and no part of a
     task's id, as sinter keeps output options out of a task's strong id
     (sinter/_data/_task.py:167-204): the writers schedule nothing. The
@@ -121,6 +130,7 @@ class ObservationSettings:
     folds_windows: bool = config.added_field(False)
     checkpoint_every_rounds: Optional[int] = config.added_field(None)
     answer_check_paths: tuple = config.added_field(())
+    answer_check_thresholds: tuple = config.added_field(())
 
     def __post_init__(self) -> None:
         """Every value checked, with the sentence the caller reads."""
@@ -170,6 +180,7 @@ class ObservationSettings:
                 "rounds",
             )
         _check_answer_check_paths(self.answer_check_paths)
+        _check_answer_check_thresholds(self.answer_check_thresholds)
 
     def records_round(self, round_index: int) -> bool:
         """Whether the latency statistics take a sample of this round."""
@@ -225,6 +236,20 @@ def _check_answer_check_paths(paths) -> None:
         "observation.answer_check_paths must be a tuple of distinct paths "
         f"from {ANSWER_CHECK_PATHS}, got {paths!r}"
     )
+
+
+def _check_answer_check_thresholds(thresholds) -> None:
+    """A tuple of distinct thresholds, each a keep threshold in decibels."""
+    name = "observation.answer_check_thresholds"
+    distinct = isinstance(thresholds, tuple)
+    distinct = distinct and len(set(thresholds)) == len(thresholds)
+    if not distinct:
+        raise ValueError(
+            f"{name} must be a tuple of distinct thresholds in decibels, "
+            f"got {thresholds!r}"
+        )
+    for threshold in thresholds:
+        threshold_sources.checked_decibels(threshold, name)
 
 
 def _check_log(log) -> None:

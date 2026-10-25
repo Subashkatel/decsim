@@ -605,19 +605,24 @@ def _answer_checks(
     windows: windows_part.Windows,
     decoders: decoders_part.Decoders,
 ) -> Optional[answer_checks_module.AnswerChecks]:
-    """Each window's two answers checked, only when the section names paths.
+    """Each window's two answers checked, when the section names chains.
 
     The answers and the closing windows are the machine's own
     (observe/closing_decisions.py), so a chain that keeps every weak
     answer ends as the weak decoder alone would.
     """
     paths = observation.answer_check_paths
-    if not paths:
-        return None
+    thresholds = observation.answer_check_thresholds
     setting = "observation.answer_check_paths"
+    if not paths:
+        setting = "observation.answer_check_thresholds"
+    if not paths and not thresholds:
+        return None
     closer = _closing_decisions(windows, decoders, setting)
-    _refuse_checks_without_two_answers(windows, closer)
-    checks = answer_checks_module.AnswerChecks(paths, closer)
+    _refuse_checks_without_two_answers(windows, closer, setting)
+    if thresholds:
+        _refuse_static_chains_without_a_threshold_row(windows)
+    checks = answer_checks_module.AnswerChecks(paths, thresholds, closer)
     source = qpu.syndrome_source
     _connect_copies(source, checks.checkpoint_reached, setting)
     qpu.device.trace.round_emitted.connect(checks.round_emitted)
@@ -630,6 +635,7 @@ def _answer_checks(
 def _refuse_checks_without_two_answers(
     windows: windows_part.Windows,
     closer: closing_decisions.ClosingDecisions,
+    setting: str,
 ) -> None:
     """Each entry pool needs an edge to a pool that decodes."""
     edges = windows.window_manager.edges
@@ -638,10 +644,29 @@ def _refuse_checks_without_two_answers(
         if edge is not None and edge.target in closer.decoder_by_pool:
             continue
         raise ValueError(
-            "observation.answer_check_paths checks each window's weak and "
+            f"{setting} checks each window's weak and "
             "strong answers, so every entry pool needs an escalate edge to "
             f"a pool that decodes (a switching machine); {pool.word} has "
             "none"
+        )
+
+
+def _refuse_static_chains_without_a_threshold_row(
+    windows: windows_part.Windows,
+) -> None:
+    """A static chain decides by its edge's verdict row at its threshold."""
+    edges = windows.window_manager.edges
+    for pool in windows.router.side_by_pool:
+        edge = edges.leaving(pool)
+        policy = edge.policy
+        if policy.reads_threshold:
+            continue
+        row_type = type(policy.verdict)
+        raise ValueError(
+            "observation.answer_check_thresholds keeps a chain a threshold, "
+            "each window decided by the escalate edge's verdict row at that "
+            f"threshold, and {row_type.__name__} reads no threshold (the row "
+            f"of {pool.word}'s edge); name the gap_threshold verdict"
         )
 
 

@@ -59,9 +59,10 @@ def main(folder: pathlib.Path) -> None:
     """The table and a confidence plot a point."""
     out = folder / "plots"
     out.mkdir(exist_ok=True)
-    lines_by_point = _lines_by_point(folder)
+    lines_by_point = lines_by_point_of(folder)
     rows = [
-        _row(point, lines) for point, lines in sorted(lines_by_point.items())
+        point_row(point, lines)
+        for point, lines in sorted(lines_by_point.items())
     ]
     write_table(rows, out)
     for point, lines in sorted(lines_by_point.items()):
@@ -127,7 +128,8 @@ def plot_confidence(point: tuple, lines: list, out: pathlib.Path) -> None:
     plt.close(figure)
 
 
-def _lines_by_point(folder: pathlib.Path) -> dict:
+def lines_by_point_of(folder: pathlib.Path) -> dict:
+    """Every json line in the folder, under its (distance, p) point."""
     lines_by_point = collections.defaultdict(list)
     for path in sorted(folder.glob("*.jsonl")):
         for text in path.read_text().splitlines():
@@ -137,7 +139,8 @@ def _lines_by_point(folder: pathlib.Path) -> dict:
     return lines_by_point
 
 
-def _row(point: tuple, lines: list) -> dict:
+def point_row(point: tuple, lines: list) -> dict:
+    """The point's shots and each run's failures, with exact intervals."""
     distance, probability = point
     failures = {
         "weak": sum(line["failed"]["weak"] for line in lines),

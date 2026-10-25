@@ -8,9 +8,14 @@ already hold to separate streams (tests/observe/test_checkpoints.py).
 The best-of-two chain is held to its rule on scripted answers: it keeps
 the strong answer only where the weak one fails its check and the
 strong one passes, so it fails a window only where both answers do.
+A static chain keeps the weak answer unless the machine's verdict row
+escalates it at the chain's threshold: at the machine's own threshold
+it must end and escalate as the machine does.
 """
 
 import dataclasses
+import functools
+import math
 
 import pytest
 
@@ -53,12 +58,20 @@ SCRIPT = {
     2: ((0,), (0,), 7.0, False),
     3: ((0,), (1,), 2.5, True),
 }
+# static chains around the scripted gaps: 0 dB escalates no window, 8 dB
+# (1.84 nats) window 1, 12 dB (2.76 nats) windows 1 and 3, 50 dB all
+SCRIPTED_THRESHOLDS = (0.0, 8.0, 12.0, 50.0)
+# on a real machine at 10 dB: the weak path, the machine's own threshold,
+# and one above every finite gap, the strong path
+REAL_THRESHOLDS = (0.0, checkpoint_tests.FIXED.threshold_decibels, 200.0)
 
 
-def _checked(task, paths=PATHS):
+def _checked(task, paths=PATHS, thresholds=()):
     machine = task.machine
     observation = dataclasses.replace(
-        machine.observation, answer_check_paths=paths
+        machine.observation,
+        answer_check_paths=paths,
+        answer_check_thresholds=thresholds,
     )
     machine = dataclasses.replace(machine, observation=observation)
     return dataclasses.replace(task, machine=machine)
@@ -109,6 +122,35 @@ def _chains(seed: int) -> dict:
     record = stream_command.stream_record(task, ROUNDS, 0, seed)
     rows = record["measurement"]["answer_checks"]
     return {row["path"]: row for row in rows}
+
+
+@functools.cache
+def _static_measurement(seed: int) -> dict:
+    """The switching machine at 10 dB, its paths and REAL_THRESHOLDS kept."""
+    switching = checkpoint_tests._switching_task(checkpoint_tests.FIXED, None)
+    task = _checked(switching, PATHS, REAL_THRESHOLDS)
+    record = stream_command.stream_record(task, ROUNDS, 0, seed)
+    return record["measurement"]
+
+
+def _static_column(measurements: list, decibels: float, field: str) -> list:
+    """One field of the static chain at the threshold, a run each."""
+    column = []
+    for measurement in measurements:
+        rows = measurement["threshold_checks"]
+        by_threshold = {row["threshold_decibels"]: row for row in rows}
+        column.append(by_threshold[decibels][field])
+    return column
+
+
+def _path_column(measurements: list, path: str) -> list:
+    """The path chain's outcomes, a run each."""
+    column = []
+    for measurement in measurements:
+        rows = measurement["answer_checks"]
+        by_path = {row["path"]: row for row in rows}
+        column.append(by_path[path]["failed"])
+    return column
 
 
 def test_the_weak_and_strong_chains_end_as_each_decoder_alone_seed_by_seed():
@@ -204,6 +246,53 @@ def test_a_stream_lets_go_of_the_rounds_and_copies_its_checks_passed():
     assert min(stream.packets) == FINAL_ROUND + 1 - reach
 
 
+def test_a_static_chain_at_the_machines_threshold_ends_and_escalates_as_it():
+    measurements = [_static_measurement(seed) for seed in SEEDS]
+
+    threshold = checkpoint_tests.FIXED.threshold_decibels
+    failed = _static_column(measurements, threshold, "failed")
+    escalated = _static_column(measurements, threshold, "escalated_windows")
+    assert failed == [[m["logical_failure"]] for m in measurements]
+    assert escalated == [[m["escalated_windows"]] for m in measurements]
+    assert any(m["escalated_windows"] for m in measurements)
+
+
+def test_static_chains_at_zero_and_over_every_gap_end_as_weak_and_strong():
+    """These seeds give every window a finite gap."""
+    measurements = [_static_measurement(seed) for seed in SEEDS]
+
+    zero, over = REAL_THRESHOLDS[0], REAL_THRESHOLDS[-1]
+    weak = _path_column(measurements, "weak")
+    strong = _path_column(measurements, "strong")
+    assert _static_column(measurements, zero, "failed") == weak
+    assert _static_column(measurements, over, "failed") == strong
+    escalated = _static_column(measurements, over, "escalated_windows")
+    assert escalated == _static_column(measurements, over, "window_count")
+
+
+def test_each_static_chain_keeps_the_weak_answer_unless_its_threshold_says():
+    listener = _scripted_listener(thresholds=SCRIPTED_THRESHOLDS)
+
+    rows = listener.threshold_rows()
+
+    assert [row["threshold_decibels"] for row in rows] == [*SCRIPTED_THRESHOLDS]
+    assert [row["escalated_windows"] for row in rows] == [[0], [1], [2], [4]]
+    assert [row["window_count"] for row in rows] == [[4], [4], [4], [4]]
+    # 8 dB keeps what best_of_two keeps; 12 dB takes window 3's flip too
+    assert [row["failed"] for row in rows] == [[True], [False], [True], [True]]
+
+
+def test_static_chains_alone_close_no_window_after_a_check():
+    """Only a chain's last window is checked, and nothing comes after it."""
+    with_paths = _scripted_listener(thresholds=SCRIPTED_THRESHOLDS)
+    alone = _scripted_listener(paths=(), thresholds=SCRIPTED_THRESHOLDS)
+
+    assert with_paths.closer.tail_decodes > 0
+    assert alone.closer.tail_decodes == 0
+    assert alone.rows() == []
+    assert alone.threshold_rows() == with_paths.threshold_rows()
+
+
 def test_answer_checks_on_a_machine_with_no_strong_tier_are_refused():
     machine = _weak_machine()
     weak = checkpoint_tests._checkpointed(machine, 3, None)
@@ -230,6 +319,34 @@ def test_answer_checks_beside_a_verdict_that_draws_are_refused():
     assert "Bernoulli draws from the run's seed" in message
 
 
+def test_static_chains_on_a_machine_with_no_strong_tier_are_refused():
+    machine = _weak_machine()
+    weak = checkpoint_tests._checkpointed(machine, 3, None)
+    task = _checked(weak, paths=(), thresholds=(10.0,))
+
+    with pytest.raises(ValueError) as refusal:
+        stream_command.stream_record(task, ROUNDS, 0, 1)
+
+    message = str(refusal.value)
+    assert "observation.answer_check_thresholds" in message
+    assert "needs an escalate edge to a pool that decodes" in message
+
+
+def test_static_chains_beside_a_verdict_row_that_reads_no_threshold_refused():
+    always = verdicts.Always.Settings()
+    switching = checkpoint_tests._switching_task(
+        checkpoint_tests.FIXED, None, verdict=always
+    )
+    task = _checked(switching, paths=(), thresholds=(10.0,))
+
+    with pytest.raises(ValueError) as refusal:
+        stream_command.stream_record(task, ROUNDS, 0, 1)
+
+    message = str(refusal.value)
+    assert "observation.answer_check_thresholds" in message
+    assert "Always reads no threshold" in message
+
+
 def test_answer_checks_on_a_source_that_copies_nothing_are_refused():
     switching = checkpoint_tests._switching_task(checkpoint_tests.FIXED, None)
     task = _checked(switching)
@@ -252,10 +369,26 @@ def test_answer_check_paths_other_than_distinct_known_ones_are_refused(paths):
     )
 
 
-def _scripted_listener() -> answer_checks.AnswerChecks:
+@pytest.mark.parametrize(
+    "thresholds",
+    [(10.0, 10.0), (-1.0,), (math.inf,), [10.0], ("ten",)],
+    ids=str,
+)
+def test_answer_check_thresholds_other_than_distinct_decibels_are_refused(
+    thresholds,
+):
+    with pytest.raises(ValueError) as refusal:
+        observe_settings.ObservationSettings(answer_check_thresholds=thresholds)
+
+    assert "observation.answer_check_thresholds" in str(refusal.value)
+
+
+def _scripted_listener(
+    paths=PATHS, thresholds=()
+) -> answer_checks.AnswerChecks:
     """A noiseless d = 3 stream of 12 rounds, its answers scripted."""
     closer = _ScriptedCloser()
-    listener = answer_checks.AnswerChecks(PATHS, closer)
+    listener = answer_checks.AnswerChecks(paths, thresholds, closer)
     windows = [dataclasses.replace(window) for window in SCRIPTED_WINDOWS]
     for window in windows:
         listener.window_planned(window)
@@ -274,11 +407,17 @@ def _scripted_listener() -> answer_checks.AnswerChecks:
 
 
 class _ScriptedCloser:
-    """Answers each window from SCRIPT; a tail window passes."""
+    """Answers each window from SCRIPT; a tail window passes.
+
+    It escalates below a threshold as the gap row does
+    (escalation/verdicts.py GapThreshold), and counts the tail windows
+    it decides.
+    """
 
     def __init__(self) -> None:
         decoder = minimum_weight_perfect_matching.PyMatchingDecoder()
         self.requirement = decoder.fault_model_requirement
+        self.tail_decodes = 0
 
     def answer_pair(self, job) -> closing_decisions.AnswerPair:
         weak_flip, strong_flip, gap, escalates = SCRIPT[job.window_id]
@@ -288,7 +427,12 @@ class _ScriptedCloser:
         strong = _result(job, strong_flip)
         return closing_decisions.AnswerPair(weak, strong, escalates)
 
+    def escalates_at(self, job, weak, threshold_nats: float) -> bool:
+        del job
+        return weak.soft_output.gap < threshold_nats
+
     def decide(self, job) -> decoding_records.DecodeResult:
+        self.tail_decodes += 1
         return _result(job, (0,))
 
 

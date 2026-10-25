@@ -101,6 +101,9 @@ class StreamMeasurement:
     # one row a path, when the run checks each window's two answers
     # (observe/answer_checks.py AnswerChecks.rows)
     answer_checks: list
+    # one row a static threshold, when the run keeps static chains
+    # (observe/answer_checks.py AnswerChecks.threshold_rows)
+    threshold_checks: list
 
 
 class StreamMeasures:
@@ -240,6 +243,7 @@ class StreamMeasures:
             "statistic_values": value_counts,
             "checkpoints": _checkpoint_rows(observation),
             "answer_checks": _answer_check_rows(observation),
+            "threshold_checks": _threshold_check_rows(observation),
         }
 
     def _connect(self, machine: machine_module.Machine) -> None:
@@ -726,6 +730,13 @@ def _answer_check_rows(observation) -> list:
     if observation.answer_checks is None:
         return []
     return observation.answer_checks.rows()
+
+
+def _threshold_check_rows(observation) -> list:
+    """The static chains' rows; none when the run checks no window."""
+    if observation.answer_checks is None:
+        return []
+    return observation.answer_checks.threshold_rows()
 
 
 def _scored_owners(result: result_records.RunResult) -> tuple:

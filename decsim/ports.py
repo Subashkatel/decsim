@@ -2044,10 +2044,12 @@ class EscalationPolicy(Protocol):
     (src/cpu/pred/conditional.hh: lookup answers, update teaches): it
     builds no job and sends nothing. check_plan refuses, once at build,
     a run the policy cannot serve. verdict is the row it asks of each
-    weak result, whose statistics are recorded at <edge>.verdict.
+    weak result, whose statistics are recorded at <edge>.verdict, and
+    reads_threshold says whether that row decides on the threshold.
     """
 
     verdict: "EscalationVerdict"
+    reads_threshold: bool
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse, with a sentence, a run shape the policy cannot serve."""
@@ -2091,6 +2093,18 @@ class EscalationPolicy(Protocol):
         A checkpoint decides its closing window by it
         (observe/closing_decisions.py), and the run goes on as if it
         were never asked.
+        """
+
+    def verdict_at(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        threshold_nats: float,
+    ) -> decoding_records.Verdict:
+        """The verdict at a fixed threshold, in nats: nothing learns.
+
+        An answer check's static chain decides each window by it
+        (observe/answer_checks.py).
         """
 
     def threshold_now(self) -> float:

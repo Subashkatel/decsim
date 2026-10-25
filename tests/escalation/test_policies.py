@@ -690,6 +690,29 @@ def test_a_verdict_without_learning_reads_a_moving_threshold_and_moves_it_not():
     assert policy.threshold_now() == pytest.approx(threshold)
 
 
+def test_a_verdict_at_a_threshold_reads_that_threshold_and_moves_none():
+    """A static chain asks at its own threshold (observe/answer_checks.py).
+
+    The tracker sits at 15 dB and the gap on it: at 5 dB the row keeps
+    the result, at 25 dB it escalates it, and the tracker hears nothing.
+    """
+    rate = threshold_sources.RateThreshold.Settings(15.0, 0.1)
+    source = rate.for_task({})
+    policy = policies.Switching(threshold=source)
+    gap = threshold_sources.decibels_to_nats(15.0)
+    result = _result(gap)
+    low = threshold_sources.decibels_to_nats(5.0)
+    high = threshold_sources.decibels_to_nats(25.0)
+    summary_before = source.summary()
+
+    kept = policy.verdict_at(JOB, result, low)
+    escalated = policy.verdict_at(JOB, result, high)
+
+    assert kept is decoding_records.Verdict.KEEP
+    assert escalated is decoding_records.Verdict.ESCALATE
+    assert source.summary() == summary_before
+
+
 def test_a_fixed_threshold_summary_is_its_threshold():
     source = threshold_sources.FixedThreshold(2.0)
 

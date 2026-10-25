@@ -27,6 +27,12 @@ keeps one answer by its path:
   right when at least one of its decoders is (1905.02345 lines 186-196,
   equation 1; experiments/paired_shots.py).
 
+A static chain, one a threshold it is given, keeps the weak answer
+unless the machine's own verdict row escalates it at that fixed
+threshold (ClosingDecisions.escalates_at), and then the strong one. It
+is checked only at its last window and keeps no rows: its outcome, the
+windows it escalated and the windows it decided.
+
 A chain's outcome is its last window's check, which has no window after
 it. No component reads any of this; the listener hears the source, the
 device and the window side through their trace sources.
@@ -35,10 +41,12 @@ device and the window side through their trace sources.
 import dataclasses
 from typing import Any, Optional
 
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.observe.closing_decisions as closing_decisions
 import decsim.observe.closing_windows as closing_windows
 import decsim.observe.settings as observe_settings
 import decsim.records.checkpoints as checkpoint_records
+import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
 
@@ -77,12 +85,19 @@ class AnswerCheck:
 
 
 class AnswerChecks:
-    """The answer checks of a run's streams, one chain a path."""
+    """The answer checks of a run's streams: one chain a path and a threshold.
+
+    thresholds are the static chains' thresholds, in decibels.
+    """
 
     def __init__(
-        self, paths: tuple, closer: closing_decisions.ClosingDecisions
+        self,
+        paths: tuple,
+        thresholds: tuple,
+        closer: closing_decisions.ClosingDecisions,
     ) -> None:
         self.paths = paths
+        self.thresholds = thresholds
         self.closer = closer
         # stream id -> _StreamChecks, in the order streams were heard
         self.streams: dict = {}
@@ -134,25 +149,55 @@ class AnswerChecks:
             rows.append(row)
         return rows
 
+    def threshold_rows(self) -> list:
+        """One row a threshold: each stream's outcome and window counts.
+
+        failed, escalated_windows and window_count hold each stream's,
+        in the order the streams were heard.
+        """
+        streams = self.streams.values()
+        rows = []
+        for decibels in self.thresholds:
+            chains = [stream.chains[decibels] for stream in streams]
+            row = {
+                "threshold_decibels": decibels,
+                "failed": [chain.failed for chain in chains],
+                "escalated_windows": [
+                    chain.escalated_windows for chain in chains
+                ],
+                "window_count": [chain.window_count for chain in chains],
+            }
+            rows.append(row)
+        return rows
+
     def _stream(self, stream_id: Any) -> "_StreamChecks":
         stream = self.streams.get(stream_id)
         if stream is None:
-            stream = _StreamChecks(self.paths)
+            stream = _StreamChecks(self.paths, self.thresholds)
             self.streams[stream_id] = stream
         return stream
 
 
-@dataclasses.dataclass
-class _Chain:
-    """One path's answers so far: their observables and the last boundary.
+@dataclasses.dataclass(frozen=True)
+class _WindowCheck:
+    """What a window's check closes on.
 
-    failed is the chain's outcome, None until its last window is checked.
+    The copy at the check's round, the window as decided there, its
+    events, and the laid windows the check cuts after it.
     """
 
-    observables: Optional[tuple] = ()
-    boundary_ids: tuple = ()
-    checks: list = dataclasses.field(default_factory=list)
-    failed: Optional[bool] = None
+    snapshot: checkpoint_records.CheckpointSnapshot
+    window: window_records.Window
+    events: dict
+    tail: list
+
+
+@dataclasses.dataclass(frozen=True)
+class _Answers:
+    """One window's two answers on one boundary, and the job they answer."""
+
+    job: decoding_records.DecodeJob
+    pair: closing_decisions.AnswerPair
 
 
 @dataclasses.dataclass(frozen=True)
@@ -168,10 +213,136 @@ class _Answered:
     strong_prediction: Optional[tuple]
 
 
+class _WindowAnswers:
+    """One window's answers on each boundary a chain hands it.
+
+    Chains on one boundary share the window's two answers, decoded once,
+    and the tail closed behind each, closed only when a chain checks.
+    """
+
+    def __init__(
+        self, closing: closing_windows.ClosingWindows, check: _WindowCheck
+    ) -> None:
+        self.closing = closing
+        self.check = check
+        # boundary ids -> _Answers
+        self.answers: dict = {}
+        # boundary ids -> _Answered
+        self.checked: dict = {}
+
+    def answers_on(self, boundary_ids: tuple) -> _Answers:
+        """The two answers on the boundary, decoded once."""
+        answers = self.answers.get(boundary_ids)
+        if answers is None:
+            check = self.check
+            job = self.closing.job(
+                check.snapshot, check.window, check.events, boundary_ids
+            )
+            pair = self.closing.closer.answer_pair(job)
+            answers = _Answers(job, pair)
+            self.answers[boundary_ids] = answers
+        return answers
+
+    def checked_on(self, boundary_ids: tuple) -> _Answered:
+        """The two answers on the boundary, each with its check's prediction."""
+        answered = self.checked.get(boundary_ids)
+        if answered is None:
+            answers = self.answers_on(boundary_ids)
+            pair = answers.pair
+            weak = self._prediction(pair.weak)
+            strong = self._prediction(pair.strong)
+            answered = _Answered(pair, weak, strong)
+            self.checked[boundary_ids] = answered
+        return answered
+
+    def _prediction(self, result) -> Optional[tuple]:
+        """The answer's observables XOR the tail closed behind it."""
+        if result is None:
+            return None
+        check = self.check
+        boundary_ids = closing_windows.boundary_ids_of(result)
+        tail_observables = self.closing.tail_observables(
+            check.snapshot, check.events, boundary_ids, check.tail
+        )
+        # an empty tail XORs nothing in
+        answer = result.logical_observables
+        return closing_windows.xor_or_none(tail_observables, answer)
+
+
+@dataclasses.dataclass
+class _Chain:
+    """One path's answers so far: their observables and the last boundary.
+
+    failed is the chain's outcome, None until its last window is checked.
+    """
+
+    path: str
+    observables: Optional[tuple] = ()
+    boundary_ids: tuple = ()
+    checks: list = dataclasses.field(default_factory=list)
+    failed: Optional[bool] = None
+
+    def take(
+        self, answers: _WindowAnswers, window_index: int, is_last: bool
+    ) -> None:
+        """Check the window and keep the path's answer."""
+        answered = answers.checked_on(self.boundary_ids)
+        snapshot = answers.check.snapshot
+        _keep(self.path, self, answered, snapshot, window_index)
+        if is_last:
+            self.failed = self.checks[-1].kept_failed
+
+
+@dataclasses.dataclass
+class _StaticChain:
+    """One fixed threshold's answers so far, kept by the verdict row.
+
+    escalated_windows and window_count count the windows it escalated
+    and decided; failed is its outcome, None until its last window.
+    """
+
+    threshold_nats: float
+    observables: Optional[tuple] = ()
+    boundary_ids: tuple = ()
+    escalated_windows: int = 0
+    window_count: int = 0
+    failed: Optional[bool] = None
+
+    def take(
+        self, answers: _WindowAnswers, window_index: int, is_last: bool
+    ) -> None:
+        """Keep the answer the row gives at the threshold; check the last."""
+        del window_index
+        found = answers.answers_on(self.boundary_ids)
+        closer = answers.closing.closer
+        weak = found.pair.weak
+        escalates = closer.escalates_at(found.job, weak, self.threshold_nats)
+        result = weak
+        if escalates:
+            result = found.pair.strong
+        if is_last:
+            self.failed = self._last_failed(answers, escalates)
+        self.window_count += 1
+        self.escalated_windows += escalates
+        self.observables = _observables_after(self.observables, result)
+        self.boundary_ids = _boundary_after(result)
+
+    def _last_failed(
+        self, answers: _WindowAnswers, escalates: bool
+    ) -> Optional[bool]:
+        """The kept answer's check, with the chain's past XORed in."""
+        answered = answers.checked_on(self.boundary_ids)
+        prediction = answered.weak_prediction
+        if escalates:
+            prediction = answered.strong_prediction
+        prediction = closing_windows.xor_or_none(self.observables, prediction)
+        return closing_windows.failed(prediction, answers.check.snapshot)
+
+
 class _StreamChecks:
     """One stream's rounds, copies, laid windows and chains."""
 
-    def __init__(self, paths: tuple) -> None:
+    def __init__(self, paths: tuple, thresholds: tuple) -> None:
         # round -> raw bits, from the earliest a window still to check reads
         self.packets: dict = {}
         # round -> the copy closed after it, from the next check's round
@@ -179,7 +350,12 @@ class _StreamChecks:
         # the laid windows not checked yet, in index order
         self.windows: list = []
         self.final_keys: set = set()
-        self.chains = {path: _Chain() for path in paths}
+        # each path's chain under its name, each static chain under its
+        # threshold in decibels
+        self.chains: dict = {path: _Chain(path) for path in paths}
+        for decibels in thresholds:
+            threshold_nats = threshold_sources.decibels_to_nats(decibels)
+            self.chains[decibels] = _StaticChain(threshold_nats)
         # made at the first copy, which carries the stream's program
         self.closing: Optional[closing_windows.ClosingWindows] = None
 
@@ -255,61 +431,17 @@ class _StreamChecks:
     def _check(
         self, window: window_records.Window, check_round: int, tail: list
     ) -> None:
-        """Every chain's check of the window, and the answer each keeps.
-
-        Chains on one boundary share the window's answers and the tail
-        closed behind each.
-        """
+        """Every chain's take of the window, on answers they share."""
         snapshot = self.snapshots[check_round]
         events = self.closing.events(snapshot, window.start_round, self.packets)
         deciding = window
         if window.buffer_hi >= check_round:
             deciding = closing_windows.ending_on(window, check_round)
         is_last = not tail and check_round == self._final_round()
-        answered_by_boundary: dict = {}
-        for path, chain in self.chains.items():
-            boundary_ids = chain.boundary_ids
-            answered = answered_by_boundary.get(boundary_ids)
-            if answered is None:
-                answered = self._answered(
-                    snapshot, deciding, events, boundary_ids, tail
-                )
-                answered_by_boundary[boundary_ids] = answered
-            _keep(path, chain, answered, snapshot, window.window_index)
-            if is_last:
-                chain.failed = chain.checks[-1].kept_failed
-
-    def _answered(
-        self,
-        snapshot: checkpoint_records.CheckpointSnapshot,
-        window: window_records.Window,
-        events: dict,
-        boundary_ids: tuple,
-        tail: list,
-    ) -> _Answered:
-        job = self.closing.job(snapshot, window, events, boundary_ids)
-        pair = self.closing.closer.answer_pair(job)
-        weak = self._prediction(snapshot, events, pair.weak, tail)
-        strong = self._prediction(snapshot, events, pair.strong, tail)
-        return _Answered(pair, weak, strong)
-
-    def _prediction(
-        self,
-        snapshot: checkpoint_records.CheckpointSnapshot,
-        events: dict,
-        result,
-        tail: list,
-    ) -> Optional[tuple]:
-        """The answer's observables XOR the tail closed behind it."""
-        if result is None:
-            return None
-        boundary_ids = closing_windows.boundary_ids_of(result)
-        tail_observables = self.closing.tail_observables(
-            snapshot, events, boundary_ids, tail
-        )
-        # an empty tail XORs nothing in
-        answer = result.logical_observables
-        return closing_windows.xor_or_none(tail_observables, answer)
+        check = _WindowCheck(snapshot, deciding, events, tail)
+        answers = _WindowAnswers(self.closing, check)
+        for chain in self.chains.values():
+            chain.take(answers, window.window_index, is_last)
 
     def _let_go(self, window: window_records.Window, check_round: int) -> None:
         """Every later window reads from its own start, checked later.

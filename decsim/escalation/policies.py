@@ -66,6 +66,8 @@ class Switching:
             # the boundaries the policy ships are the entry pools'
             if plan.leaves_an_entry_pool:
                 _refuse_eager_serial_boundaries(plan.boundary_policy)
+            if plan.boundary_policy.rechecks_provisional_boundaries:
+                self._refuse_checked_boundary_contradictions()
             return
         self._refuse_absorbing_window_contradictions(plan)
         _refuse_absorbing_window_scheme(
@@ -131,6 +133,28 @@ class Switching:
         summary = self.threshold.summary()
         return summary["threshold"]
 
+    def _refuse_checked_boundary_contradictions(self) -> None:
+        """Checked boundaries start no strong work on a provisional input.
+
+        A window decoded on a boundary not final yet may be decoded
+        again (windows/input_checks.py), so its verdict waits; these
+        start the strong decode or learn from the verdict at once.
+        """
+        if self.run_both_at_once:
+            raise ValueError(
+                "checked boundaries escalate a window only once the "
+                "boundaries its decode read are final; run_both_at_once "
+                "starts the strong decode with every window (the two "
+                "policies contradict; pick one)"
+            )
+        if self.threshold.audits_by_escalating:
+            raise ValueError(
+                "online threshold calibration audits each window's "
+                "verdict; under checked boundaries a window may be "
+                "decoded again and its first verdict dropped, which the "
+                "audit would count; use a fixed threshold"
+            )
+
     def _refuse_absorbing_window_contradictions(
         self, plan: decoding_records.RunShape
     ) -> None:
@@ -191,11 +215,14 @@ def _refuse_flush_terminal(scheme) -> None:
 
 
 def _refuse_eager_serial_boundaries(boundary_policy) -> None:
-    if boundary_policy.ships_provisional_boundaries:
+    """A provisional boundary that ships must be checked again."""
+    if not boundary_policy.ships_provisional_boundaries:
+        return
+    if not boundary_policy.rechecks_provisional_boundaries:
         raise ValueError(
-            "serial switching requires held boundaries: an eagerly "
-            "shipped provisional boundary is never corrected when "
-            "the strong result later revises the window"
+            "serial switching requires held or checked boundaries: an "
+            "eagerly shipped provisional boundary is never corrected "
+            "when the strong result later revises the window"
         )
 
 

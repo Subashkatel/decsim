@@ -54,6 +54,13 @@ class WindowInteraction(Protocol):
     def boundary_arrived(self, state: Any) -> bool:  # an opaque identity
         """Whether any source has delivered a boundary into this state."""
 
+    def same_boundary(
+        self,
+        state: Any,  # an opaque identity
+        other: Any,  # an opaque identity
+    ) -> bool:
+        """Whether two states fold the same bits into the window's input."""
+
     def apply_boundary(
         self,
         state: Any,  # an opaque identity
@@ -176,6 +183,14 @@ class DefaultWindowInteraction:
         """
         contributions = getattr(state, "contributions", None)
         return bool(contributions)
+
+    def same_boundary(self, state: dict, other: dict) -> bool:
+        """Whether two masks set the same bits.
+
+        A mask's trailing zeros fold nothing, nor does a key whose mask
+        is all zeros, so only the set bits of each key are compared.
+        """
+        return _set_bits_by_key(state) == _set_bits_by_key(other)
 
     def apply_boundary(
         self,
@@ -429,6 +444,22 @@ def _map_shifted_defects(defects: dict, shift: int, destination) -> dict:
             destination_key = (round_index, patch_ids)
         mapped[destination_key] = list(mask)
     return mapped
+
+
+def _set_bits_by_key(state: dict) -> dict:
+    """Each key's set bit positions; a key with none is left out."""
+    set_bits = {}
+    for key, mask in state.items():
+        set_positions = _set_positions(mask)
+        positions = frozenset(set_positions)
+        if positions:
+            set_bits[key] = positions
+    return set_bits
+
+
+def _set_positions(mask) -> list:
+    """The positions of a mask's set bits."""
+    return [position for position, bit in enumerate(mask) if bit]
 
 
 def _xor_mask(previous_mask, incoming_mask) -> list:

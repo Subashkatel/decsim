@@ -24,6 +24,7 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 import decsim.windows.escalate_edges as escalate_edges
+import decsim.windows.input_checks as input_checks_module
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
 import decsim.windows.routers as routers
@@ -44,6 +45,8 @@ class WindowInputGate:
     interaction = ports.Port(window_interactions.WindowInteraction)
     # the decoder side's input, which installs what this hands it
     input_fold = ports.Port(ports.DecoderInputFold)
+    # what each decode reads, kept while a boundary it read is not final
+    input_checks = ports.Port(input_checks_module.InputChecks)
 
     def __init__(self, copies_fold_by_pool: dict):
         # each pool's copies_boundary_fold: a copy duplicates the landed
@@ -66,6 +69,7 @@ class WindowInputGate:
         window = job.window
         if window is None:
             return
+        self.input_checks.note_read(job)
         state = window.boundary_in
         if job.decoder_input is None:
             return
@@ -574,6 +578,22 @@ class DecodeRequester:
         for side in self.router.sides():
             _check_joined(side)
 
+    def decode_again(self, window: window_records.Window) -> None:
+        """Decode the window again, on the boundary it holds now.
+
+        A decode of it read a boundary that changed (input_checks.py).
+        Its rounds are still stored: a window's potential strong hold
+        keeps them until the window is final
+        (round_retention.register_window), and the fresh request takes
+        its own hold on them. The window keeps its first queue entry,
+        and the final boundary releases it now, so the dropped decode
+        is part of its wait for that boundary (experiments/measure.py
+        dep_block).
+        """
+        window.t_released = self.builder.engine.now
+        operation = self.tracker.operation_by_id[window.stream_id]
+        self.request(window, operation)
+
     def withdraw(self, window: window_records.Window) -> None:
         """Withdraw one window's unstarted decode.
 
@@ -626,7 +646,9 @@ class DecodeRequester:
             edge = self.edges.entering(job.request_key.pool, entry)
             edge.enqueue_target(job, None)
             return
-        job.window.t_queued = self.builder.engine.now
+        # a window decoded again keeps its first entry (decode_again)
+        if job.window.t_queued is None:
+            job.window.t_queued = self.builder.engine.now
         entry_pool = job.request_key.pool
         on_decoded = self.verdict.accept_revision
         gap_join = self._join_of(entry_pool)

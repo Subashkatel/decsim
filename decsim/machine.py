@@ -288,7 +288,7 @@ class Machine:
             engine, keeps_series=keeps_series
         )
         decoders.attach_statistics(run_statistics)
-        statistics_parts = (control, readout, *switching_parts)
+        statistics_parts = (control, readout, windows, *switching_parts)
         _attach_statistics(run_statistics, statistics_parts)
         observation = _observe(
             graph,

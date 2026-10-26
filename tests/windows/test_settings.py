@@ -47,6 +47,7 @@ class _OutsideHeld:
     """A boundary row written outside decsim, in no table."""
 
     ships_provisional_boundaries = False
+    rechecks_provisional_boundaries = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:

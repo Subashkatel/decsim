@@ -883,10 +883,13 @@ class WindowJobBuilder(Protocol):
 
 @runtime_checkable
 class WindowRequests(Protocol):
-    """The submission side, as a strong window shape steers it."""
+    """The submission side, as a strong window shape or a verdict steers it."""
 
     def request_if_ready(self, window: window_records.Window) -> None:
         """If the window has its data, submit it through the policy."""
+
+    def decode_again(self, window: window_records.Window) -> None:
+        """Decode the window again: a boundary its decode read changed."""
 
     def withdraw(self, window: window_records.Window) -> None:
         """Withdraw one window's early-shipped, unstarted decode."""
@@ -1219,6 +1222,17 @@ class DecodeQueue(Protocol):
         verdict: decoding_records.Verdict,
     ) -> None:
         """The window side decided this weak request; close its attempt."""
+
+    def discard_weak_request(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """The window side dropped this weak result, its input changed.
+
+        Its attempt closes with no verdict. The window side read the
+        result already (read_result), so a unit it held is free.
+        """
 
     def read_result(self, job: decoding_records.DecodeJob) -> None:
         """The window side, or the confidence join, has this result in hand.
@@ -2005,12 +2019,15 @@ class Framing(Protocol):
 class BoundaryPolicy(Protocol):
     """When a committed window ships its boundary to the windows after it.
 
-    A provisional boundary that ships is never revised, so a run that may
-    revise a weak result needs a policy that holds;
-    ships_provisional_boundaries declares that fact.
+    A provisional boundary that ships is revised only by a policy that
+    ships the final one again and has its readers check it, so a run that
+    may revise a weak result needs a policy that holds or rechecks;
+    ships_provisional_boundaries and rechecks_provisional_boundaries
+    declare those facts.
     """
 
     ships_provisional_boundaries: bool
+    rechecks_provisional_boundaries: bool
 
     def on_commit(self, window: window_records.Window, *, final: bool) -> bool:
         """Whether to ship the boundary now."""

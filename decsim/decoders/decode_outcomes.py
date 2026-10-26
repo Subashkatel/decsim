@@ -78,6 +78,21 @@ class DecodeOutcomes:
             processing = outcomes.WEAK_AWAITED_STRONG
         self.trace.request_ended.fire(job, result, processing, self.engine.now)
 
+    def discard_weak_request(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """The decode read a boundary that changed: close its attempt.
+
+        The window side decodes the window again on the boundary it
+        holds now (windows/input_checks.py), so no verdict is given.
+        """
+        key = _destination_of(job)
+        self.manager.strong_requests.resolve_weak(key, job.request_key.pool)
+        outcome = decoding_records.RequestProcessingOutcome.WEAK_DISCARDED_STALE
+        self.trace.request_ended.fire(job, result, outcome, self.engine.now)
+
     def close_companion_request(
         self,
         job: decoding_records.DecodeJob,

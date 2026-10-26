@@ -62,7 +62,9 @@ POINTS = (
     # included, before the input hop
     "store_read",
     # the dependency wait: in the queue, from the job's entry to its
-    # predecessor's boundary arriving, and around the committing decode's
+    # predecessor's boundary arriving, or to its final boundary that sent
+    # a window decoded on a guess to be decoded again, the dropped decode
+    # included (windows/input_checks.py), and around the committing decode's
     # own hop, from where its path started, the dispatch or the verdict
     # that escalated the window, to the first tick it may compute, less
     # the input hop and the store's read. It is the wait for the
@@ -112,6 +114,11 @@ POINTS = (
     # wait a strong decode started with the weak one under
     # run_both_at_once has; zero for every other window
     "selection_wait",
+    # the verdict, or the committing decode's end when later -> the
+    # boundaries that decode read on a guess final and the same, so the
+    # kept answer could leave for the frame (windows/input_checks.py);
+    # zero for a window whose decode read final boundaries
+    "input_check_wait",
     # a unit took the window's first decode -> the verdict that
     # escalated it: the weak attempt whose result did not commit, zero
     # for a window the first decode committed
@@ -669,6 +676,7 @@ def window_points_us(
     dependency_block = config_module.ticks_to_microseconds(dependency_ticks)
     confidence_ticks = _confidence_ticks(window, decode)
     answered = max(window.t_done, decode.done_ticks)
+    input_final = _input_final_ticks(window, answered)
     last_required_send = last_required_send_ticks(decode, qpu_send)
     first_required_send = qpu_send[(stream_id, window.start_round)]
     return {
@@ -697,7 +705,8 @@ def window_points_us(
             decode.done_ticks, decode.compute_start_ticks
         ),
         "confidence": config_module.ticks_to_microseconds(confidence_ticks),
-        "selection_wait": _span_microseconds(output_sent, answered),
+        "selection_wait": _span_microseconds(output_sent, input_final),
+        "input_check_wait": _span_microseconds(input_final, answered),
         "weak_attempt": _span_microseconds(attempt_end, first_dispatch),
         "escalation_link_per_window": config_module.ticks_to_microseconds(
             escalation_ticks
@@ -2218,16 +2227,21 @@ def _first_dispatch_ticks(stages, window, frame_record) -> int:
 
     The ready-queue wait ends there and an escalated window's weak attempt
     starts there (Toshio et al. 2510.25222 Sec. III A steps 2 to 4). A
-    cancelled decode is not on the window's path, so it is left out.
+    cancelled decode is not on the window's path, so it is left out, nor
+    is one a unit took before the window's release: that decode read a
+    boundary that changed, and its result was dropped (decode_again).
     """
     stream_id, window_id = frame_record.window_key
     records = stages.records_for(stream_id, window_id)
     cancelled = _cancelled_run_sequences(records)
+    released = _released_ticks(window)
     ticks = []
     for record in records:
         if cancelled.intersection(record.run_sequences):
             continue
         if record.dispatch_ticks is None:
+            continue
+        if record.dispatch_ticks < released:
             continue
         ticks.append(record.dispatch_ticks)
     if not ticks:
@@ -2279,6 +2293,17 @@ def _released_ticks(window) -> int:
     if window.t_released is None:
         return window.t_queued
     return max(window.t_queued, window.t_released)
+
+
+def _input_final_ticks(window, answered: int) -> int:
+    """Where the wait for a guessed input ends: never before the answer.
+
+    A window whose decode read final boundaries waits for none, and an
+    escalated one settled its guess before its strong answer.
+    """
+    if window.t_input_final is None:
+        return answered
+    return max(window.t_input_final, answered)
 
 
 def _startable_ticks(decode: _CommittedDecode, input_landed: int) -> int:

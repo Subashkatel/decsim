@@ -29,6 +29,7 @@ import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.escalate_edges as escalate_edges
+import decsim.windows.input_checks as input_checks
 import decsim.windows.round_retention as round_retention
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
@@ -166,6 +167,7 @@ class _Fixture:
         )
         gate.interaction = interaction
         gate.input_fold = input_fold
+        gate.input_checks = input_checks.InputChecks()
         self.gate = gate
         self.builder = decode_requests.DecodeRequestBuilder(self.engine)
         self.builder.planner = self.planner

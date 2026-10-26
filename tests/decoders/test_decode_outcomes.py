@@ -95,6 +95,32 @@ def test_an_escalated_weak_request_closes_the_attempt():
     assert not requests.by_window
 
 
+def test_a_dropped_weak_request_closes_the_attempt_with_no_verdict():
+    """A result that read a boundary that changed ends as stale, unjudged.
+
+    The window side decodes the window again (windows/input_checks.py),
+    so the attempt must close for the next one to open.
+    """
+    outcomes, requests, _policy = _outcomes(decoding_records.Verdict.KEEP)
+    ended = []
+    outcomes.trace.request_ended.connect(
+        lambda _job, _result, outcome, _ticks: ended.append(outcome)
+    )
+    verdicts = []
+    outcomes.trace.verdict_given.connect(
+        lambda _key, _request, verdict: verdicts.append(verdict)
+    )
+    job = _weak_job([])
+    requests.admit(job, now=0)
+    result = decoding_records.DecodeResult(1, 0)
+    outcomes.deliver_weak(job, result)
+    outcomes.discard_weak_request(job, result)
+    stale = decoding_records.RequestProcessingOutcome.WEAK_DISCARDED_STALE
+    assert ended == [stale]
+    assert verdicts == []
+    assert not requests.by_window
+
+
 def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
     outcomes, requests, policy = _outcomes(decoding_records.Verdict.KEEP)
     delivered = []

@@ -225,3 +225,11 @@ class SwitchingSettings:
                 f"the far weak boundary exists (the two policies "
                 f"contradict; pick one)"
             )
+        boundary_policy = shape.boundary_policy.build()
+        if boundary_policy.rechecks_provisional_boundaries:
+            raise ValueError(
+                f"switching.deadline starts the target decode before the "
+                f"verdict; strong_window {shape.name} with checked "
+                f"boundaries starts it only once the window's input is "
+                f"final (the two policies contradict; pick one)"
+            )

@@ -374,6 +374,14 @@ class DecoderManager:
         """The window side decided this weak request; close its attempt."""
         self.outcomes.resolve_weak_request(job, result, verdict)
 
+    def discard_weak_request(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """The window side dropped this weak result; close its attempt."""
+        self.outcomes.discard_weak_request(job, result)
+
     def close_companion_request(
         self,
         job: decoding_records.DecodeJob,

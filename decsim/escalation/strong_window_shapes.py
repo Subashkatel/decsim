@@ -4,11 +4,12 @@ Two rows, one of which fills SwitchingSettings.strong_window (Toshio et
 al. 2510.25222). Both pin a face on a neighbour's committed correction,
 Bombin et al. 2303.04846's input adaptation (lines 775-788). RedoWindow
 is the escalated window's commit region with its past face pinned, built
-once its rounds are stored in the strong syndrome buffer. DoubleWindow
-is Sec. III C and Fig. 12: a forward extent with both faces pinned that
-absorbs the weak windows it covers, re-slices the window past it, and is
-held until that window's weak commit or, at the operation's end, until
-its last round is stored. A shape with both faces pinned that absorbs
+once its rounds are stored in the strong syndrome buffer; its boundary
+row is held, or checked to let the weak chain go on
+(boundary_policies.Checked). DoubleWindow is Sec. III C and Fig. 12: a
+forward extent with both faces pinned that absorbs the weak windows it
+covers, re-slices the window past it, and is held until that window's
+weak commit or, at the operation's end, until its last round is stored. A shape with both faces pinned that absorbs
 nothing is not a row: it waits for the window after it, which waits for
 its own strong result, and the serial sliding chain deadlocks.
 
@@ -69,15 +70,14 @@ class StrongWindowShape(Protocol):
     (release_conditions); the redecode asks held_job when those
     conditions fire. absorbs_weak_windows declares that the row's region
     replaces the weak windows it covers, so the planner claims the
-    rounds a restart would read. boundary_policy is the boundary row a
-    switching run's windows take: eager for an absorbing region, held
-    for one that absorbs nothing. window_absorbed(key, owner_key) is the
-    shape's one trace source; a shape that absorbs nothing exposes the
-    silent source.
+    rounds a restart would read. The boundary row a switching run's
+    windows take is the row's settings' (ports.StrongWindowBoundaries):
+    eager for an absorbing region, held or checked for one that absorbs
+    nothing. window_absorbed(key, owner_key) is the shape's one trace
+    source; a shape that absorbs nothing exposes the silent source.
     """
 
     absorbs_weak_windows: bool
-    boundary_policy: ports.BoundaryPolicySettings
     window_absorbed: Union[trace_source.TraceSource, trace_source.SilentSource]
 
     def plan(
@@ -113,8 +113,11 @@ class RedoWindow(StrongWindowPorts):
     closed past boundary and an open future boundary". It absorbs no
     weak window, so serial switching gives it held boundaries, under
     which a committed boundary is final, and the neighbour has committed
-    by the time its dependent escalates. The window with no earlier
-    neighbour pins nothing: the initialisation closes its past face.
+    by the time its dependent escalates. Under checked boundaries a
+    window escalates only once the boundaries its decode read are final
+    (windows/input_checks.py), so the face it pins is final too. The
+    window with no earlier neighbour pins nothing: the initialisation
+    closes its past face.
 
     The job waits for its rounds in the strong syndrome buffer, and the
     rounds the chip still holds go up with the escalation. This is not
@@ -123,13 +126,23 @@ class RedoWindow(StrongWindowPorts):
     """
 
     absorbs_weak_windows = False
-    boundary_policy = boundary_policies.Held.Settings()
     window_absorbed = trace_source.SILENT
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The redo window, as the switching slot names it."""
+        """The redo window, as the switching slot names it.
 
+        boundary_policy is the boundary row the windows take: held, the
+        default, where the window after an escalated one waits for the
+        strong answer, or checked, where it decodes on the weak
+        boundary and is checked when the strong one lands. Eager is
+        refused (policies.py): its provisional boundary is never
+        corrected.
+        """
+
+        boundary_policy: ports.BoundaryPolicySettings = (
+            boundary_policies.Held.Settings()
+        )
         # the word the refusals name this row by
         name = "redo_window"
         # it restarts no weak window, so the width the window interaction
@@ -140,11 +153,6 @@ class RedoWindow(StrongWindowPorts):
         def absorbs_weak_windows(self) -> bool:
             """The row's own declaration."""
             return RedoWindow.absorbs_weak_windows
-
-        @property
-        def boundary_policy(self) -> ports.BoundaryPolicySettings:
-            """The row's own declaration."""
-            return RedoWindow.boundary_policy
 
         def build(self, engine: engine_module.Engine) -> "RedoWindow":
             """A fresh redo window on the run's engine."""
@@ -157,6 +165,7 @@ class RedoWindow(StrongWindowPorts):
 
         A face the chip committed is pinned now, as the window is
         assigned: under held boundaries the neighbour's commit is final,
+        and under checked ones the window escalates only once it is,
         so the boundary condition is determined (Toshio et al.
         2510.25222 Fig. 12 caption and Sec. III C) and leaves the chip
         with the escalation (App. C: a small soft output assigns the
@@ -234,7 +243,6 @@ class DoubleWindow(StrongWindowPorts):
     """
 
     absorbs_weak_windows = True
-    boundary_policy = boundary_policies.Eager.Settings()
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -261,8 +269,8 @@ class DoubleWindow(StrongWindowPorts):
 
         @property
         def boundary_policy(self) -> ports.BoundaryPolicySettings:
-            """The row's own declaration."""
-            return DoubleWindow.boundary_policy
+            """Eager: the weak chain keeps committing past the region."""
+            return boundary_policies.Eager.Settings()
 
         def build(self, engine: engine_module.Engine) -> "DoubleWindow":
             """A fresh double window on the run's engine."""

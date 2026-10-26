@@ -1991,6 +1991,7 @@ class RecordingBoundaryPolicy:
     """A boundary policy written outside decsim: one method, plain names."""
 
     ships_provisional_boundaries = False
+    rechecks_provisional_boundaries = False
 
     def on_commit(self, window, final: bool) -> bool:
         del window
@@ -2057,6 +2058,7 @@ class SeedRecordingPolicy:
     """A boundary policy that records the seed the root derived for it."""
 
     ships_provisional_boundaries = False
+    rechecks_provisional_boundaries = False
 
     def __init__(self):
         self.reserved_seeds = []

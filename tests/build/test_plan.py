@@ -348,6 +348,7 @@ class _OutsideBoundaryPolicy:
     """A boundary policy row written outside decsim; it ships when final."""
 
     ships_provisional_boundaries = False
+    rechecks_provisional_boundaries = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:

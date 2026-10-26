@@ -685,6 +685,12 @@ strong_answer_route names one of records/routes.py ANSWER_ROUTE_NAMES, the way a
 
 `decsim/escalation/strong_window_shapes.py`. The redo window, as the switching slot names it.
 
+boundary_policy is the boundary row the windows take: held, the default, where the window after an escalated one waits for the strong answer, or checked, where it decodes on the weak boundary and is checked when the strong one lands. Eager is refused (policies.py): its provisional boundary is never corrected.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `boundary_policy` | `ports.BoundaryPolicySettings` | `boundary_policies.Held.Settings()` |
+
 ### `DoubleWindow.Settings`
 
 `decsim/escalation/strong_window_shapes.py`. The double window, as the switching slot names it.
@@ -1232,6 +1238,10 @@ bits bounds the store; None is unbounded. A full store makes the controller hold
 ### `Held.Settings`
 
 `decsim/windows/boundary_policies.py`. The held row, which takes no setting.
+
+### `Checked.Settings`
+
+`decsim/windows/boundary_policies.py`. The checked row, which takes no setting.
 
 ### `CoordinateOrder.Settings`
 

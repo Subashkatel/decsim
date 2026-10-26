@@ -2,7 +2,7 @@
 
 The result is the ledger's XOR over the operation's commit range, or a
 stream segment's, delivered to the conditional release once every
-window is committed, no strong redo is pending, and the stream is
+window is committed, none waits for its final result, and the stream is
 sealed; a segment releases when the stream's committed prefix covers
 it (Skoric et al. 2209.08552: the logical correction of a stream is the
 sum over its committed windows). The workload is complete once every
@@ -150,7 +150,7 @@ class OperationResults:
     ) -> None:
         """Deliver the segment results whose full round range committed.
 
-        Gated as operations are: no pending strong may still change it.
+        Gated as operations are: no result still to be final may change it.
         A commit may release any blocker the release rule makes wait for
         an operation bound to the stream.
         """
@@ -376,25 +376,25 @@ class OperationResults:
     def _is_segment_final(
         self, operation: program_records.Operation, segment: "_Segment"
     ) -> bool:
-        """Its end is committed, and no strong redo may change it."""
+        """Its end is committed, and no result still to be final changes it."""
         committed_by_stream = self.deliveries.committed_round_count_by_stream
         committed = committed_by_stream.get(segment.stream_id, 0)
         segment_end = self._stream_segment_end(operation, segment)
         if segment_end > committed:
             return False
-        is_waiting = self._segment_waits_for_strong(
+        is_waiting = self._segment_waits_for_final(
             segment.stream_id, segment_end
         )
         return not is_waiting
 
-    def _segment_waits_for_strong(self, stream_id, segment_end: int) -> bool:
-        """Whether a window awaiting its redo commits from the segment on.
+    def _segment_waits_for_final(self, stream_id, segment_end: int) -> bool:
+        """Whether a window awaiting its final result commits in the segment.
 
         The windows before the final cursor are final, so only the open
         ones after it are read.
         """
         for window in self._open_windows(stream_id):
-            if not is_awaiting_strong(window):
+            if not is_awaiting_final(window):
                 continue
             if window.commit_lo <= segment_end:
                 return True
@@ -471,14 +471,18 @@ class OperationResults:
 
 
 def is_final_window(window: window_records.Window) -> bool:
-    """Committed, and not waiting for a strong redo to publish."""
+    """Committed, and not waiting for its final result to publish."""
     if not window.committed:
         return False
-    return not is_awaiting_strong(window)
+    return not is_awaiting_final(window)
 
 
-def is_awaiting_strong(window: window_records.Window) -> bool:
-    """Committed provisionally: the strong redo has not published yet."""
+def is_awaiting_final(window: window_records.Window) -> bool:
+    """Committed provisionally: its final result has not published yet.
+
+    That result is a strong redo's, or a decode's that read a boundary
+    not final yet, once that boundary is final (input_checks.py).
+    """
     if not window.committed:
         return False
     if window.is_absorbed:

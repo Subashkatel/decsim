@@ -87,6 +87,7 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
+import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.revision_rules as revision_rules
 import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
@@ -155,6 +156,7 @@ CHAIN = (
     "service",
     "confidence",
     "selection_wait",
+    "input_check_wait",
     "output_link_per_window",
     "frame_commit",
 )
@@ -1034,6 +1036,27 @@ def test_an_escalated_windows_points_sum_to_its_reaction_time():
 
     totals = chain_sum_ticks(measurement)
     assert totals == reaction_ticks(measurement)
+
+
+def test_a_checked_windows_points_sum_to_its_reaction_time():
+    """A kept answer on a guessed boundary waits in input_check_wait.
+
+    Under checked boundaries the window after an escalated one decodes
+    on the weak boundary, and its kept answer waits for the final one
+    before it leaves for the frame (windows/input_checks.py); a window
+    whose guess was wrong is decoded again, the dropped decode in its
+    dep_block. Every point still adds up to the window's reaction time
+    to the tick.
+    """
+    checked = boundary_policies.Checked.Settings()
+    redo = strong_window_shapes.RedoWindow.Settings(boundary_policy=checked)
+    settings = switching_settings(20.0, strong_window=redo)
+    task = task_at(settings, SWITCHING_ERROR_PROBABILITY)
+
+    measurement = measured(task)
+
+    assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
+    assert max(measurement.samples["input_check_wait"]) > 0
 
 
 def test_a_batched_windows_points_sum_to_its_reaction_time():

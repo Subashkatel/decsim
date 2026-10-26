@@ -140,8 +140,14 @@ class Window:
     )
     t_queued: Optional[int] = None  # tick the job entered the decode queue
     # tick its last owed boundary arrived while its decode waited in the
-    # queue, so its wait for a unit began then; None when it owed none
+    # queue, so its wait for a unit began then, or the tick a final
+    # boundary that changed what its decode read sent it to be decoded
+    # again (windows/input_checks.py); None when it owed none
     t_released: Optional[int] = None
+    # tick the boundaries a decode read on a guess were final and the
+    # same, so its result could stand; None for a window whose decode
+    # read final boundaries
+    t_input_final: Optional[int] = None
     # The three ticks below are the window's own decodes as they happen,
     # so a window decoded more than once (the two forced-class solves of
     # a complementary gap) keeps the last one's dispatch

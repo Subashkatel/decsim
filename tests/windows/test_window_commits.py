@@ -20,6 +20,7 @@ import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph_layout as graph_layout
 import decsim.windows.escalate_edges as escalate_edges
+import decsim.windows.input_checks as input_checks
 import decsim.windows.revision_rules as revision_rules
 import decsim.windows.window_commits as window_commits
 import tests.declared_run as declared_run
@@ -201,6 +202,8 @@ class _Fixture:
         self.verdict.router = one_entry.router(decode_queue=self.decode_queue)
         self.verdict.edges = edges
         self.verdict.committer = committer
+        # no boundary lands here, so every input reads final
+        self.verdict.input_checks = input_checks.InputChecks()
 
     def job(self, tier, sequence, awaiting=False) -> decoding_records.DecodeJob:
         request_key = window_records.DecoderRequestKey(4, 1, tier, sequence)

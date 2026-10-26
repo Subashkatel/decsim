@@ -434,9 +434,61 @@ def test_serial_switching_refuses_eager_boundaries_at_build():
     eager = boundary_policies.Eager.Settings()
     serial = _serial_switching_graph(eager)
     with pytest.raises(
-        ValueError, match="serial switching requires held boundaries"
+        ValueError, match="serial switching requires held or checked boundaries"
     ):
         machine_module.Machine.build(serial, 0)
+
+
+def test_serial_switching_runs_on_checked_boundaries():
+    """A checked boundary ships at once and is checked when final."""
+    redo = _checked_redo_window()
+    machine = fabric.switching_machine(
+        rounds=9, escalated_windows={0}, strong_window=redo
+    )
+    result = machine.run()
+    assert result.terminal_status == "complete"
+
+
+def test_checked_boundaries_beside_run_both_at_once_are_refused():
+    """A strong decode started with every window would start on a guess."""
+    redo = _checked_redo_window()
+    with pytest.raises(
+        ValueError, match="checked boundaries escalate a window only once"
+    ):
+        fabric.switching_machine(
+            rounds=9,
+            escalated_windows=set(),
+            strong_window=redo,
+            run_both_at_once=True,
+        )
+
+
+def test_an_online_source_under_checked_boundaries_is_refused():
+    """A verdict dropped with its decode would still be in the audit."""
+    online = _always_auditing_online_threshold(threshold=2.0)
+    online_settings = threshold_sources.OnlineThreshold.Settings(
+        threshold_decibels=20.0
+    )
+    redo = _checked_redo_window()
+    switching = declared_run.declared_switching(
+        threshold=online_settings, strong_window=redo
+    )
+    with pytest.raises(
+        ValueError, match="under checked boundaries a window may be decoded"
+    ):
+        fabric.switching_machine(
+            rounds=9,
+            escalated_windows=set(),
+            strong_window=redo,
+            switching=switching,
+            online_threshold=online,
+        )
+
+
+def _checked_redo_window() -> strong_window_shapes.RedoWindow.Settings:
+    """The redo window with the checked boundary row."""
+    checked = boundary_policies.Checked.Settings()
+    return strong_window_shapes.RedoWindow.Settings(boundary_policy=checked)
 
 
 def test_the_double_window_refuses_held_boundaries_at_build():

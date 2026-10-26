@@ -409,6 +409,7 @@ class RequestProcessingOutcome(Enum):
         "strong_cancelled_member_service_continued"
     )
     WEAK_WITHDRAWN_FOR_STRONG_WINDOW = "weak_withdrawn_for_strong_window"
+    WEAK_DISCARDED_STALE = "weak_discarded_stale"
 
 
 @dataclass(frozen=True)

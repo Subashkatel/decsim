@@ -26,6 +26,7 @@ import decsim.windows.built_window_models as built_window_models
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.escalate_edges as escalate_edges
+import decsim.windows.input_checks as input_checks_module
 import decsim.windows.operation_results as operation_results
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
@@ -57,6 +58,7 @@ class Windows:
     ledger: committed_rounds.LogicalLedger
     results: operation_results.OperationResults
     courier: window_boundaries.BoundaryCourier
+    input_checks: input_checks_module.InputChecks
     committer: window_commits.WindowCommitter
     verdict: window_commits.WindowVerdict
     requester: decode_requests.DecodeRequester
@@ -117,6 +119,7 @@ class Windows:
         )
         results.release_rule = rule_settings.build(plan.operations)
         courier = window_boundaries.BoundaryCourier(routes)
+        input_checks = input_checks_module.InputChecks()
         committer = window_commits.WindowCommitter(engine)
         verdict = window_commits.WindowVerdict(engine)
         clocked_windows = config.with_machine_clock(
@@ -143,6 +146,7 @@ class Windows:
             ledger=ledger,
             results=results,
             courier=courier,
+            input_checks=input_checks,
             committer=committer,
             verdict=verdict,
             requester=requester,
@@ -204,6 +208,17 @@ class Windows:
                 joins.append(join)
         return tuple(joins)
 
+    def statistics_parts(self) -> tuple:
+        """The input checks, on a run whose boundaries are checked again.
+
+        A run with held or eager boundaries never reads a provisional
+        boundary, so it keeps no counts that are always zero.
+        """
+        boundary_policy = self.courier.boundary_policy
+        if not boundary_policy.rechecks_provisional_boundaries:
+            return ()
+        return (("input_checks", self.input_checks),)
+
     def start(self) -> None:
         """Build every planned window's model, then its first boundary."""
         self.planner.start()
@@ -223,6 +238,7 @@ class Windows:
         self.tracker.scheme = plan.scheme
         self.tracker.planner = self.planner
         self.gate.interaction = interaction
+        self.input_checks.interaction = interaction
         self.builder.interaction = interaction
         self.courier.interaction = interaction
         self.courier.boundary_policy = plan.boundary_policy
@@ -249,6 +265,8 @@ class Windows:
         self.courier.transfers = self.window_transfers
         self.courier.retention = retention
         self.courier.windows = self.window_manager
+        self.courier.input_checks = self.input_checks
+        self.gate.input_checks = self.input_checks
         self.committer.courier = self.courier
         self.committer.decoder_output = self.decoder_output
         self.committer.results = self.results
@@ -266,6 +284,8 @@ class Windows:
         verdict.planner = self.planner
         verdict.tracker = self.tracker
         verdict.committer = self.committer
+        verdict.input_checks = self.input_checks
+        verdict.requester = requester
         requester.tracker = self.tracker
         requester.retention = self.retention
         requester.builder = self.builder

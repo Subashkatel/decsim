@@ -16,11 +16,14 @@ import pytest
 import decsim.engine as engine_module
 import decsim.links.fabric as fabric
 import decsim.links.window_transfers as window_transfers
+import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph_layout as graph_layout
 import decsim.windows.boundary_payloads as boundary_payloads
+import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.input_checks as input_checks
 import decsim.windows.round_retention as round_retention
 import decsim.windows.window_boundaries as window_boundaries
 import decsim.windows.window_interactions as window_interactions
@@ -44,6 +47,8 @@ _ROUTES = REFERENCE_LAYOUT.routes()
 
 
 class _EagerPolicy:
+    rechecks_provisional_boundaries = False
+
     def on_commit(self, _window, *, final) -> bool:
         del final
         return True
@@ -105,6 +110,7 @@ def test_a_stale_delivery_is_ignored_and_the_edge_releases_once():
     courier.retention = _retention_of(20)
     courier.interaction = interaction
     courier.boundary_policy = _EAGER
+    courier.input_checks = _input_checks(interaction)
     courier.windows = types.SimpleNamespace(
         accept_boundary=on_boundary_received
     )
@@ -233,7 +239,7 @@ def _reference_latency_ticks(path_name: str) -> int:
     return path.channel.propagation_latency_ticks
 
 
-def _pinned_courier():
+def _pinned_courier(boundary_policy=_EAGER):
     """A courier whose window (1,0) has committed, and its strong reader.
 
     The strong window re-decodes rounds 4-6 with its past face pinned on
@@ -289,7 +295,8 @@ def _pinned_courier():
     courier.transfers = recording
     courier.retention = _retention_of(6)
     courier.interaction = interaction
-    courier.boundary_policy = _EAGER
+    courier.boundary_policy = boundary_policy
+    courier.input_checks = _input_checks(interaction)
     courier.windows = _LandingTicks(engine)
     return engine, operation, source, courier, recording
 
@@ -372,6 +379,72 @@ def test_a_pinned_face_carries_the_neighbours_committed_seam():
         (2, 1),
         (2, 2),
         (2, 3),
+    )
+
+
+def test_a_checked_boundary_ships_at_its_commit_and_again_when_final():
+    """The window after reads the weak boundary now and checks the final one.
+
+    Under the checked row a provisional boundary ships as eager's does
+    and is kept, as held's is, for the final result; the window after
+    holds it unchecked until that lands (input_checks.py).
+    """
+    checked = boundary_policies.Checked()
+    engine, operation, source, courier, recording = _pinned_courier(checked)
+    weak = _result_with((24,))
+    strong = _result_with((25,))
+    weak_key = _key(0)
+    strong_key = _key(1)
+
+    courier.hand_on(source, operation, weak, weak_key, False)
+    engine.run()
+    provisional = _provisional_sources(courier)
+    courier.ship_held(source, strong, strong_key)
+    engine.run()
+
+    assert provisional == {source.key}
+    assert _provisional_sources(courier) == set()
+    assert len(recording.boundary_sends) == 2
+
+
+def test_a_final_hand_on_ends_a_checked_boundary_kept_before_it():
+    """A window decoded again on its final input hands its boundary on anew.
+
+    What it kept for a final result it no longer awaits ships nothing.
+    """
+    checked = boundary_policies.Checked()
+    engine, operation, source, courier, recording = _pinned_courier(checked)
+    guess = _result_with((24,))
+    again = _result_with((25,))
+    guess_key = _key(0)
+    again_key = _key(1)
+
+    courier.hand_on(source, operation, guess, guess_key, False)
+    courier.hand_on(source, operation, again, again_key, True)
+    courier.ship_held(source, again, again_key)
+    engine.run()
+
+    assert _provisional_sources(courier) == set()
+    assert len(recording.boundary_sends) == 2
+
+
+def _provisional_sources(courier) -> set:
+    """The sources whose boundary the window after (1,0) holds unchecked."""
+    checks = courier.input_checks
+    sources = checks.provisional_sources_by_window.get((1, 1), set())
+    return set(sources)
+
+
+def _result_with(detector_ids: tuple) -> decoding_records.DecodeResult:
+    """A result of window (1,0) whose committed faults flip these detectors."""
+    residual = window_records.DependencyResidual(detector_ids=detector_ids)
+    return decoding_records.DecodeResult(1, 0, boundary_data=residual)
+
+
+def _key(sequence: int) -> window_records.DecoderRequestKey:
+    """A request of window (1,0) on the weak pool."""
+    return window_records.DecoderRequestKey(
+        1, 0, window_records.WEAK_POOL_ID, sequence
     )
 
 
@@ -509,3 +582,10 @@ def test_a_face_pinned_on_a_window_that_has_not_committed_is_refused():
         courier.pin_strong_face(
             (1, 0), strong_window, model, operation, strong_request_key
         )
+
+
+def _input_checks(interaction) -> input_checks.InputChecks:
+    """The checks a courier tells each landing; no decode reads here."""
+    checks = input_checks.InputChecks()
+    checks.interaction = interaction
+    return checks

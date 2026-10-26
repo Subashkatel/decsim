@@ -14,6 +14,12 @@ the pool's decode queue; a revision no edge leaves is final.
 WindowCommitter then commits the revision and hands the correction on;
 the decoder side sends the final one to the frame
 (decoders/decoder_output.py), which takes one write per window.
+
+A first revision that read a boundary not final yet commits
+provisionally and waits for that boundary (input_checks.py): a keep is
+final, and an escalation leaves, once it is final and the same; a
+boundary that changed drops the revision and the window is decoded
+again, which starts its revisions over.
 """
 
 import dataclasses
@@ -31,6 +37,7 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 import decsim.windows.escalate_edges as escalate_edges
+import decsim.windows.input_checks as input_checks_module
 import decsim.windows.operation_results as operation_results
 import decsim.windows.round_tracker as round_tracker_module
 import decsim.windows.routers as routers
@@ -298,9 +305,15 @@ class WindowCommitter:
         self.trace.window_final.fire(window)
 
     def _kept_revisions(self, revision: Revision, is_final: bool) -> tuple:
-        """The window's earlier revisions; this one kept unless it is final."""
+        """The window's earlier revisions; this one kept unless it is final.
+
+        A first revision starts them over: a window decoded again read
+        a boundary that changed, so what it revised before is void.
+        """
         window_key = revision.window.key
         earlier = self.revisions_by_window.pop(window_key, ())
+        if revision.is_first:
+            earlier = ()
         if not is_final:
             self.revisions_by_window[window_key] = (*earlier, revision)
         return earlier
@@ -327,6 +340,10 @@ class WindowVerdict:
     edges = ports.Port(escalate_edges.EscalateEdges)
     # which entry pool decodes each window, and each entry pool's manager
     router = ports.Port(routers.Router)
+    # whether a first revision read final boundaries; what it waits with
+    input_checks = ports.Port(input_checks_module.InputChecks)
+    # the window decoded again when a boundary its decode read changed
+    requester = ports.Port(ports.WindowRequests)
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
@@ -412,6 +429,32 @@ class WindowVerdict:
         verdict: decoding_records.Verdict,
         edge: Optional[ports.EscalateEdge],
     ) -> None:
+        """Act on the verdict, as the input the decode read allows.
+
+        The input is asked of here, the last instant before the result
+        is used, so a boundary that lands while the verdict is priced
+        counts.
+        """
+        input_state = self._input_of(job)
+        if input_state is input_checks_module.InputState.STALE:
+            self._drop_stale_result(job, result)
+            return
+        queue = self._queue_of(job.request_key.pool)
+        read_result = functools.partial(queue.read_result, job)
+        if input_state is input_checks_module.InputState.PROVISIONAL:
+            self._commit_on_a_guess(job, result, verdict, edge, read_result)
+            return
+        self._settle(job, result, verdict, edge, read_result)
+
+    def _settle(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        verdict: decoding_records.Verdict,
+        edge: Optional[ports.EscalateEdge],
+        read_result: Callable[[], None],
+    ) -> None:
+        """Escalate or keep, on an input that is final."""
         revision = self._revision(job, result)
         is_final = verdict is decoding_records.Verdict.KEEP
         if not is_final:
@@ -421,8 +464,87 @@ class WindowVerdict:
             cancel_rule.on_keep(edge, revision.window.key)
         queue = self._queue_of(job.request_key.pool)
         queue.resolve_weak_request(job, result, verdict)
-        read_result = functools.partial(queue.read_result, job)
         self.committer.commit_revision(revision, is_final, read_result)
+
+    def _commit_on_a_guess(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        verdict: decoding_records.Verdict,
+        edge: Optional[ports.EscalateEdge],
+        read_result: Callable[[], None],
+    ) -> None:
+        """The decode read a provisional boundary: commit now, settle later.
+
+        The provisional commit hands the boundary on and reads the
+        result, so the chain goes on and the unit is free. The verdict
+        is acted on once the input is final: no strong work starts on a
+        guess, and the frame takes only a final result.
+        """
+        revision = self._revision(job, result)
+        self.committer.commit_revision(revision, False, read_result)
+        settle = functools.partial(
+            self._settle_the_guess, job, result, verdict, edge
+        )
+        decode_again = functools.partial(self._decode_again, job, result)
+        self.input_checks.wait_for_final_input(
+            revision.window.key, settle, decode_again
+        )
+
+    def _settle_the_guess(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        verdict: decoding_records.Verdict,
+        edge: Optional[ports.EscalateEdge],
+    ) -> None:
+        """The input the provisional commit read is final, and the same.
+
+        An escalation leaves now, its window committed already; a keep
+        commits as final, which sends the result to the frame and its
+        boundary on as final.
+        """
+        window = self._window_of(job)
+        window.t_input_final = self.engine.now
+        if verdict is decoding_records.Verdict.KEEP:
+            self._settle(job, result, verdict, edge, _nothing_to_read)
+            return
+        edge.escalate(job)
+        queue = self._queue_of(job.request_key.pool)
+        queue.resolve_weak_request(job, result, verdict)
+
+    def _drop_stale_result(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """A boundary the decode read changed while it ran: drop the result."""
+        queue = self._queue_of(job.request_key.pool)
+        queue.read_result(job)
+        self._decode_again(job, result)
+
+    def _decode_again(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """Close the dropped result's request; decode the window again."""
+        queue = self._queue_of(job.request_key.pool)
+        queue.discard_weak_request(job, result)
+        window = self._window_of(job)
+        self.requester.decode_again(window)
+
+    def _input_of(
+        self, job: decoding_records.DecodeJob
+    ) -> input_checks_module.InputState:
+        """A first revision's input as the checks hold it; a later one is final.
+
+        A later revision decodes a strong window, whose faces are pinned
+        on final boundaries.
+        """
+        if not self._decoded_first(job):
+            return input_checks_module.InputState.FINAL
+        return self.input_checks.take_result(job)
 
     def _revision(
         self,

@@ -157,7 +157,7 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `buffer_fill` | the first round of a window arriving, to the last: the wait on the QPU |
 | `admission_wait` | the window's data complete in the weak syndrome buffer, to its decode job entering the queue: the window side's decision (`windows.decision_cycles`), and any earlier request of the window that was withdrawn, as a restart window's is when a `double_window` strong window re-slices it; zero otherwise |
 | `store_read` | the committing decode's dispatch, to the end of its input's read in its tier's syndrome buffer, before the input hop: a store that prices reads, its port waits included; zero for a store that prices none |
-| `dep_block` | the wait for what the decode depends on: in the queue, from the job's entry to its predecessor's boundary arriving, since a window that owes a boundary takes no unit (`decsim/decoders/decode_dispatch.py`); and for an escalated window, the escalated rounds and the selection, to the first tick the decode may compute, less its input hop and its store read; zero when nothing was owed |
+| `dep_block` | the wait for what the decode depends on: in the queue, from the job's entry to its predecessor's boundary arriving, since a window that owes a boundary takes no unit (`decsim/decoders/decode_dispatch.py`), or, under checked boundaries, to the final boundary that sent a window decoded on a guess to be decoded again, its dropped decode included; and for an escalated window, the escalated rounds and the selection, to the first tick the decode may compute, less its input hop and its store read; zero when nothing was owed |
 | `compute_wait` | that first startable tick, to the compute starting: the wait for the unit's own compute, busy with another decode |
 | `queue_wait` | queued, or the predecessor's boundary arriving when later, to a unit assigned: the wait for a unit only |
 | `input_link_per_window` | a unit assigned, to the input in that unit's memory |
@@ -168,9 +168,10 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for outside the unit. A strong backend's queue holds the unit, so `backend_queue_wait` is inside |
 | `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the other forced-class solve's remaining time under `complementary_gap`, and zero for an escalated window whose strong decode began after the verdict |
 | `selection_wait` | the verdict, or the committing decode's end when later, to its answer leaving for the frame: a finished strong answer kept in its unit's output slot until the verdict's selection has crossed `weak_to_strong`, which a speculative strong decode under `run_both_at_once` waits for, and zero for every other window |
+| `input_check_wait` | the verdict, or the committing decode's end when later, to the boundaries that decode read on a guess being final and the same, under checked boundaries (`decsim/windows/input_checks.py`), so the kept answer may leave for the frame; zero for a window whose decode read final boundaries |
 | `weak_attempt` | a unit taking an escalated window's weak job, to the verdict that escalated it: the attempt whose result did not commit, zero when the first decode committed |
 | `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, from the selection's send to the landing of the rounds the strong store lacked, zero for a window that did not escalate |
-| `dd_per_window` | the boundary handoff into the window: the first boundary sent to it, to the last landing, zero for a window no boundary reaches |
+| `dd_per_window` | the boundary handoff into the window: the first boundary sent to it, to the last landing, zero for a window no boundary reaches; under checked boundaries the last landing is the final boundary's, so the span holds the wait for it |
 | `output_link_per_window` | the answer's first send toward the Pauli frame, to the frame accepting it: one hop on the `direct` route, and `strong_to_weak`, the weak chip's commit and `weak_to_frame` for a strong answer `through_weak_chip` |
 | `frame_commit` | the frame accepting a correction, to it being committed |
 | `buffer0_ready_to_frame` | the window complete in the syndrome buffer its first decode reads (the weak one, or the strong one in a run with no weak decoder), to the frame |
@@ -239,9 +240,11 @@ to one decode.
   decode ended.
 - `selection_wait` is a strong answer that finished first waiting for
   the verdict's selection to reach it.
+- `input_check_wait` is a kept answer, decoded on a boundary that was not
+  final yet, waiting for that boundary to be final and the same.
 - `frame_commit` closes it.
 
-On a serial path those twelve add
+On a serial path those thirteen add
 up to `buffer0_ready_to_frame` to the tick, on every window of every
 config this repository ships.
 

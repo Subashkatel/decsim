@@ -19,6 +19,7 @@ import decsim.escalation.threshold_sources as threshold_sources
 import decsim.machine as machine_module
 import decsim.presets.machines as machines
 import decsim.topology.graph as graph
+import decsim.windows.boundary_policies as boundary_policies
 import tests.escalation.test_strong_window_shapes as shape_tests
 
 
@@ -61,6 +62,20 @@ def test_a_deadline_beside_an_absorbing_window_is_refused():
 
     with pytest.raises(ValueError, match="double_window"):
         _switching(deadline=deadline, strong_window=double_window)
+
+
+def test_a_deadline_beside_checked_boundaries_is_refused():
+    """A rescue starts the target early; checked boundaries wait for it.
+
+    A window decoded on a guessed boundary escalates only once that
+    boundary is final (windows/input_checks.py).
+    """
+    deadline = deadlines.Deadline.Settings(slack_microseconds=10.0)
+    checked = boundary_policies.Checked.Settings()
+    redo = strong_window_shapes.RedoWindow.Settings(boundary_policy=checked)
+
+    with pytest.raises(ValueError, match="with checked boundaries"):
+        _switching(deadline=deadline, strong_window=redo)
 
 
 def test_a_route_through_the_weak_chip_with_no_clock_is_refused():

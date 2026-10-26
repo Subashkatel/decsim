@@ -26,6 +26,14 @@ fault, its graphlike components read the same way. The name is the same
 in every short circuit, so a weak window's commits and a strong window's
 priors share it. A test holds every window's model to the whole
 circuit's, sliced in window order.
+
+A short circuit's frame, its slicer and its faults' names, is a function
+of the program's circuits, the decoders' requirement and its round
+count, and of nothing a seed touches; building one is most of a live
+stream's wall time. So every stream of one program in this process
+shares one set of frames, kept by the circuits' text as circuit_builds
+keeps the formation tables, and one numbering of shapes names their
+faults for every reader.
 """
 
 import collections
@@ -36,6 +44,7 @@ from typing import Optional
 
 import numpy
 
+import decsim.detector_error_model.circuit_builds as circuit_builds
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.periodic_formation as periodic_formation
 import decsim.detector_error_model.window_slicer as window_slicer
@@ -65,7 +74,7 @@ class MovedStimModels:
         requirement: fault_models.DecoderFaultModelRequirement,
     ) -> None:
         self.template = periodic_formation.StreamTemplate(program)
-        self.frames = _Frames(program, requirement)
+        self.frames = _frames_of(program, requirement)
         self.models = _Recent(MODEL_LIMIT)
         self.final_round_count: Optional[int] = None
         template_frame = self.frames.frame(self.template.round_count)
@@ -324,7 +333,7 @@ class _Frame:
 
 
 class _Frames:
-    """The short circuits of one program, by their rounds."""
+    """The short circuits of one program, by their rounds, for its streams."""
 
     def __init__(
         self,
@@ -347,7 +356,7 @@ class _Frames:
 
 
 class _Shapes:
-    """A number for every fault shape a stream's circuits hold."""
+    """A number for every fault shape a program's circuits hold."""
 
     def __init__(self) -> None:
         self.number_by_shape: dict = {}
@@ -449,6 +458,37 @@ class _Recent:
         if len(self.by_key) > self.limit:
             self.by_key.popitem(last=False)
         return made
+
+
+# (the program's circuits' text, the requirement) -> its short circuits,
+# in this process; one set is about 60 MB at d = 7 and 120 MB at d = 11,
+# and a task reads one program under one or two requirements
+_FRAMES = circuit_builds.KeptBuilds(kept_count=4)
+
+
+def _frames_of(
+    program: circuit_records.RepeatedStimCircuit,
+    requirement: fault_models.DecoderFaultModelRequirement,
+) -> _Frames:
+    """The program's short circuits, made once in this process.
+
+    They are kept by the text of the circuits they are a function of, so
+    a copy of the program finds them too (circuit_builds).
+    """
+    circuits = (
+        program.first_round,
+        program.repeated_round,
+        program.final_round,
+        program.single_round,
+    )
+    texts = tuple(str(circuit) for circuit in circuits)
+    key = (texts, requirement)
+    frames = _FRAMES.held(key)
+    if frames is not None:
+        return frames
+    frames = _Frames(program, requirement)
+    _FRAMES.keep(key, frames)
+    return frames
 
 
 def _unmoved_placement(

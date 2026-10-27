@@ -9,7 +9,9 @@ machine:
   noise channel at 0), so no tier flips a logical observable;
 - a latency added on one hop of the reaction path moves the reaction time,
   from a round's measurement to the instruction that acts on its correction
-  (docs/reference/glossary.md), by exactly that latency;
+  (docs/reference/glossary.md), by exactly that latency, and on one
+  microsecond rounds the recorded conditional reaction, which ends at the
+  cycle boundary the instruction starts on, by exactly that too;
 - every round is committed by exactly one owner and every owner's
   correction enters the Pauli frame exactly once (Toshio et al. 2510.25222
   Theorem 1: two owners never claim one round);
@@ -33,6 +35,7 @@ import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
+import decsim.experiments.measure as measure
 import decsim.frontends.settings as workload_settings
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
@@ -277,6 +280,34 @@ def test_a_latency_added_on_the_reaction_path_adds_exactly_that_stall(
 
     one_microsecond = config.microseconds_to_ticks(1.0)
     assert slower_stall.stall_ticks - stall.stall_ticks == one_microsecond
+
+
+def conditional_reaction(settings) -> float:
+    """The second memory's one recorded conditional reaction, in us."""
+    shot = run(settings)
+    measurement = measure.measure_shot(shot)
+    (reaction,) = measurement.samples["conditional_reaction"]
+    return reaction
+
+
+@pytest.mark.parametrize("path_name", tuple(REACTION_PATH))
+def test_a_slower_hop_adds_its_latency_to_the_conditional_reaction(
+    path_name,
+):
+    """The recorded reaction carries every hop, the conditional legs too.
+
+    The instruction reaches the QPU one microsecond later and starts on
+    the next cycle boundary, which on one microsecond rounds is one
+    round, so one microsecond, later.
+    """
+    settings = feedback_settings()
+    slower = with_latency_added(settings, path_name, 1.0)
+
+    reaction = conditional_reaction(settings)
+    slower_reaction = conditional_reaction(slower)
+
+    one_microsecond_later = reaction + 1.0
+    assert slower_reaction == pytest.approx(one_microsecond_later)
 
 
 def committed_rounds(contributions: dict) -> list:

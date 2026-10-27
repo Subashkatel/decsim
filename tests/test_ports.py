@@ -67,6 +67,7 @@ SOURCE_ROWS = {
 DEFAULTED_DECODER_ROWS = (
     minimum_weight_perfect_matching.PyMatchingDecoder,
     minimum_weight_perfect_matching.UnweightedPyMatchingDecoder,
+    minimum_weight_perfect_matching.CorrelatedPyMatchingDecoder,
     belief_matching.BeliefMatchingDecoder,
     tesseract.TesseractDecoder,
     relay_bp.RelayBeliefPropagationDecoder,

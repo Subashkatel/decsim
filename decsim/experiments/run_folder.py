@@ -42,12 +42,12 @@ TASKS_FOLDER = "tasks"
 RECORD_FILE = "machine.json"
 INPUTS_FOLDER = "inputs"
 HASHES_FILE = "hashes.json"
-# What the launcher saw of the tree it was about to run, for a process
-# whose interpreter has no git of its own (a job script exports it):
-# "1" dirty, "0" clean, unset means nobody looked.
+# What the submitting shell saw of the tree a job is about to run, for a
+# process whose interpreter has no git of its own (a job script exports
+# it): "1" dirty, "0" clean, unset means nobody looked.
 TREE_DIRTY_VARIABLE = "DECSIM_TREE_DIRTY"
-# The sha256 of the code state patch the launcher saw, exported with
-# the dirty flag; empty when the tree was clean.
+# The sha256 of the code state patch the submitting shell saw, exported
+# with the dirty flag; empty when the tree was clean.
 TREE_PATCH_VARIABLE = "DECSIM_TREE_PATCH_SHA256"
 # Set, it lets a run go on from a tree git does not vouch for.
 ALLOW_DIRTY_VARIABLE = "ALLOW_DIRTY"
@@ -57,10 +57,10 @@ ORDINARY_FILE_MODE = 0o666
 # word platform.processor gives
 PROCESSOR_INFO_FILE = pathlib.Path("/proc/cpuinfo")
 # What git reads as the code: the whole checkout but its results folder.
-# A run writes run.json and the run file's copy there, which .gitignore
-# keeps tracked as evidence, so they would make every later reading
-# dirty; dirty says the code differs from its commit, and results are
-# not code.
+# A run writes run.json and the run file's copy in results, which
+# .gitignore keeps tracked as evidence, so they would make every later
+# reading dirty; dirty says the code differs from its commit, and results
+# are not code.
 CODE_PATHSPEC = ("--", ".", f":(exclude){RESULTS_DIR}")
 
 
@@ -525,8 +525,8 @@ def copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
     """The run file beside the results, under its own name.
 
     The copy is written once (_copy_once), so a folder's copy is the file
-    that made its rows, and a Slurm job refuses a run file edited since
-    the launch, in which task i may be another task.
+    that made its rows, and a job of --seeds refuses a run file edited
+    since the folder was recorded, whose tasks may be other tasks.
     """
     target = copied_run_file(run_file, run_dir)
     _copy_once(run_file, target)
@@ -535,9 +535,9 @@ def copy_the_run_file(run_file: pathlib.Path, run_dir: pathlib.Path) -> None:
 def fresh_tree_reading() -> tuple:
     """(checkout, commit, dirty) of the tree, read now from git itself.
 
-    Not the cached reading and not the launcher's: a launcher and every
-    task it starts each look at the tree as they start. commit and dirty
-    are None where git could not answer.
+    Not the cached reading and not the submitting shell's: recording a
+    folder and every job run into it each look at the tree as they
+    start. commit and dirty are None where git could not answer.
     """
     checkout = _checkout()
     commit = _git_output("git", "-C", str(checkout), "rev-parse", "HEAD")
@@ -841,16 +841,16 @@ def _tree_reading() -> tuple:
     :687), and sinter writes its csv header before the collect loop
     (sinter/_collection/_collection.py:385-397).
 
-    The launcher's dirtiness and patch hash win when given, because it
-    looked at the tree the process imported. The container has no git, so
-    the commit falls back to the tree's own git files and dirty is None
-    rather than clean when nobody could answer.
+    The submitting shell's dirtiness and patch hash win when given,
+    because it looked at the tree the process imported. The container
+    has no git, so the commit falls back to the tree's own git files and
+    dirty is None rather than clean when nobody could answer.
     """
     checkout = _checkout()
     commit = _git_output("git", "-C", str(checkout), "rev-parse", "HEAD")
     if not commit:
         commit = _commit_from_git_files(checkout)
-    is_dirty = _dirty_from_the_launcher()
+    is_dirty = _dirty_from_the_environment()
     if is_dirty is None:
         is_dirty = _code_is_dirty(checkout)
     patch_sha256 = os.environ.get(TREE_PATCH_VARIABLE)
@@ -869,8 +869,8 @@ def _code_is_dirty(checkout: pathlib.Path) -> Optional[bool]:
     return bool(porcelain)
 
 
-def _dirty_from_the_launcher() -> Optional[bool]:
-    """What the launcher saw, when it exported it (TREE_DIRTY_VARIABLE)."""
+def _dirty_from_the_environment() -> Optional[bool]:
+    """What the submitting shell saw, when it exported TREE_DIRTY_VARIABLE."""
     said = os.environ.get(TREE_DIRTY_VARIABLE)
     if said is None or said == "":
         return None

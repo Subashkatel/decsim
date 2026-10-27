@@ -6,7 +6,8 @@ Every `decsim run` writes one results folder,
 `results/<date>_<name>/`, named for the day it started and the
 experiment it ran, and a second one that day gets `_2`
 (`decsim/experiments/run_folder.py`, `new_run_dir`), unless `--out`
-names one. A launcher fixes the folder once and hands it to every job.
+names one. `decsim run --record` fixes the folder once, and every job of
+`--share` or `--seeds` runs into it.
 `results/` is output, not code, and git does not track it, which is
 gem5's `m5out/`. `examples/deltakit_example.py` and
 `examples/live_memory_example.py` write the same records into their
@@ -19,7 +20,7 @@ rounds its script sets, as `sweep.csv`'s per-round columns are.
 
 A results folder holds one experiment: its pieces, one record per
 task, and the files folded from the pieces at its root. It holds one
-tree's results, so a run or a launch into a folder whose `run.json`
+tree's results, so a run or a record into a folder whose `run.json`
 names another commit, the same commit clean against dirty, or dirty
 with another `code_state.patch`, is refused:
 
@@ -27,7 +28,6 @@ with another `code_state.patch`, is refused:
 | --- | --- | --- |
 | `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one task, its additive files (`shots.csv`, `shot_links.csv`, `shot_pools.csv`, `shot_stats.csv`, `stat_values.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`, `window_outcomes.csv`) without the swept columns, an online task's calibrator as the piece left it in `state.pickle`, which the task's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
 | `piece.json` | `decsim/experiments/pieces.py`, `write` | the piece's `task_id`, `first_seed` and `count` (its other counts are its own `shots.csv` columns summed: `is_scored`, `logical_failure`, `sim_wall_seconds`, `executed_rounds` and the `*_windows` status columns), its `confidence_shot_count` (the shots its confidence rows cover, `all`, or null when no confidence signal ran; a fold refuses a task whose pieces differ in it, a piece without it included), the `state_sha256` of an online task's `state.pickle`, its `peak_memory_mb` (the peak resident memory of the process that ran it, read when the piece ended), and the `commit`, `dirty`, `patch_sha256` (the sha256 of the tree's `code_state.patch`, null when it has none), `python`, `packages` (each third-party top-level module the process that ran the shots had imported, and its version: the module's own `__version__`, else its installed distribution's; read in that process, so a pooled worker names the decoder package it loaded), `host`, `processor_model`, `slurm_job_id`, `slurm_array_job_id` and `slurm_array_task_id` of the process that ran it (a run and a fold refuse a folder holding a piece whose tree is not the one its `run.json` names: another commit, the same commit clean against dirty, or another patch, since its rows would pool two simulators under one `run.json`) |
-| `jobs.json`, `run.sbatch`, `fold.sbatch`, `logs/` | `decsim/experiments/plan_command.py`, `launch` | what `decsim run --slurm` writes: each job's pieces, `[task name, first seed, count]`, longest first; the job array, whose job `i` runs job `i`'s pieces with the run file where it stands, so a file beside it is found; the job that folds after the array; and their Slurm logs, `logs/<array id>_<i>.log` and `logs/fold.log`. A launch again replaces them all, packing only the pieces not yet saved |
 | `tasks/<name>/machine.json`, `tasks/<name>/inputs/` | `decsim/experiments/run_folder.py`, `write_task_record` | each task's record and workload, below, written before any shot and only once every task of the experiment has built and been accepted, so a refused one changes no record. A name the folder holds for a task of another id is refused, and so is a task whose shot runs no round, which sizes no piece. The record also holds `rounds_per_shot`, the QEC rounds the plan gives a shot, each patch's rounds added up over every operation that sends detector data, which sizes the task's pieces (a live stream also idles through its feedback wait, rounds only its run knows), and `experiment`: its `collection`, whether its threshold is `adaptive`, and the `algorithm` that decodes its windows, which `decsim run --fold` folds it by, whatever its run file says later |
 
 The root files are the fold: a run and `decsim run --fold` build the whole
@@ -45,17 +45,17 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | Name | Written by | What it is |
 | --- | --- | --- |
 | `shots.csv` | `decsim/experiments/report.py`, `shot_rows` | one row per shot |
-| `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows` | one row per shot per link |
+| `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows`, `summed_link_rows` | one row per shot per link, or per piece per link when the task's `record_options.is_statistics_per_shot` is false |
 | `shot_pools.csv` | `decsim/experiments/report.py`, `shot_pool_rows` | one row per shot per decoder pool |
 | `pool_summary.csv` | `decsim/experiments/report.py`, `pool_summary_rows` | one row per task and decoder pool, written by the fold |
-| `shot_stats.csv` | `decsim/experiments/report.py`, `shot_statistics_rows` | one row per shot per part, statistic and field |
+| `shot_stats.csv` | `decsim/experiments/report.py`, `shot_statistics_rows`, `summed_statistics_rows` | one row per shot per part, statistic and field, or per piece when the task's `record_options.is_statistics_per_shot` is false |
 | `stat_summary.csv` | `decsim/experiments/report.py`, `statistic_summary_rows` | one row per task, part, statistic and derived measure, written by the fold |
 | `stat_values.csv` | `decsim/experiments/report.py`, `statistic_value_rows` | one row per task, part, statistic and distinct value: how many times it was seen, or for a level how many ticks it was held |
 | `window_samples.csv` | `decsim/experiments/report.py`, `window_sample_rows` | one row per task, latency point, committing tier and distinct microsecond value |
 | `latency_samples.csv` | `decsim/experiments/report.py`, `latency_sample_rows` | one row per decoded window of a decoder named by a table row, written only when one ran |
-| `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `confidence_shot_count` shots of a task (its `record_options`, a `decsim.experiments.collect.RecordOptions`, 100 by default), written only when a confidence signal decides the escalation |
+| `window_confidence.csv` | `decsim/experiments/report.py`, `window_confidence_rows` | one row per committed window of the scored shots among the first `confidence_shot_count` shots of a task (its `record_options`, a `decsim.experiments.collect.RecordOptions`, 100 by default), written only when a confidence signal ran: one that decides the escalation, or the one `windows.recorded_confidence` records on a run with no switching |
 | `window_outcomes.csv` | `decsim/experiments/report.py`, `window_outcome_rows` | one row per delivered window of every shot: its committed answer beside its true label, written only when `observation.record_window_outcomes` is on |
-| `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every scored shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal decides the escalation |
+| `confidence_histogram.csv` | `decsim/experiments/report.py`, `confidence_histogram_rows` | counts of every scored shot's window gaps and smallest gap per 0.1 dB bin, written only when a confidence signal ran: one that decides the escalation, or the one `windows.recorded_confidence` records on a run with no switching |
 | `sweep.csv` | `decsim/experiments/report.py`, `fold_pieces` | one row per task, in the sweep's task order, summarized from `shots.csv` and `window_samples.csv` |
 | `shot_data_movement.csv` | `decsim/experiments/report.py`, `shot_data_movement_rows` | one row per shot per path: that shot's copy and move counters and the memory class the path crosses, written only when `observation.data_movement` is on. A task's mean per shot on a path or a memory class is a counter's sum over those rows divided by the task's distinct seeds; `references` and `referenced_rounds` repeat on every row of a shot, so they count once per seed |
 | `run.json` | `decsim/experiments/run_folder.py`, `write_run_record` | one object: what ran, where, and with which library versions |
@@ -178,7 +178,8 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `buffer0_first_round_to_frame` | the window's first round in that syndrome buffer, to the frame |
 | `qpu_last_round_to_frame` | the last round the committing decode read leaving the QPU, to the frame: a strong region that absorbed later windows reads past its window, and a buffer that runs into the next operation reads that operation's rounds |
 | `qpu_first_round_to_frame` | the window's first round leaving the QPU, to the frame |
-| `end_of_stream_reaction` | one sample a shot: the last round any committing decode read leaving the QPU, to the last correction committed at the frame, whichever window holds it. It is the response time from the final syndrome to the correction (Toshio et al. 2510.25222 lines 357-363) and Riverlane's full decoding response time (2410.05202 lines 74-79) up to the frame; a conditional operation's own legs, `frame_to_controller`, the decision-to-pulse cycles and `controller_to_qpu`, run only for an operation another waits on and are not in it. The pooled window points hide it: the final window is one sample among many |
+| `end_of_stream_reaction` | one sample a shot: the last round any committing decode read leaving the QPU, to the last correction committed at the frame, whichever window holds it. It is the response time from the final syndrome to the correction (Toshio et al. 2510.25222 lines 357-363) and Riverlane's full decoding response time (2410.05202 lines 74-79) up to the frame; a conditional operation's own legs, `frame_to_controller`, the decision-to-pulse cycles and `controller_to_qpu`, run only for an operation another waits on and are not in it; `conditional_reaction` holds them. The pooled window points hide it: the final window is one sample among many |
+| `conditional_reaction` | one sample per conditional operation, one another's result releases (`blocked_by`), as a teleported T gate's S correction waits on its decoded Z measurement (Skoric et al. 2209.08552 Fig. 1): its blocker's body done on the QPU, the end of the final syndrome round, to its own body starting there, the conditional gate applied. It is Riverlane's full decoding response time (2410.05202 lines 74-79), the response time of Toshio et al. (2510.25222 lines 357-363) and Skoric's tau (lines 74-79): the decode, every hop of the reaction path, the decision-to-pulse cycles and the wait for the next cycle boundary, and any other start gate that opened later, a magic state's among them. A program with no conditional operation has no sample |
 
 `observation.first_recorded_round` and `observation.last_recorded_round`
 set the measurement interval, both ends included, rounds counted from 1
@@ -190,7 +191,8 @@ when the queues are empty, and its drain at the end. The interval
 cuts these points, their `_mean_us` and `_max_us` columns, the tier
 split, the growth rates and deadline columns, `load` and
 `parallel_processes_needed`; `end_of_stream_reaction`, which is the
-drain itself, `logical_failure`,
+drain itself, `conditional_reaction`, one per operation of the program,
+`logical_failure`,
 `predictions` and every count and rate in `shots.csv`, `decoded_windows`
 and `escalated_windows` among them, stay over the whole shot.
 
@@ -300,6 +302,13 @@ here and moves no column of any file. A link's mean per shot at a task
 is the mean of a column over that task's rows of the link, and its bits
 per transfer is the mean `payload_bits` over the mean `transfers`.
 
+A task whose `record_options.is_statistics_per_shot` is false writes one
+row per piece per link instead: every counter added over the piece's
+shots, `seed` the piece's first seed and a `shot_count` column beside
+it. A link's mean per shot is then a column's sum over the task's rows
+over the sum of their `shot_count`. A fold refuses pieces of the two
+shapes, whose columns differ.
+
 ### `shot_pools.csv`
 
 One row per shot per decoder pool, in the machine's layout order: the
@@ -344,6 +353,15 @@ A level's `area` is the level times the ticks it held, from tick 0 to
 the shot's end, and `span` is that end, so its mean over the shot is
 `area / span`. `peak` counts only the level a tick ends at. Every field
 but `peak` adds over shots. A part the run does not build has no rows.
+
+A task whose `record_options.is_statistics_per_shot` is false writes one
+row per piece per part, statistic and field instead: the field over the
+piece's shots, added as the fold adds shots (`peak` and `maximum` the
+largest, `minimum` the smallest, every other field the sum), `seed` the
+piece's first seed and a `shot_count` column beside it. The fold adds
+pieces by the same law, so `stat_summary.csv` comes out as it would from
+every shot's rows. A million shots' own rows are some 5 kB a shot, so
+a large sweep keeps per-shot rows only for the tasks that need them.
 
 | Part | Statistic | Kind | What it is |
 | --- | --- | --- | --- |
@@ -408,7 +426,7 @@ value.
 | --- | --- |
 | `task_id`, the swept paths, `algorithm` | the task |
 | `name` | which latency point, from the list above |
-| `tier` | the tier whose decode the frame committed for the windows counted here: `weak` for a kept window and `strong` for an escalated one, when the weak tier decodes the run's windows. Empty for the three `_per_round` latency points, whose samples are rounds, not windows, and for `end_of_stream_reaction`, whose samples are shots |
+| `tier` | the tier whose decode the frame committed for the windows counted here: `weak` for a kept window and `strong` for an escalated one, when the weak tier decodes the run's windows. Empty for the three `_per_round` latency points, whose samples are rounds, not windows, for `end_of_stream_reaction`, whose samples are shots, and for `conditional_reaction`, whose samples are operations |
 | `value_us` | one microsecond value that occurred |
 | `count` | how many windows, rounds or shots carried it |
 
@@ -547,7 +565,8 @@ Then four columns per latency point, in the order of `POINTS`:
 `<point>_max_us`. The mean and the max fold over the shot rows; the
 median and the p99 come from the sample counts, through
 `percentile_of_counts`, and for `end_of_stream_reaction`, one sample a
-shot, they are over the task's shots.
+shot, they are over the task's shots, and for `conditional_reaction`
+over its conditional operations.
 
 Then `buffer0_ready_to_frame_<tier>_median_us` and
 `buffer0_ready_to_frame_<tier>_p99_us` for each tier that committed a

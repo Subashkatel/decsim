@@ -10,14 +10,20 @@ counted, not rerun, so a killed collect resumes. The same experiment
 reproduces the same rows (only the wall-clock column varies) with a
 pool of any size, since the rule reads the prefix in seed order
 whatever order pieces end in; only a stop on the time cap depends on
-timing. On Slurm each job runs the fixed pieces the launcher packed
-into it and one fold job folds them all.
+timing.
+
+On a cluster the user's own jobs share one folder: `decsim run --record`
+records every task once, each job runs its seeds, a share of every
+task's with `--share` or a range with `--seeds`, and `--fold` folds
+what they saved. decsim writes no job script; how the seeds are split
+and submitted is the user's.
 """
 
 import copy
 import dataclasses
 import functools
 import math
+import os
 import pathlib
 import sys
 import tempfile
@@ -204,6 +210,69 @@ class TaskCollection:
         return min(self.piece_shots, remaining)
 
 
+@dataclasses.dataclass(frozen=True)
+class SeedRange:
+    """Seeds first_seed to end_seed - 1 of every task, as --seeds names them."""
+
+    first_seed: int
+    end_seed: int
+
+    def seeds_of(
+        self, _task_name: str, first_seed: int, max_shots: Optional[int]
+    ) -> range:
+        """The range, inside the task's own seeds.
+
+        The task's seeds start at its first_seed and, when it has
+        max_shots, stop max_shots later.
+        """
+        start = max(self.first_seed, first_seed)
+        end_seed = self.end_seed
+        if max_shots is not None:
+            task_end = first_seed + max_shots
+            end_seed = min(end_seed, task_end)
+        return range(start, end_seed)
+
+
+@dataclasses.dataclass(frozen=True)
+class Share:
+    """Job index of count jobs: its contiguous share of each task's seeds.
+
+    A task's max_shots seeds are cut into count runs of consecutive
+    seeds, whole numbers apart by at most one, and job index runs run
+    index. Shares count from 0, as a Slurm array's task ids from
+    --array=0-N do (https://slurm.schedmd.com/job_array.html) and
+    Bazel's TEST_SHARD_INDEX does (Bazel's test encyclopedia), so job
+    $SLURM_ARRAY_TASK_ID of $SLURM_ARRAY_TASK_COUNT runs its own.
+    """
+
+    index: int
+    count: int
+
+    def seeds_of(
+        self, task_name: str, first_seed: int, max_shots: Optional[int]
+    ) -> range:
+        """Run index of the task's seeds; a task with no max_shots is refused.
+
+        The task's seeds are its max_shots seeds from its first_seed.
+
+        A task that stops on failures or time has no seed count to cut.
+        """
+        if max_shots is None:
+            raise refusal.RefusalError(
+                f"--share cuts each task's max_shots seeds, and the task "
+                f"{task_name} has none, since it stops on failures or time; "
+                "name its seeds with --seeds, or give it max_shots"
+            )
+        first_product = self.index * max_shots
+        share_first = first_product // self.count
+        next_index = self.index + 1
+        end_product = next_index * max_shots
+        share_end = end_product // self.count
+        start = first_seed + share_first
+        end_seed = first_seed + share_end
+        return range(start, end_seed)
+
+
 def run_experiment(
     run_file: Union[str, pathlib.Path],
     out_dir: Optional[pathlib.Path] = None,
@@ -278,33 +347,59 @@ def start_the_folder(
     return every_id, collections, started_utc
 
 
-def run_pieces(
-    run_file: pathlib.Path,
+def record_the_folder(
+    run_file: Union[str, pathlib.Path], run_dir: pathlib.Path
+) -> list:
+    """Every task of the run file recorded into run_dir; no shot run.
+
+    The folder many jobs share is recorded once, before any of them
+    starts: each task's build runs here, so a machine that cannot be
+    built stops before a job is queued, and run.json and the run file's
+    copy fix the tree and the run file every job is checked against.
+    Returns the recorded tasks' names.
+    """
+    refuse_an_unnamed_tree()
+    run_path = pathlib.Path(run_file)
+    study = experiment.load(run_path)
+    made_dir = run_folder.run_dir_for(study.name, run_dir)
+    start_the_folder(study, study, made_dir, run_path)
+    return [task.name for task in study.tasks]
+
+
+def run_seeds(
+    run_file: Union[str, pathlib.Path],
     run_dir: pathlib.Path,
-    job_pieces: list,
+    selection: Union[SeedRange, Share],
     *,
+    only: Optional[str] = None,
     processes: int = 1,
 ) -> None:
-    """One Slurm job's pieces, each [task name, first seed, count], run.
+    """The chosen tasks' unsaved seeds of one job, run into a recorded folder.
 
-    The launcher recorded every task and wrote run.json and the run
-    file's copy, so a job checks the folder ran this tree, this run file
-    and these tasks, and writes no record: many jobs share a task. The
-    pieces go to the pool in the order given, which the launcher made
-    longest first, and a piece saved since the launch is skipped. It
-    folds nothing.
+    selection names each task's seeds: a share of its max_shots, or a
+    range stopped there. A seed a saved piece holds is not run again, so
+    a job submitted again runs only what it did not save. The rest are
+    cut into pieces of the task's piece_rounds, which bound what a
+    killed job loses.
+
+    A job writes no record, since many jobs share a task: it checks the
+    folder ran this tree, this run file and these tasks. It checks
+    run.json's tree alone, not every piece's, since a thousand jobs each
+    opening every piece.json is the metadata storm GPFS serves worst.
+    It folds nothing.
     """
     _check_processes(processes)
-    run_folder.copy_the_run_file(run_file, run_dir)
-    study = experiment.load(run_file)
-    _refuse_another_tree(run_dir)
-    names = [name for name, _first_seed, _count in job_pieces]
-    unique_names = dict.fromkeys(names)
-    chosen = study.only(*unique_names)
+    refuse_an_unnamed_tree()
+    _refuse_an_unrecorded_folder(run_dir)
+    run_path = pathlib.Path(run_file)
+    run_folder.copy_the_run_file(run_path, run_dir)
+    study = experiment.load(run_path)
+    run_folder.refuse_another_tree(run_dir)
+    chosen = _chosen_tasks(study, only)
+    units = []
     for task in chosen.tasks:
-        task_id = task.strong_id()
-        _refuse_a_name_recorded_for_another_task(run_dir, task.name, task_id)
-    units = _unsaved_units(chosen, run_dir, job_pieces)
+        task_units = _unsaved_units(study, run_dir, task, selection)
+        units.extend(task_units)
     measure_shot = _shot_measure(chosen.tasks, run_dir)
     save = functools.partial(_save_the_piece, run_dir)
     collect.run_units(
@@ -403,6 +498,36 @@ def recorded_tasks(run_dir: pathlib.Path, study: experiment.Experiment) -> list:
         collection = _task_collection(run_dir, resolved_task)
         collections.append(collection)
     return collections
+
+
+def refuse_an_unnamed_tree() -> None:
+    """A tree git does not vouch for is refused, unless ALLOW_DIRTY is set.
+
+    Recording a folder and every job that runs into it read the tree,
+    since each job imports the tree as it stands when it starts: an edit
+    while jobs wait gives them different code, and their pieces would
+    name a commit none ran.
+    """
+    checkout, commit, is_dirty = run_folder.fresh_tree_reading()
+    dirty_text = _dirty_text(is_dirty)
+    commit_text = commit or "unknown"
+    print(f"decsim tree: {checkout}")
+    print(f"decsim commit: {commit_text}, dirty: {dirty_text}")
+    if os.environ.get(run_folder.ALLOW_DIRTY_VARIABLE):
+        return
+    if is_dirty:
+        raise refusal.RefusalError(
+            f"refusing to start: {checkout} has uncommitted changes, so a "
+            "job would import whatever the tree holds when it starts; "
+            "commit them, run from a worktree pinned at a commit, or "
+            f"set {run_folder.ALLOW_DIRTY_VARIABLE}=1"
+        )
+    if is_dirty is None:
+        raise refusal.RefusalError(
+            f"refusing to start: git says nothing about {checkout}, so a "
+            "job cannot name the code it ran; run from a git checkout "
+            f"pinned at a commit, or set {run_folder.ALLOW_DIRTY_VARIABLE}=1"
+        )
 
 
 def _refuse_another_tree(run_dir: pathlib.Path) -> None:
@@ -696,20 +821,81 @@ def _record_path(run_dir: pathlib.Path, name: str) -> pathlib.Path:
     return task_dir / run_folder.RECORD_FILE
 
 
+def _dirty_text(is_dirty: Optional[bool]) -> str:
+    """The dirty flag as printed: 1, 0 or unknown."""
+    if is_dirty is None:
+        return "unknown"
+    return str(int(is_dirty))
+
+
+def _refuse_an_unrecorded_folder(run_dir: pathlib.Path) -> None:
+    run_path = run_dir / run_folder.RUN_FILE
+    if run_path.is_file():
+        return
+    raise refusal.RefusalError(
+        f"{run_dir} records no run, so a job's pieces could not be folded; "
+        f"record it first with decsim run <run file> --record --out {run_dir}"
+    )
+
+
 def _unsaved_units(
-    chosen: experiment.Experiment, run_dir: pathlib.Path, job_pieces: list
+    study: experiment.Experiment,
+    run_dir: pathlib.Path,
+    task: collect.Task,
+    selection: Union[SeedRange, Share],
 ) -> list:
-    """The job's pieces whose folders do not exist yet, as work units."""
+    """The task's selected seeds no saved piece holds, as work units.
+
+    Each unit holds at most a piece of the task's piece_rounds.
+    """
+    _refuse_a_task_run_in_order(task)
+    record = _task_record(run_dir, task)
+    settings = study.collection_of(task)
+    rounds_per_shot = record["rounds_per_shot"]
+    piece_shots = settings.piece_shots(rounds_per_shot)
+    seeds = selection.seeds_of(
+        task.name, settings.first_seed, settings.max_shots
+    )
+    task_folders = pieces.folders_of(run_dir, [record["id"]])
+    saved = pieces.saved_counts(task_folders)
+    gaps = pieces.unsaved_ranges(saved, seeds.start, len(seeds))
     units = []
-    for name, first_seed, count in job_pieces:
-        task = chosen.task_named(name)
-        task_id = task.strong_id()
-        folder = pieces.piece_dir(run_dir, task_id, first_seed, count)
-        if folder.is_dir():
-            continue
-        unit = collect.Unit(task, first_seed, count)
-        units.append(unit)
+    for gap_first, gap_count in gaps:
+        gap_end = gap_first + gap_count
+        for piece_first in range(gap_first, gap_end, piece_shots):
+            seeds_left = gap_end - piece_first
+            count = min(piece_shots, seeds_left)
+            unit = collect.Unit(task, piece_first, count)
+            units.append(unit)
     return units
+
+
+def _refuse_a_task_run_in_order(task: collect.Task) -> None:
+    """An online task's pieces run one after another, so no job splits them.
+
+    Each piece starts from the calibrator the piece before saved.
+    """
+    if task.online_threshold is None:
+        return
+    raise refusal.RefusalError(
+        f"the task {task.name} calibrates its threshold online, so its "
+        "pieces run one after another from the state the piece before "
+        "saved; collect it in one job with decsim run <run file> --only "
+        f"{task.name} --out <folder>"
+    )
+
+
+def _task_record(run_dir: pathlib.Path, task: collect.Task) -> dict:
+    """The folder's record of the task, refused when it is not this task."""
+    record_path = _record_path(run_dir, task.name)
+    if not record_path.is_file():
+        raise refusal.RefusalError(
+            f"{run_dir} has no record of the task {task.name}; record the "
+            "folder again with --record"
+        )
+    task_id = task.strong_id()
+    _refuse_a_name_recorded_for_another_task(run_dir, task.name, task_id)
+    return run_folder.read_json(record_path)
 
 
 def _record_a_new_task(
@@ -862,7 +1048,11 @@ def _save_the_piece(
         "packages": outcome.module_versions,
     }
     state = unit.task.online_threshold
-    pieces.write(run_dir, task_id, unit.first_seed, rows, piece_facts, state)
+    options = unit.task.record_options
+    first_seed = unit.first_seed
+    pieces.write(
+        run_dir, task_id, first_seed, rows, piece_facts, state, options
+    )
 
 
 def _say_the_threshold(calibrator) -> None:

@@ -1,4 +1,4 @@
-"""The PyMatching adapter: minimum-weight perfect matching on one window.
+"""The PyMatching adapters: minimum-weight perfect matching on one window.
 
 PyMatching's Matching.from_check_matrix on the window's graphlike faults
 with log-odds weights, parallel faults merged as independent errors (the
@@ -18,6 +18,7 @@ from typing import Optional, Union
 import numpy
 import pymatching
 import scipy.sparse
+import stim
 
 import decsim.config as config
 import decsim.decoders.backend_outcome as backend_outcome
@@ -229,6 +230,92 @@ class UnweightedPyMatchingDecoder(PyMatchingDecoder):
         return numpy.ones(fault_count)
 
 
+class CorrelatedPyMatchingDecoder(decoder_module.WindowDecoderBase):
+    """Decode one window with PyMatching's two-pass correlated matching.
+
+    Correlated matching (Fowler arXiv 1310.0863, the reference
+    PyMatching 2.4.0's Matching.decode names) matches once, then
+    reweights each edge given the hyperedge errors the first matching
+    used and matches again. PyMatching reads the hyperedges from a Stim
+    detector error model whose errors are decomposed into graphlike
+    components, so the window's linked models are written as one
+    (_correlated_model). Measured mode times the decode alone, as
+    PyMatchingDecoder's does.
+    """
+
+    fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
+    fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The row as a run names it: measured, or at a preset latency.
+
+        preset_latency_microseconds is PyMatchingDecoder.Settings' own.
+        """
+
+        preset_latency_microseconds: Optional[float] = None
+        # the word the reports name this row by
+        name = "correlated_pymatching"
+
+        def __post_init__(self) -> None:
+            _check_preset_latency(self.preset_latency_microseconds)
+
+        def build(self) -> "CorrelatedPyMatchingDecoder":
+            """A fresh decoder of these settings."""
+            if self.preset_latency_microseconds is None:
+                return CorrelatedPyMatchingDecoder()
+            latency_model = decoders.PresetLatencyDecoder(
+                self.preset_latency_microseconds
+            )
+            return CorrelatedPyMatchingDecoder(latency_model)
+
+    def __init__(
+        self, latency_model: Optional[decoder_module.DecoderBase] = None
+    ):
+        decoder_module.WindowDecoderBase.__init__(self, latency_model)
+        row = type(self)
+        self.compile_key = (row, None)
+
+    def compile(
+        self,
+        faults: fault_models.PlacedFaultModel,
+        model: fault_models.WindowErrorModel,
+    ) -> pymatching.Matching:
+        """The correlated matching graph of one window model, warm."""
+        detector_error_model = _correlated_model(faults, model)
+        matching = pymatching.Matching.from_detector_error_model(
+            detector_error_model, enable_correlations=True
+        )
+        _warm_up_correlated(matching, faults)
+        return matching
+
+    def decode_window(
+        self,
+        backend: pymatching.Matching,
+        model: fault_models.WindowErrorModel,
+        faults: fault_models.PlacedFaultModel,
+        syndrome: numpy.ndarray,
+    ) -> decoding_records.WindowDecode:
+        """The correlated matching's columns, or an empty one marked invalid.
+
+        The prediction holds one element per fault id up to the largest
+        one an edge carries (Matching.decode), so the columns after it
+        are padded with zeros.
+        """
+        del model
+        try:
+            prediction = backend.decode(syndrome, enable_correlations=True)
+        except ValueError as error:
+            if "perfect matching" not in str(error):
+                raise
+            return _no_matching_decode(faults)
+        column_count = faults.check.shape[1]
+        selected = numpy.zeros(column_count, dtype=numpy.uint8)
+        predicted_count = len(prediction)
+        selected[:predicted_count] = prediction
+        return decoding_records.WindowDecode(selected)
+
+
 def _check_preset_latency(microseconds) -> None:
     """A preset core latency is a finite number at least zero, or none."""
     if microseconds is None:
@@ -350,3 +437,76 @@ def _with_pinned_observable(syndrome, observable_bit: int):
     """The syndrome with the pinned graph's observable detector appended."""
     extended = numpy.concatenate([syndrome, [observable_bit]])
     return extended.astype(numpy.uint8)
+
+
+def _correlated_model(graphlike, model) -> stim.DetectorErrorModel:
+    """The window as a decomposed Stim model, one observable per column.
+
+    Each physical fault is one error whose components, split by ^, are
+    the graphlike faults the link says it is made of
+    (stim_fault_catalog._physical_catalog_and_link), as Stim's
+    decompose_errors writes it. Graphlike column i carries observable i,
+    so the matching's prediction is the columns it selects (an element
+    is 1 when the matching holds an odd number of edges with that fault
+    id, Matching.decode). A graphlike fault no physical fault of the
+    window holds is an error of its own at its graphlike prior.
+    """
+    physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
+    link = model.physical_to_graphlike_detector_projection
+    physical_priors = weights.finite_priors(physical.priors)
+    detector_error_model = stim.DetectorErrorModel()
+    linked_columns = set()
+    for physical_column in range(link.shape[1]):
+        components = basis_split.column_rows(link, physical_column)
+        if not components:
+            continue
+        linked_columns.update(components)
+        targets = _component_targets(graphlike.check, components)
+        prior = float(physical_priors[physical_column])
+        detector_error_model.append("error", [prior], targets)
+    graphlike_priors = weights.finite_priors(graphlike.priors)
+    for column in range(len(graphlike_priors)):
+        if column in linked_columns:
+            continue
+        targets = _component_targets(graphlike.check, (column,))
+        prior = float(graphlike_priors[column])
+        detector_error_model.append("error", [prior], targets)
+    _declare_detectors(detector_error_model, graphlike.check)
+    return detector_error_model
+
+
+def _component_targets(check, components: tuple) -> list:
+    """One error's targets: each component's detectors and its column."""
+    targets = []
+    for column in components:
+        if targets:
+            separator = stim.target_separator()
+            targets.append(separator)
+        rows = basis_split.column_rows(check, column)
+        for row in rows:
+            detector = stim.target_relative_detector_id(row)
+            targets.append(detector)
+        observable = stim.target_logical_observable_id(column)
+        targets.append(observable)
+    return targets
+
+
+def _declare_detectors(detector_error_model, check) -> None:
+    """Declare the window's last row, so every row is a detector.
+
+    A row no fault flips still has its syndrome bit, and PyMatching
+    sizes its graph by the model's detector count.
+    """
+    row_count = check.shape[0]
+    if row_count == 0:
+        return
+    last_row = row_count - 1
+    last_detector = stim.target_relative_detector_id(last_row)
+    detector_error_model.append("detector", [], [last_detector])
+
+
+def _warm_up_correlated(matching, faults) -> None:
+    """Decode the warm-up syndromes on both passes, as _warm_up does."""
+    syndromes = _warm_up_syndromes(faults.check)
+    for _column, syndrome in syndromes:
+        matching.decode(syndrome, enable_correlations=True)

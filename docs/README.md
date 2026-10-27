@@ -73,6 +73,7 @@ Each guide adds one kind of thing to the machine.
 - [How to sweep a machine over a grid](how-to/sweep_a_machine_over_a_grid.md)
 - [How to build each switching pattern](how-to/build_each_switching_pattern.md)
 - [How to run a memory as a stream](how-to/run_a_memory_as_a_stream.md)
+- [How to run a sweep on a Slurm cluster](how-to/run_on_a_slurm_cluster.md)
 
 ## Reference
 

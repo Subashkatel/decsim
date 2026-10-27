@@ -17,7 +17,6 @@ import json
 import pathlib
 import platform
 import resource
-import shlex
 import shutil
 import subprocess
 import sys
@@ -40,7 +39,6 @@ import decsim.experiments.experiment as experiment
 import decsim.experiments.failure_statistics as failure_statistics
 import decsim.experiments.fold as fold
 import decsim.experiments.pieces as pieces
-import decsim.experiments.plan_command as plan_command
 import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
@@ -73,13 +71,11 @@ FOUR_TASKS = {
     "axes": run_files.FOUR_TASK_AXES,
     "collection": {"max_shots": 2},
 }
-# the four tasks, each shot estimated at 280 core seconds: a piece of a
-# two-hour job holds one shot, and the twenty overfill one single-core job
-FOUR_TASKS_PACKED = {
+# the four tasks, five shots each, which jobs share by seed
+FOUR_TASKS_OF_FIVE_SHOTS = {
     "axes": run_files.FOUR_TASK_AXES,
     "collection": {"max_shots": 5},
 }
-FOUR_TASKS_PIECE_SECONDS = 280.0
 # the four tasks in pieces of one shot each
 FOUR_TASKS_CUT = {
     "axes": run_files.FOUR_TASK_AXES,
@@ -159,13 +155,12 @@ def _rows_of_seed(rows: list, seed: str) -> list:
 def one_tree_reading_per_test(monkeypatch):
     """Every test here takes its own reading of the tree.
 
-    run_folder reads the tree once per process, which is what a Slurm
-    job is. The suite is one process running many runs, and one of
-    these tests answers for git itself, so the reading is dropped
-    around each test rather than carried between them. A Slurm job
-    refuses a tree git does not vouch for, which tests/test_tools.py
-    holds; here a run runs on the tree as it stands, and the reading
-    it exports goes when the test ends.
+    run_folder reads the tree once per process, which is what a job
+    is. The suite is one process running many runs, and one of these
+    tests answers for git itself, so the reading is dropped around each
+    test rather than carried between them. A record and a job refuse a
+    tree git does not vouch for, which tests/test_tools.py holds; here a
+    run runs on the tree as it stands.
     """
     monkeypatch.setenv(run_folder.ALLOW_DIRTY_VARIABLE, "1")
     monkeypatch.delenv(run_folder.TREE_DIRTY_VARIABLE, raising=False)
@@ -2064,10 +2059,10 @@ def test_a_manifest_names_the_commit_of_the_tree_it_imported(
     assert "dirty" in recorded
 
 
-def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
+def test_a_manifest_takes_the_dirty_flag_from_the_shell_that_looked(
     tmp_path, monkeypatch
 ):
-    """The interpreter may have no git; the launcher did.
+    """The interpreter may have no git; the submitting shell did.
 
     A job script looks at the tree as the job starts and exports what it
     saw, because the container image this runs in ships no git binary
@@ -2075,7 +2070,7 @@ def test_a_manifest_takes_the_dirty_flag_from_the_launcher_that_looked(
     that rather than say clean.
 
     A process reads the tree once, so the two runs here take a reading
-    each on purpose: one process launched by two different launchers is
+    each on purpose: one process started by two different shells is
     the test bench's own shape and never a cluster job's.
     """
     config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
@@ -2215,79 +2210,216 @@ def _named_library(path: pathlib.Path, digest) -> dict:
     return {str(absolute): digest}
 
 
-@pytest.mark.parametrize(
-    "flag, value, minimum",
-    [("--cores", "0", 1), ("--hours", "1", 2), ("--memory-mb", "-1", 1)],
-)
-def test_a_slurm_job_asking_for_no_core_hour_or_memory_is_refused(
-    tmp_path, capsys, flag, value, minimum
+def test_jobs_of_seed_ranges_then_the_fold_write_the_local_runs_rows(
+    tmp_path,
 ):
-    """A job has a core, two hours and some memory, or nothing is written.
-
-    A walltime is at least 61 minutes, so a limit of one hour holds none.
-    """
-    run_file = run_files.write_run_file(tmp_path)
-    out_dir = tmp_path / "out"
-    arguments = [str(run_file), "--out", str(out_dir), "--slurm", "--dry-run"]
-
-    with pytest.raises(SystemExit):
-        command.main(["run", *arguments, flag, value])
-
-    printed = capsys.readouterr()
-    assert f"{flag} must be at least {minimum}, got {value}" in printed.err
-    assert not out_dir.exists()
-
-
-def test_array_jobs_then_the_fold_write_the_local_runs_rows(tmp_path):
     """The referent is one local run of the same four tasks.
 
-    The launcher records the tasks and packs their one-shot pieces into
-    two jobs; each job then runs the line run.sbatch holds, in
-    whatever order the array runs them, and the fold job's fold writes
-    every file the local run wrote, row for row but the wall clock. The
-    run file reads a file beside it, as a threshold table is read, and
-    every job finds it.
+    The folder is recorded once, two jobs run seeds 3 to 4 and 0 to 2 of
+    every task, the later seeds first, and the fold writes every file
+    the local run wrote, row for row but the wall clock. The run file
+    reads a file beside it, as a threshold table is read, and every job
+    finds it.
     """
-    config_path = run_files.write_packed_run_file(
-        tmp_path, FOUR_TASKS_PIECE_SECONDS, **FOUR_TASKS_PACKED
-    )
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS)
     _read_a_file_beside(config_path)
     local_dir = tmp_path / "local"
     split_dir = tmp_path / "split"
     command.main(["run", str(config_path), "--out", str(local_dir)])
-    job = plan_command.JobShape(cores=1, hours=2, memory_mb=1024)
-    plan_command.launch(config_path, split_dir, job, dry_run=True)
+    shared = [str(config_path), "--out", str(split_dir)]
 
-    job_1 = _job_arguments(split_dir, "1")
-    command.main(job_1)
-    job_0 = _job_arguments(split_dir, "0")
-    command.main(job_0)
+    command.main(["run", *shared, "--record"])
+    command.main(["run", *shared, "--seeds", "3:5"])
+    command.main(["run", *shared, "--seeds", "0:3"])
     command.main(["run", "--fold", "--out", str(split_dir)])
 
     assert _rows_of_every_file(split_dir) == _rows_of_every_file(local_dir)
 
 
-def test_an_array_job_refuses_a_run_file_edited_since_the_launch(
-    tmp_path, capsys
-):
-    """Job i of an edited run file may name another task, so it stops."""
-    config_path = run_files.write_packed_run_file(
-        tmp_path, FOUR_TASKS_PIECE_SECONDS, **FOUR_TASKS_PACKED
-    )
-    split_dir = tmp_path / "split"
-    job = plan_command.JobShape(cores=1, hours=2, memory_mb=1024)
-    plan_command.launch(config_path, split_dir, job, dry_run=True)
-    with config_path.open("a") as run_file:
-        run_file.write("# edited after the launch\n")
-    job_arguments = _job_arguments(split_dir, "0")
+def test_the_shares_of_a_count_run_each_seed_once_in_runs(tmp_path):
+    """Five seeds in three shares: 0, then 1 and 2, then 3 and 4.
+
+    Share i holds seeds i * 5 // 3 up to (i + 1) * 5 // 3, so the shares
+    cover the task's max_shots seeds, each once, a seed apart at most.
+    """
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS)
+    run_dir = tmp_path / "split"
+    shared = [str(config_path), "--out", str(run_dir)]
+    command.main(["run", *shared, "--record"])
+
+    command.main(["run", *shared, "--share", "2/3"])
+    command.main(["run", *shared, "--share", "0/3"])
+    command.main(["run", *shared, "--share", "1/3"])
+
+    study = experiment.load(config_path)
+    first_task = study.tasks[0]
+    task_id = first_task.strong_id()
+    task_folders = pieces.folders_of(run_dir, [task_id])
+    assert pieces.saved_counts(task_folders) == {0: 1, 1: 2, 3: 2}
+
+
+def test_a_share_of_a_task_with_no_shot_count_is_refused(tmp_path, capsys):
+    """A task that stops on time has no seeds to cut into shares."""
+    timed = {"collection": {"max_core_seconds": 60.0}}
+    config_path = run_files.write_run_file(tmp_path, **timed)
+    task = run_files.first_task(**timed)
+    run_dir = tmp_path / "split"
+    shared = [str(config_path), "--out", str(run_dir)]
+    command.main(["run", *shared, "--record"])
 
     with pytest.raises(SystemExit):
-        command.main(job_arguments)
+        command.main(["run", *shared, "--share", "0/2"])
 
     printed = capsys.readouterr()
-    saved_pieces = split_dir.glob("pieces/*")
+    assert (
+        "--share cuts each task's max_shots seeds, and the task "
+        f"{task.name} has none, since it stops on failures or time; name "
+        "its seeds with --seeds, or give it max_shots"
+    ) in printed.err
+
+
+def test_a_job_run_again_runs_only_the_seeds_no_piece_saved(tmp_path):
+    """Seeds 0 to 2 saved, then 0 to 99 asked: 3 and 4 run, and no more.
+
+    The task stops at five shots, so the range stops there too.
+    """
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS)
+    run_dir = tmp_path / "split"
+    shared = [str(config_path), "--out", str(run_dir)]
+    command.main(["run", *shared, "--record"])
+    command.main(["run", *shared, "--seeds", "0:3"])
+
+    command.main(["run", *shared, "--seeds", "0:100"])
+
+    study = experiment.load(config_path)
+    first_task = study.tasks[0]
+    task_id = first_task.strong_id()
+    task_folders = pieces.folders_of(run_dir, [task_id])
+    assert pieces.saved_counts(task_folders) == {0: 3, 3: 2}
+
+
+def test_a_job_refuses_a_run_file_edited_since_the_record(tmp_path, capsys):
+    """A job of an edited run file may build other tasks, so it stops."""
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS)
+    run_dir = tmp_path / "split"
+    shared = [str(config_path), "--out", str(run_dir)]
+    command.main(["run", *shared, "--record"])
+    with config_path.open("a") as run_file:
+        run_file.write("# edited after the record\n")
+
+    with pytest.raises(SystemExit):
+        command.main(["run", *shared, "--seeds", "0:5"])
+
+    printed = capsys.readouterr()
+    saved_pieces = run_dir.glob("pieces/*")
     assert f"holds another {config_path.name} than" in printed.err
     assert not any(saved_pieces)
+
+
+def test_a_job_into_a_folder_never_recorded_is_refused(tmp_path, capsys):
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS_OF_FIVE_SHOTS)
+    run_dir = tmp_path / "split"
+    seeds = ["--seeds", "0:5"]
+
+    with pytest.raises(SystemExit):
+        command.main(["run", str(config_path), "--out", str(run_dir), *seeds])
+
+    printed = capsys.readouterr()
+    assert (
+        f"{run_dir} records no run, so a job's pieces could not be folded; "
+        f"record it first with decsim run <run file> --record --out {run_dir}"
+    ) in printed.err
+
+
+def test_a_job_of_a_task_the_folder_did_not_record_is_refused(tmp_path, capsys):
+    """A local run of one task records that task alone."""
+    config_path = run_files.write_run_file(tmp_path, **FOUR_TASKS)
+    study = experiment.load(config_path)
+    first_task, second_task = study.tasks[:2]
+    run_dir = tmp_path / "split"
+    shared = [str(config_path), "--out", str(run_dir)]
+    command.main(["run", *shared, "--only", first_task.name])
+
+    with pytest.raises(SystemExit):
+        command.main(["run", *shared, "--seeds", "0:2"])
+
+    printed = capsys.readouterr()
+    assert (
+        f"{run_dir} has no record of the task {second_task.name}; record "
+        "the folder again with --record"
+    ) in printed.err
+
+
+def test_a_job_of_a_task_whose_threshold_learns_online_is_refused(
+    tmp_path, capsys
+):
+    """Each of its pieces starts from the calibrator the one before saved."""
+    config_path = run_files.write_run_file(tmp_path, **ONLINE)
+    task = run_files.first_task(**ONLINE)
+    run_dir = tmp_path / "split"
+    shared = [str(config_path), "--out", str(run_dir)]
+    command.main(["run", *shared, "--record"])
+
+    with pytest.raises(SystemExit):
+        command.main(["run", *shared, "--seeds", "0:1"])
+
+    printed = capsys.readouterr()
+    assert (
+        f"the task {task.name} calibrates its threshold online, so its "
+        "pieces run one after another"
+    ) in printed.err
+
+
+@pytest.mark.parametrize(
+    ("arguments", "sentence"),
+    [
+        (["--record"], "--record, --share and --seeds work in the folder"),
+        (["--seeds", "0:5"], "--record, --share and --seeds work in the"),
+        (["--share", "0/2"], "--record, --share and --seeds work in the"),
+        (
+            ["--out", "out", "--record", "--seeds", "0:5"],
+            "--record runs no shot and --share or --seeds runs some",
+        ),
+        (
+            ["--out", "out", "--share", "0/2", "--seeds", "0:5"],
+            "argument --seeds: not allowed with argument --share",
+        ),
+        (
+            ["--out", "out", "--share", "2/2"],
+            "a share INDEX/COUNT counts from 0, so 0 <= INDEX < COUNT, got 2/2",
+        ),
+        (
+            ["--out", "out", "--share", "first/2"],
+            "a share is INDEX/COUNT, two whole numbers, got first/2",
+        ),
+        (
+            ["--out", "out", "--record", "--only", "d3"],
+            "--record records every task, which the fold folds",
+        ),
+        (
+            ["--out", "out", "--seeds", "0:5", "--shots", "5"],
+            "--shots and --seed run locally",
+        ),
+        (
+            ["--out", "out", "--seeds", "5:5"],
+            "a seed range FIRST:END has 0 <= FIRST < END, got 5:5",
+        ),
+        (
+            ["--out", "out", "--seeds", "first:5"],
+            "a seed range is FIRST:END, two whole numbers, got first:5",
+        ),
+    ],
+)
+def test_a_record_or_seeds_that_name_no_one_shared_folder_are_refused(
+    tmp_path, capsys, arguments, sentence
+):
+    config_path = run_files.write_run_file(tmp_path)
+
+    with pytest.raises(SystemExit):
+        command.main(["run", str(config_path), *arguments])
+
+    printed = capsys.readouterr()
+    assert sentence in printed.err
 
 
 def _read_a_file_beside(run_path: pathlib.Path) -> None:
@@ -2299,17 +2431,6 @@ def _read_a_file_beside(run_path: pathlib.Path) -> None:
             "import pathlib\n"
             'pathlib.Path(__file__).with_name("beside.txt").read_text()\n'
         )
-
-
-def _job_arguments(run_dir: pathlib.Path, index: str) -> list:
-    """The decsim arguments in run.sbatch's job line, at one array index."""
-    run_script = run_dir / plan_command.RUN_SCRIPT
-    script_text = run_script.read_text()
-    script_lines = script_text.splitlines()
-    job_line = script_lines[-1]
-    indexed_line = job_line.replace("$SLURM_ARRAY_TASK_ID", index)
-    words = shlex.split(indexed_line)
-    return words[3:]
 
 
 def _typed_sweep_rows(experiment_dir: pathlib.Path) -> list:

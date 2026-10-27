@@ -81,3 +81,14 @@ task's count of every value, and `stat_summary.csv` the per-task
 measures: a count's total and per-shot mean, a level's time mean and
 peak, a distribution's mean and extremes, and p50, p90 and p99
 (the columns are in [the run folder](../reference/run_folder.md)).
+
+Every shot's rows cost some 5 kB a shot. A sweep of millions of shots
+can write each piece's sums instead, which give the same
+`stat_summary.csv`:
+
+```python
+sweep = decsim.Sweep(
+    ...,
+    record_options=decsim.RecordOptions(is_statistics_per_shot=False),
+)
+```

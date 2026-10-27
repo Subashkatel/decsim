@@ -10,21 +10,28 @@ runs, so `decsim trace` never loads Stim. The console script and
     decsim run <run file> --list
     decsim run <run file> --seed S [--only NAME] [--out DIR] [--log ...]
         [--trace]
-    decsim run <run file> --slurm [--cores C] [--hours H] [--memory-mb M]
-        [--memory-margin F] [--out DIR] [--dry-run]
+    decsim run <run file> --record --out DIR
+    decsim run <run file> --share INDEX/COUNT --out DIR [--only NAME]
+        [--processes N]
+    decsim run <run file> --seeds FIRST:END --out DIR [--only NAME]
+        [--processes N]
     decsim run --fold --out DIR
     decsim trace follow <file> --round k:n | --window k:n
     decsim params <run file> [--only NAME] [--match PATTERN]
     decsim info <record name>
     decsim describe <run file> [--only NAME]
     decsim check <run file> [--only NAME]
-    decsim estimates <run dir>
     decsim stream <run file> --rounds N [--only NAME] [--warmup W]
         [--seed S] [--out FILE]
 
 Every run form takes --set PATH=VALUE, repeated, to set any parameter
 of every task's machine (decsim/parameters; `decsim params` lists the
 paths); DECSIM_SET holds more, `;` between them, the flags winning.
+
+decsim writes no job script. A run split over jobs, on Slurm or any
+other scheduler, is --record once, --share or --seeds in each job,
+then --fold
+(docs/how-to/run_on_a_slurm_cluster.md).
 
 What the experiments layer refuses reaches the user as one sentence and
 exit 1 (decsim/experiments/refusal.py); anything else keeps its
@@ -72,7 +79,7 @@ def _verb(verb: Optional[str], rest: list) -> None:
 
 
 def _run(argv: list) -> None:
-    """An experiment's tasks, one task, one shot, Slurm, a job, a fold."""
+    """An experiment's tasks, one task, one shot, a record, seeds, a fold."""
     import decsim.experiments.parameters_command as parameters_command
 
     parser = _run_parser()
@@ -82,14 +89,14 @@ def _run(argv: list) -> None:
     if parsed.fold:
         _fold(parsed)
         return
-    if parsed.job is not None:
-        _run_a_job(parsed)
-        return
     if parsed.list:
         _list_the_tasks(parsed.run_file)
         return
-    if parsed.slurm:
-        _launch_on_slurm(parsed)
+    if parsed.record:
+        _record(parsed)
+        return
+    if parsed.selection is not None:
+        _run_seeds(parsed)
         return
     if parsed.seed is not None:
         _run_one_shot(parsed)
@@ -97,30 +104,26 @@ def _run(argv: list) -> None:
     _collect(parsed)
 
 
-def _launch_on_slurm(parsed) -> None:
-    """Every task recorded, its pieces packed into Slurm jobs, then a fold."""
-    import decsim.experiments.plan_command as plan_command
+def _record(parsed) -> None:
+    """Every task recorded into the folder jobs will share; no shot run."""
+    import decsim.experiments.collect_command as collect_command
 
-    memory_mb = parsed.memory_mb
-    if memory_mb is None:
-        memory_mb = plan_command.measured_memory_mb(
-            parsed.run_file, parsed.cores, parsed.memory_margin
-        )
-    job = plan_command.JobShape(parsed.cores, parsed.hours, memory_mb)
-    plan_command.launch(
-        parsed.run_file, parsed.out, job, dry_run=parsed.dry_run
-    )
-
-
-def _run_a_job(parsed) -> None:
-    """One Slurm job: the pieces packed into it, on a tree git names."""
-    import decsim.experiments.plan_command as plan_command
-
-    plan_command.refuse_an_unnamed_tree()
-    run_path = pathlib.Path(parsed.run_file)
     run_dir = pathlib.Path(parsed.out)
-    plan_command.run_job(
-        run_path, run_dir, parsed.job, processes=parsed.processes
+    names = collect_command.record_the_folder(parsed.run_file, run_dir)
+    print(f"recorded {len(names)} tasks in {run_dir}")
+
+
+def _run_seeds(parsed) -> None:
+    """One job's seeds, run into a recorded folder; no fold."""
+    import decsim.experiments.collect_command as collect_command
+
+    run_dir = pathlib.Path(parsed.out)
+    collect_command.run_seeds(
+        parsed.run_file,
+        run_dir,
+        parsed.selection,
+        only=parsed.only,
+        processes=parsed.processes,
     )
 
 
@@ -174,12 +177,7 @@ def _list_the_tasks(run_file: str) -> None:
 
 
 def _run_parser():
-    """The run command's arguments, all here, where the command page reads them.
-
-    The Slurm defaults are three cores a job (decsim/experiments/
-    plan_command.py says why), a walltime limit of a day and 16384 MB a
-    job. --job is a Slurm job's entry, which run.sbatch writes.
-    """
+    """The run command's arguments, all here, where the page reads them."""
     import argparse
 
     import decsim.experiments.parameters_command as parameters_command
@@ -231,41 +229,34 @@ def _run_parser():
         help="write the narrated shot's Chrome trace of the data path",
     )
     parser.add_argument(
-        "--slurm",
+        "--record",
         action="store_true",
-        help="pack the tasks' pieces into Slurm job arrays, then fold",
+        help="record every task into the --out folder that jobs will "
+        "share, and run no shot",
     )
-    parser.add_argument(
-        "--cores", type=int, default=3, help="pieces a job runs at once"
-    )
-    parser.add_argument(
-        "--hours", type=int, default=24, help="a job's longest walltime"
-    )
-    parser.add_argument(
-        "--memory-mb",
-        type=int,
+    selections = parser.add_mutually_exclusive_group()
+    selections.add_argument(
+        "--share",
+        dest="selection",
+        type=_share,
         default=None,
-        help="a job's memory; by default its cores times the largest "
-        "peak_memory_mb in seconds_per_shot.csv, times --memory-margin, "
-        "or 16384 without one",
+        help="INDEX/COUNT, counted from 0: run job INDEX's share of every "
+        "task's max_shots seeds, or the --only one's, into the recorded "
+        "--out folder, skipping saved seeds, and fold nothing",
     )
-    parser.add_argument(
-        "--memory-margin",
-        type=float,
-        default=1.25,
-        help="what a job asks over its workers' measured peaks",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="write the sbatch files and submit nothing",
+    selections.add_argument(
+        "--seeds",
+        dest="selection",
+        type=_seed_range,
+        default=None,
+        help="FIRST:END, as --share but seeds FIRST to END - 1 of every "
+        "task, stopped at its max_shots",
     )
     parser.add_argument(
         "--fold",
         action="store_true",
         help="fold the --out folder's saved pieces and run nothing",
     )
-    parser.add_argument("--job", type=int, default=None, help=argparse.SUPPRESS)
     parameters_command.add_set_argument(parser)
     return parser
 
@@ -282,6 +273,49 @@ def _shot_count(text: str) -> int:
     return count
 
 
+def _share(text: str):
+    """INDEX/COUNT, job INDEX of COUNT, with 0 <= INDEX < COUNT."""
+    import argparse
+
+    import decsim.experiments.collect_command as collect_command
+
+    index_text, _slash, count_text = text.partition("/")
+    try:
+        index = int(index_text)
+        count = int(count_text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"a share is INDEX/COUNT, two whole numbers, got {text}"
+        ) from None
+    if not 0 <= index < count:
+        raise argparse.ArgumentTypeError(
+            "a share INDEX/COUNT counts from 0, so 0 <= INDEX < COUNT, "
+            f"got {text}"
+        )
+    return collect_command.Share(index, count)
+
+
+def _seed_range(text: str):
+    """FIRST:END, seeds FIRST to END - 1, with 0 <= FIRST < END."""
+    import argparse
+
+    import decsim.experiments.collect_command as collect_command
+
+    first_text, _colon, end_text = text.partition(":")
+    try:
+        first_seed = int(first_text)
+        end_seed = int(end_text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"a seed range is FIRST:END, two whole numbers, got {text}"
+        ) from None
+    if not 0 <= first_seed < end_seed:
+        raise argparse.ArgumentTypeError(
+            f"a seed range FIRST:END has 0 <= FIRST < END, got {text}"
+        )
+    return collect_command.SeedRange(first_seed, end_seed)
+
+
 def _check_the_run_arguments(parser, parsed) -> None:
     """The run's arguments name one thing to do."""
     if parsed.fold:
@@ -289,10 +323,8 @@ def _check_the_run_arguments(parser, parsed) -> None:
         return
     if parsed.run_file is None:
         parser.error("name the run file")
-    if parsed.job is not None and parsed.out is None:
-        parser.error("--job runs one task into a folder; name it with --out")
-    if parsed.slurm:
-        _check_the_slurm_arguments(parser, parsed)
+    if parsed.record or parsed.selection is not None:
+        _check_the_shared_folder_arguments(parser, parsed)
         return
     _check_the_local_arguments(parser, parsed)
 
@@ -317,13 +349,36 @@ def _check_the_local_arguments(parser, parsed) -> None:
         )
 
 
-def _check_the_slurm_arguments(parser, parsed) -> None:
-    """A Slurm run runs every task to its max_shots."""
-    chosen = (parsed.only, parsed.shots, parsed.seed)
-    if any(option is not None for option in chosen):
+def _check_the_shared_folder_arguments(parser, parsed) -> None:
+    """A record or a range of seeds names the folder jobs share.
+
+    A folder of a new date for each job would scatter one run's pieces.
+    """
+    if parsed.out is None:
         parser.error(
-            "--slurm runs every task to its max_shots; --only, --shots and "
-            "--seed run locally"
+            "--record, --share and --seeds work in the folder jobs share; "
+            "name it with --out"
+        )
+    local_options = (parsed.shots, parsed.seed)
+    if any(option is not None for option in local_options):
+        parser.error(
+            "--record, --share and --seeds take every task to its "
+            "max_shots, or the given seeds; --shots and --seed run locally"
+        )
+    if parsed.record:
+        _check_the_record_arguments(parser, parsed)
+
+
+def _check_the_record_arguments(parser, parsed) -> None:
+    """A record runs no shot, and records every task the fold folds."""
+    if parsed.selection is not None:
+        parser.error(
+            "--record runs no shot and --share or --seeds runs some; give one"
+        )
+    if parsed.only is not None:
+        parser.error(
+            "--record records every task, which the fold folds; --only "
+            "chooses the tasks of --share or --seeds"
         )
 
 
@@ -353,13 +408,6 @@ def _describe(argv: list) -> None:
     import decsim.experiments.describe_command as describe_command
 
     describe_command.describe(argv)
-
-
-def _estimates(argv: list) -> None:
-    """What --slurm sizes its jobs by, read off a folded run."""
-    import decsim.experiments.estimates_command as estimates_command
-
-    estimates_command.estimates(argv)
 
 
 def _check(argv: list) -> None:
@@ -404,6 +452,5 @@ _RUN_BY_VERB = {
     "info": _info,
     "describe": _describe,
     "check": _check,
-    "estimates": _estimates,
     "stream": _stream,
 }

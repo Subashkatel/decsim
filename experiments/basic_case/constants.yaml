@@ -34,7 +34,7 @@ frame:
 
 union_find:
   algorithm:
-    weight_step: 0.5                 # edges 6 to 16 ticks, Helios's finest w_max = 16 (2301.08419 Sec. VI-C); fails as often as 0.1 (specs/adaptive-switching README, evidence)
+    weight_step: 0.5                 # edges 6 to 16 ticks, Helios's finest w_max = 16 (2301.08419 Sec. VI-C); fails as often as 0.1 (specs/adaptive-switching/evidence.md)
   cycle_count:
     delay: 3 cycles                  # MAXIMUM_DELAY, Helios_single_FPGA_core.v:76 (yale-paragon/Helios_scalable_QEC 2dda998)
     cycles_per_edge: 0.0             # a processing element per vertex (2301.08419 lines 764-767)

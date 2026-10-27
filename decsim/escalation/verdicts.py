@@ -16,7 +16,7 @@ learns from by the windows it escalates.
                    drawn from the run's seed (Toshio et al. Sec. III C)
     backlog_bernoulli
                    bernoulli at a rate the outer loop steps by the
-                   source pool's backlog (target_steps.py, slice 06)
+                   source pool's backlog (target_steps.py)
     agreement      keep an ensemble's answer at or above a share of its
                    members agreeing; all of them by default (Shutty et
                    al. 2401.12434 Sec. V)
@@ -220,7 +220,7 @@ class Bernoulli(seeding.GeneratorSeedConsumer):
     γ_switch per window. This row is that model: it ignores the result,
     so a capacity study sets the escalation rate directly. A run seeds
     it at the edge's policy path, so a seed repeats its draws. A change
-    of conditions mid-stream (slice 06) gives later_rate from window
+    of conditions mid-stream gives later_rate from window
     from_window on, as a fixed threshold escalates more when p rises.
     """
 
@@ -284,7 +284,7 @@ class Bernoulli(seeding.GeneratorSeedConsumer):
 class BacklogBernoulli(seeding.GeneratorSeedConsumer):
     """Bernoulli at the share the outer loop sets from the backlog.
 
-    The timing-only form of slice 06, as Toshio et al. 2510.25222 Sec.
+    The timing-only form of that loop, as Toshio et al. 2510.25222 Sec.
     III C model switching: no gap is read, each window escalates at the
     loop's current share, and the loop (target_steps.TargetSteps) reads
     the windows waiting for the source pool before each decision.

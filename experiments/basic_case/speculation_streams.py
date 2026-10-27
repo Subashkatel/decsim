@@ -1,4 +1,4 @@
-r"""Long memory streams at fixed thresholds: sliding and speculation (scratch).
+r"""Long memory streams at fixed thresholds: sliding and speculation.
 
 Each task streams one memory at a steady p on FlipStreamDevice (a
 stream samples its rounds as it goes, not from a saved dataset), a

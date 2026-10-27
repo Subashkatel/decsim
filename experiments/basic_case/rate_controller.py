@@ -1,6 +1,6 @@
 r"""The rate controller on held-out shots, against the static threshold.
 
-Each point's switching run with RateThreshold (slice 05) holding 5% or
+Each point's switching run with RateThreshold holding 5% or
 10% of windows escalated, on seeds 20,000 to 29,999, the first half of
 threshold_heldout.py's static runs. It starts either at the threshold
 calibration.py gives for its target, or cold at 20 dB. The controller

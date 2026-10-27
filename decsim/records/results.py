@@ -32,7 +32,7 @@ class GateStall:
     release open), the release crossing the output path, and the QPU's
     start. stall_ticks is the start less the first round boundary at or
     after otherwise-ready, where the operation would have started had
-    nothing waited on a decode (slice 07); reaction_ticks is the release
+    nothing waited on a decode; reaction_ticks is the release
     less the blocker's body done: from the outcome's rounds to the moment
     it can control further logic, decoding and communication both
     (Bombín et al. 2303.04846 Sec. II).

@@ -1,4 +1,4 @@
-r"""Speculation beside the sliding and the double window, on memory (scratch).
+r"""Speculation beside the sliding and the double window, on memory.
 
 A switching machine handles a window it escalates in one of three ways
 (escalation/strong_window_shapes.py):

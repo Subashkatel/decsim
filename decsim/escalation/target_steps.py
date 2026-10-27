@@ -1,7 +1,6 @@
 """The outer loop: step the escalated share down while the backlog grows.
 
-Slice 06's loop (specs/adaptive-switching/slices/06-adaptive-capacity.md),
-throughput first. A chain that keeps up holds a backlog that comes and
+Throughput comes first. A chain that keeps up holds a backlog that comes and
 goes: one escalated window holds the next windows for its service, so
 bursts are the queue's ordinary state. A chain that falls behind holds
 one that grows. So every check_every_windows windows the loop reads the

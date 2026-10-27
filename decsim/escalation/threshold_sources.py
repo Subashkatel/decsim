@@ -535,7 +535,7 @@ class OnlineThreshold:
 class RateThreshold:
     """Hold a target share of windows escalated, from the gaps alone.
 
-    The rate tracker without audits (slice 05): it reads no strong
+    The rate tracker without audits: it reads no strong
     answer and no truth, so it costs nothing but the escalations it
     makes. It starts at a calibrated threshold, the one that escalated
     the target on calibration shots (experiments/basic_case/
@@ -544,7 +544,7 @@ class RateThreshold:
     share around the target for any gap sequence (EscalationRateTracker).
     One instance persists across a task's shots.
 
-    With steps, the outer loop (target_steps.TargetSteps, slice 06) sets
+    With steps, the outer loop (target_steps.TargetSteps) sets
     the target: before each window the source reads the windows waiting
     for the source pool and the loop steps the share by their trend. The
     tracker's bound holds for a moving target, its long-run share then

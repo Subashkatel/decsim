@@ -9,9 +9,9 @@ its last calibration does. The static threshold is the one that
 escalated 10% of windows at p = 0.002 (calibration.py); at 0.003 it
 escalates about 25% (threshold_sweep.py), past the share the chain
 sustains, q* of 0.12 to 0.14 (threshold_plots.py). The controller
-(RateThreshold, slice 05) starts there too and holds 10%. The loop is
+(RateThreshold) starts there too and holds 10%. The loop is
 that controller with the outer loop setting its target from the
-backlog's trend (target_steps.py, slice 06), from 10%.
+backlog's trend (target_steps.py), from 10%.
 
 Each stream records its escalated share every hundredth window and the
 controller's threshold (stream_measures.py); the warmup ends at the

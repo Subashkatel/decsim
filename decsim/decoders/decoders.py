@@ -16,7 +16,7 @@ import decsim.records.decoding as decoding_records
 class PresetLatencyDecoder(decoder_module.DecoderBase):
     """Timing-only decoder with one fixed latency for every job.
 
-    A change of conditions mid-stream (slice 06: strong service slowing)
+    A change of conditions mid-stream (strong service slowing)
     gives later_latency_microseconds from window from_window on, the
     window index within its operation.
     """

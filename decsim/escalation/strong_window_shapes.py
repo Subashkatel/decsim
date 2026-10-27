@@ -9,9 +9,10 @@ row is held, or checked to let the weak chain go on
 (boundary_policies.Checked). DoubleWindow is Sec. III C and Fig. 12: a
 forward extent with both faces pinned that absorbs the weak windows it
 covers, re-slices the window past it, and is held until that window's
-weak commit or, at the operation's end, until its last round is stored. A shape with both faces pinned that absorbs
-nothing is not a row: it waits for the window after it, which waits for
-its own strong result, and the serial sliding chain deadlocks.
+weak commit or, at the operation's end, until its last round is stored.
+A shape with both faces pinned that absorbs nothing is not a row: it
+waits for the window after it, which waits for its own strong result,
+and the serial sliding chain deadlocks.
 
 The restart window's weak decode may re-read the strong region's last
 buffer regions from the weak syndrome buffer, so those rounds must still

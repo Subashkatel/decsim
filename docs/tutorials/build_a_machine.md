@@ -158,15 +158,17 @@ True
 ```
 
 The wires to other parts are not made yet. The window manager's
-requester asks for each window's decode, and the decoder manager that
-takes the request is in another part, so its port is still empty:
+requester sends each window through its router to the decoder manager
+of the window's entry pool. That manager is in another part, so the
+router holds no entry pool yet:
 
 ```python
-windows.window_manager.requester.decode_queue
+entry_sides = windows.window_manager.requester.router.sides()
+print(entry_sides)
 ```
 
 ```text
-RuntimeError: DecodeRequester.decode_queue was read before it was bound
+()
 ```
 
 The readout part builds one store for each store the layout holds.
@@ -190,8 +192,8 @@ machine = machine_module.Machine.assemble(
     switching_parts,
 )
 window_manager = windows.window_manager
-decode_queue = window_manager.requester.decode_queue
-is_requester_wired = decode_queue is decoders.decoder_manager
+(entry_side,) = window_manager.requester.router.sides()
+is_requester_wired = entry_side.decode_queue is decoders.decoder_manager
 print(is_requester_wired)
 ```
 

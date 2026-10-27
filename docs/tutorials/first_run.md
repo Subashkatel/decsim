@@ -160,7 +160,7 @@ The numbers are in the folder's `sweep.csv`, one row per task. These
 are the columns this step reads:
 
 ```bash
-cut -d, -f5,35,79,103,136,137 results/d3/sweep.csv
+cut -d, -f5,35,79,103,140,141 results/d3/sweep.csv
 ```
 
 ```
@@ -202,9 +202,11 @@ ls results/d3
 
 ```
 pieces
+pool_summary.csv
 priced_cards_example.py
 run.json
 shot_links.csv
+shot_pools.csv
 shot_stats.csv
 shots.csv
 stat_summary.csv

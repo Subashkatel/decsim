@@ -185,8 +185,8 @@ def test_every_vqd_row_decodes_the_critical_memory_first():
 def _four_memories(rule) -> machine_module.Machine:
     """The declared weak-only machine over mem1 to mem4 and a fixup, run."""
     operations = []
-    for operation_id in range(1, 5):
-        memory = declared_run.memory_operation(operation_id)
+    for stream_id in range(1, 5):
+        memory = declared_run.memory_operation(stream_id)
         operations.append(memory)
     fixup = program_records.Operation(
         id=5,
@@ -233,14 +233,14 @@ def _drained(scheduler, queue: list) -> list:
     order = []
     while queue:
         job = scheduler.pop(queue)
-        order.append(job.operation_id)
+        order.append(job.stream_id)
     return order
 
 
-def _job(operation_id: int, ready: int = 0) -> decoding_records.DecodeJob:
+def _job(stream_id: int, ready: int = 0) -> decoding_records.DecodeJob:
     """A three-round job of the operation, admitted at tick ready."""
     return decoding_records.DecodeJob(
-        operation_id=operation_id,
+        stream_id=stream_id,
         window_id=0,
         round_count=3,
         ready_time=ready,

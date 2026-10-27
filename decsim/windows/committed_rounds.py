@@ -148,8 +148,8 @@ class LogicalLedger:
         far, with the XOR of their observables, or None when any is
         timing-only. A read XORs what covers its interval and is None
         when any of it is, so a read over folded rounds gives what it
-        gave before; a segment's first round starts a stretch, so a read
-        from it crosses no fold.
+        gave before; a stretch ends where a segment ends, so a read from
+        round 1 through a segment's end crosses no fold.
         """
         folding = self._ending_before(stream_id, first_kept_round)
         stretches = []

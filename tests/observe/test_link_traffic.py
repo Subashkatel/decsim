@@ -22,7 +22,7 @@ FREE_CHANNEL = link_settings.ChannelSettings("free", 0, None, "test")
 FREE_PATH = link_settings.PathSettings(
     FREE_CHANNEL, None, "test payload", excludes_receiver_processing=False
 )
-OPERATION_ID = ("experiment", 7)
+STREAM_ID = ("experiment", 7)
 
 
 def _edges_on(report: dict, path_name: str) -> list:
@@ -116,13 +116,13 @@ def ignore(_transfer):
 
 def round_attribution(round_index):
     return transfer_records.TransferAttribution.for_round(
-        OPERATION_ID, (1, 2), round_index
+        STREAM_ID, (1, 2), round_index
     )
 
 
 def request_key_for(window_id):
     return window_records.DecoderRequestKey(
-        operation_id=OPERATION_ID,
+        stream_id=STREAM_ID,
         window_id=window_id,
         pool=window_records.STRONG_POOL_ID,
         run_sequence=0,
@@ -131,13 +131,13 @@ def request_key_for(window_id):
 
 def window_attribution(window_id, relation):
     return transfer_records.TransferAttribution(
-        operation_id=OPERATION_ID,
+        owner_id=STREAM_ID,
         patch_ids=(1, 2),
         window_id=window_id,
         first_round=1,
         last_round=2,
         relation=relation,
-        round_keys=((OPERATION_ID, 1), (OPERATION_ID, 2)),
+        round_keys=((STREAM_ID, 1), (STREAM_ID, 2)),
     )
 
 
@@ -188,10 +188,8 @@ def test_readout_bindings_reconcile_once_per_shared_channel() -> None:
     right_route = link_settings.ReadoutRoute((2,), shared)
     run = Run(qpu_to_controller=joint, readout_routes=(left_route, right_route))
     joint_attribution = round_attribution(1)
-    left = transfer_records.TransferAttribution.for_round(OPERATION_ID, (1,), 2)
-    right = transfer_records.TransferAttribution.for_round(
-        OPERATION_ID, (2,), 2
-    )
+    left = transfer_records.TransferAttribution.for_round(STREAM_ID, (1,), 2)
+    right = transfer_records.TransferAttribution.for_round(STREAM_ID, (2,), 2)
     run.send(transfer_records.QPU_TO_CONTROLLER, 8, 0, joint_attribution)
     run.send(transfer_records.QPU_TO_CONTROLLER, 3, 0, left)
     run.send(transfer_records.QPU_TO_CONTROLLER, 5, 0, right)
@@ -261,13 +259,13 @@ def test_channels_are_aliased_in_the_order_the_paths_first_meet_them():
     ]
 
 
-def test_a_window_reading_into_the_next_operation_names_each_ones_rounds():
-    """Window 1:1 reads rounds 4 to 6 of operation 1 and 1 to 3 of 2."""
+def test_a_window_reading_into_the_next_stream_names_each_ones_rounds():
+    """Window 1:1 reads rounds 4 to 6 of stream 1 and 1 to 3 of 2."""
     run = Run()
     request_key = request_key_for(1)
     relation = transfer_records.RequestTransferRelation(request_key)
     attribution = transfer_records.TransferAttribution(
-        operation_id=1,
+        owner_id=1,
         patch_ids=(0,),
         window_id=1,
         first_round=4,
@@ -281,9 +279,9 @@ def test_a_window_reading_into_the_next_operation_names_each_ones_rounds():
     transfer = report["transfers"][0]
     first_json = identity_records.stable_identity_json(1)
     second_json = identity_records.stable_identity_json(2)
-    assert transfer["attribution"]["rounds_by_operation"] == [
-        {"operation_id": first_json, "round_lo": 4, "round_hi": 6},
-        {"operation_id": second_json, "round_lo": 1, "round_hi": 3},
+    assert transfer["attribution"]["rounds_by_stream"] == [
+        {"stream_id": first_json, "round_lo": 4, "round_hi": 6},
+        {"stream_id": second_json, "round_lo": 1, "round_hi": 3},
     ]
 
 

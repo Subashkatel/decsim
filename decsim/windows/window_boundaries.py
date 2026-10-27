@@ -8,8 +8,20 @@ whose decode committed it and the side whose decode reads it, by the
 route its run generated (build/routes.py).
 Every send bumps the source's version and each delivery's version, and a
 receiver accepts only the latest, so a late delivery is harmless. A held
-boundary waits for a final result. A strong window whose face is pinned
-reads the same records (pin_strong_face).
+boundary waits for a final result. A provisional boundary that shipped
+is kept too when the policy checks it again, so the final one ships
+when the result is final, and each landing is told to the input checks,
+which compare it with what a decode read (input_checks.py). A strong
+window whose face is pinned reads the same records (pin_strong_face).
+
+A record outlives every delivery it sent. The input of a later task is
+its syndrome plus the corrections the earlier tasks committed on the
+face they share (Bombín et al. 2303.04846 lines 775-788), so a delivery
+still on its hop needs its source's version to be accepted. A window's
+reader across a coupling is on another stream, which may lag its own by
+any number of windows, so a stream that lets its windows go
+(window_release.py) lets go only the records with nothing in flight,
+and the rest once their last delivery lands.
 """
 
 import collections.abc
@@ -25,6 +37,7 @@ import decsim.records.program as program_records
 import decsim.records.routes as route_records
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
+import decsim.windows.input_checks as input_checks_module
 import decsim.windows.routers as routers
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_planner as window_planner
@@ -42,9 +55,9 @@ class BoundaryCourier:
     """Delivers committed boundaries, versioned, held until final.
 
     routes says which hop a boundary takes between two pools. Every
-    hand-on lands on the pool that decodes the dependent window:
-    routes.window_pool, or the entry pool the router names for it, whose
-    rule is fixed before the run (routers.py); a pinned face lands on
+    hand-on lands on the entry pool the router names for the dependent
+    window, whose rule is fixed before the run (routers.py); a pinned
+    face lands on
     the pool of the strong request it pins.
     """
 
@@ -58,12 +71,18 @@ class BoundaryCourier:
     # the facade hears every delivery that landed in a window, and
     # whether it was the last boundary a shipped window owed
     windows = ports.Port(ports.WindowInput)
-    # the router of a machine of several entry pools; None for one
-    router = ports.Port(routers.Router, optional=True)
+    # which entry pool decodes each window (routers.py)
+    router = ports.Port(routers.Router)
+    # what each decode read, checked as each boundary lands
+    input_checks = ports.Port(input_checks_module.InputChecks)
 
     def __init__(self, routes: route_records.Routes) -> None:
         self.routes = routes
         self.record_by_window: dict = {}
+        # source window key -> its deliveries sent and not landed yet
+        self.in_flight_by_source: collections.Counter = collections.Counter()
+        # stream id -> the index its windows before were let go
+        self.let_go_before_by_stream: dict = {}
 
     # ---- what the committer asks
 
@@ -75,15 +94,34 @@ class BoundaryCourier:
         request_key: window_records.DecoderRequestKey,
         is_final: bool,
     ) -> None:
-        """Ship the decoder's boundary to dependent windows, or hold it."""
+        """Ship the decoder's boundary to dependent windows, keep it, or both.
+
+        A final hand-on ends any boundary kept before it, since a
+        window decoded again hands on anew (input_checks.py).
+        """
         boundary = self.interaction.boundary_from_result(result, None)
-        if self.boundary_policy.on_commit(window, final=is_final):
+        is_shipped = self.boundary_policy.on_commit(window, final=is_final)
+        # kept before the send, so a delivery landing at once reads the
+        # record's finality right
+        record = self._record(window.key)
+        record.held = None
+        if self._keeps_for_final(is_shipped, is_final):
+            record.held = HeldBoundary(operation, boundary)
+        if is_shipped:
             self.send(
                 window, operation, boundary, source_request_key=request_key
             )
-            return
-        record = self._record(window.key)
-        record.held = HeldBoundary(operation, boundary)
+
+    def _keeps_for_final(self, is_shipped: bool, is_final: bool) -> bool:
+        """A provisional boundary waits for the final one, unless unchecked.
+
+        One that shipped and is never checked again is final as it is.
+        """
+        if is_final:
+            return False
+        if not is_shipped:
+            return True
+        return self.boundary_policy.rechecks_provisional_boundaries
 
     def ship_held(
         self,
@@ -109,6 +147,13 @@ class BoundaryCourier:
             return False
         return record.committed_request_key is not None
 
+    def committed_pool(self, source_key: tuple) -> window_records.PoolId:
+        """The pool whose decode committed the source window's boundary."""
+        record = self._record(source_key)
+        if record.committed_request_key is None:
+            raise RuntimeError(f"window {source_key} has not committed")
+        return record.committed_request_key.pool
+
     def committed(self, key: tuple) -> object:
         """The boundary the window shipped, or None."""
         record = self.record_by_window.get(key)
@@ -124,11 +169,13 @@ class BoundaryCourier:
         """Let the boundary records of the stream's windows before it go.
 
         The windows are final (window_release.py): each shipped its
-        boundary, and the windows that read one have committed.
+        boundary. A record with a delivery still in flight is kept until
+        that delivery lands (_forget_if_let_go).
         """
+        self.let_go_before_by_stream[stream_id] = window_index
         for key in list(self.record_by_window):
             if key[0] == stream_id and key[1] < window_index:
-                del self.record_by_window[key]
+                self._forget_if_let_go(key)
 
     # ---- delivery
 
@@ -182,6 +229,9 @@ class BoundaryCourier:
         update = self._propose_boundary_update(delivery, destination)
         if update.accepted:
             destination.boundary_in = update.state
+            self.input_checks.boundary_landed(
+                destination, source_key, record.is_final
+            )
 
     # ---- a strong window's pinned face
 
@@ -219,7 +269,7 @@ class BoundaryCourier:
         boundary = self._pinned_boundary(source_key, destination, record)
         positions = _row_positions(model)
         layer_bits = self.planner.syndrome_bits_per_round_of(
-            destination.operation_id
+            destination.stream_id
         )
         destination_info = window_records.WindowInfo.from_window(
             destination,
@@ -334,7 +384,7 @@ class BoundaryCourier:
             delivery_revision=delivery_revision,
             latest_source_revision=record.version,
             latest_delivery_revision=delivery_revision,
-            source_operation_round_count=source_round_count,
+            source_stream_round_count=source_round_count,
             dependency_released=True,
             payload=boundary,
         )
@@ -376,7 +426,7 @@ class BoundaryCourier:
     ) -> transfer_records.TransferAttribution:
         """The window's attribution, naming every round the window reads."""
         round_keys = self.retention.read_keys_for_bounds(
-            window.operation_id, window.start_round, window.buffer_hi, window
+            window.stream_id, window.start_round, window.buffer_hi, window
         )
         return transfer_records.TransferAttribution.for_window(
             window, operation, request_key, tuple(round_keys)
@@ -387,7 +437,7 @@ class BoundaryCourier:
     ) -> None:
         """A pinned face's message landed: the strong window may start.
 
-        The fold was written when the job was built, so only the owed
+        The fold was written when the face was pinned, so only the owed
         count drops here, and the waiting decode is released as a weak
         window's is.
         """
@@ -451,14 +501,13 @@ class BoundaryCourier:
         window_pool = self._pool_of(dependent_key)
         route = self.routes.boundary(source_request_key.pool, window_pool)
         payload_bits = _wire_bits(seam_bits, route)
+        self.in_flight_by_source[window.key] += 1
         self.transfers.send_boundary(
             route.path, attribution, payload_bits, receive
         )
 
     def _pool_of(self, window_key: tuple) -> window_records.PoolId:
         """The entry pool that decodes a window."""
-        if self.router is None:
-            return self.routes.window_pool
         window = self.planner.windows_by_key[window_key]
         return self.router.pool_for(window)
 
@@ -484,7 +533,7 @@ class BoundaryCourier:
         if model is not None:
             detector_positions = model.defect_positions
         layer_bits = self.planner.syndrome_bits_per_round_of(
-            destination.operation_id
+            destination.stream_id
         )
         return window_records.WindowInfo.from_window(
             destination,
@@ -500,7 +549,7 @@ class BoundaryCourier:
     def _receive_boundary(
         self,
         key: tuple,
-        source_operation_id,
+        source_stream_id,
         defects,
         source_key: tuple,
         version: int,
@@ -508,13 +557,14 @@ class BoundaryCourier:
         _transfer=None,
     ) -> None:
         """A delivery landed: merge it if current, release the edge once."""
-        record = self._record(source_key)
+        record = self.record_by_window[source_key]
+        self.in_flight_by_source[source_key] -= 1
         window = self.planner.windows_by_key[key]
         dependency_released = key in record.released_dependents
         latest_delivery_revision = record.delivery_version_by_dependent.get(
             key, 0
         )
-        source_round_count = self.planner.round_count_of(source_operation_id)
+        source_round_count = self.planner.round_count_of(source_stream_id)
         delivery = window_records.BoundaryDelivery(
             source_key=source_key,
             destination_key=key,
@@ -522,18 +572,45 @@ class BoundaryCourier:
             delivery_revision=delivery_version,
             latest_source_revision=record.version,
             latest_delivery_revision=latest_delivery_revision,
-            source_operation_round_count=source_round_count,
+            source_stream_round_count=source_round_count,
             dependency_released=dependency_released,
             payload=defects,
         )
         update = self._propose_boundary_update(delivery, window)
         if update.accepted:
-            window.boundary_in = update.state
-            if update.release_dependency:
-                record.released_dependents.add(key)
-                window.deps_remaining -= 1
+            self._land(window, update, record, source_key)
         is_unblocked = self._is_unblocked_now(window)
+        self._forget_if_let_go(source_key)
         self.windows.accept_boundary(key, is_unblocked)
+
+    def _land(
+        self,
+        window: window_records.Window,
+        update: window_records.BoundaryUpdate,
+        record: "_BoundaryRecord",
+        source_key: tuple,
+    ) -> None:
+        """A current delivery merges, releases its edge once, is checked.
+
+        It is the source's latest version, so the record's finality is
+        the delivery's.
+        """
+        window.boundary_in = update.state
+        if update.release_dependency:
+            record.released_dependents.add(window.key)
+            window.deps_remaining -= 1
+        self.input_checks.boundary_landed(window, source_key, record.is_final)
+
+    def _forget_if_let_go(self, source_key: tuple) -> None:
+        """Drop a let-go window's record once no delivery of it is in flight."""
+        stream_id, window_index = source_key
+        let_go_before = self.let_go_before_by_stream.get(stream_id, 0)
+        if window_index >= let_go_before:
+            return
+        if self.in_flight_by_source[source_key] > 0:
+            return
+        del self.in_flight_by_source[source_key]
+        del self.record_by_window[source_key]
 
     @staticmethod
     def _is_unblocked_now(window: window_records.Window) -> bool:
@@ -598,6 +675,16 @@ class _BoundaryRecord:
         self.delivery_version_by_dependent: dict = {}
         self.released_dependents: set = set()
         self.held: Optional[HeldBoundary] = None
+
+    @property
+    def is_final(self) -> bool:
+        """The shipped boundary is final once none is kept to ship after it.
+
+        What is kept changes only with a new version, or before the
+        first ships (hand_on, ship_held), so this is the finality of the
+        latest version shipped.
+        """
+        return self.held is None
 
 
 class _WindowInfoView(collections.abc.Mapping):

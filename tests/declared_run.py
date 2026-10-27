@@ -526,7 +526,7 @@ class DeclaredConfidenceDecoder(decoder_module.DecoderBase):
             gap=confidence_gap, source=DECLARED_CONFIDENCE_SOURCE
         )
         return decoding_records.DecodeResult(
-            job.operation_id, job.window_id, soft_output=soft_output
+            job.stream_id, job.window_id, soft_output=soft_output
         )
 
 
@@ -668,15 +668,18 @@ class OccupancyProbe:
 
     def __init__(self, window_manager):
         self.window_manager = window_manager
-        self.weak_timeline = []
-        self.strong_timeline = []
+        self.entry_timeline = []
+        self.landing_timeline = []
 
     def observe(self, tick):
         """Note each store's occupancy whenever it changed."""
-        weak_store = self.window_manager.retention.weak_store
-        self._note(self.weak_timeline, tick, weak_store)
-        strong_store = self.window_manager.retention.strong_store
-        self._note(self.strong_timeline, tick, strong_store)
+        retention = self.window_manager.retention
+        entry_stores = retention.entry_stores()
+        entry_store = _first_or_none(entry_stores)
+        self._note(self.entry_timeline, tick, entry_store)
+        landing_stores = retention.landing_stores()
+        landing_store = _first_or_none(landing_stores)
+        self._note(self.landing_timeline, tick, landing_store)
 
     def _note(self, timeline, tick, store):
         """Append the occupancy when this store has a new one."""
@@ -705,3 +708,10 @@ def reaction_ticks(machine) -> tuple:
         record.accepted_ticks,
         record.committed_ticks,
     )
+
+
+def _first_or_none(stores: tuple):
+    """The first store listed, the entry's or its edge's; None for none."""
+    if not stores:
+        return None
+    return stores[0]

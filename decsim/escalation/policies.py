@@ -9,9 +9,11 @@ re-decode, and the decoder manager owns the units and cancellation.
 
 from typing import Optional
 
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.escalation.verdicts as verdicts
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.seeds as seed_records
 import decsim.records.windows as window_records
 import decsim.refusals as refusals
 
@@ -21,8 +23,9 @@ class Switching:
 
     verdict keeps or escalates each weak result (verdicts.py), by
     default on its gap against the threshold, where a result without a
-    soft output escalates. run_both_at_once starts a speculative strong
-    decode with the weak job and cancels it on a keep (Step 1);
+    soft output escalates. reads_threshold says whether that row decides
+    on the threshold at all. run_both_at_once starts a speculative
+    strong decode with the weak job and cancels it on a keep (Step 1);
     otherwise the strong re-decode starts at the verdict, after the
     edge's forward hop. check_plan refuses, once at
     build, a run shape the escalation cannot serve.
@@ -52,6 +55,7 @@ class Switching:
         self.threshold = threshold
         self.run_both_at_once = run_both_at_once
         self.verdict = verdict
+        self.reads_threshold = reads_threshold
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse a run shape the escalation cannot serve."""
@@ -59,15 +63,23 @@ class Switching:
         if self.run_both_at_once:
             _refuse_batches_beside_run_both(plan)
         if not plan.is_absorbing_strong_window:
-            # the boundaries the policy ships are the entry pool's
-            if plan.leaves_the_entry_pool:
+            # the boundaries the policy ships are the entry pools'
+            if plan.leaves_an_entry_pool:
                 _refuse_eager_serial_boundaries(plan.boundary_policy)
+            if plan.boundary_policy.rechecks_provisional_boundaries:
+                self._refuse_checked_boundary_contradictions()
             return
         self._refuse_absorbing_window_contradictions(plan)
         _refuse_absorbing_window_scheme(
             plan.strong_window, plan.scheme, plan.boundary_policy
         )
         _refuse_absorbing_window_run(plan)
+
+    def run_seed_children(self) -> tuple:
+        """The verdict, which a seeded row draws from (verdicts.py)."""
+        path = (seed_records.RunSeedPathSegment("field", "verdict"),)
+        child = seed_records.RunSeedChild(path, self.verdict)
+        return (child,)
 
     def decodes_both_at_once(self, window: window_records.Window) -> bool:
         """Whether the strong tier starts beside the weak one (Step 1)."""
@@ -91,6 +103,57 @@ class Switching:
     ) -> None:
         """The threshold source hears the strong tier's answer."""
         self.threshold.learn_from_strong_result(window_key, result)
+
+    def verdict_without_learning(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> decoding_records.Verdict:
+        """The verdict row's decision now, on a copy of the threshold.
+
+        The copy is fixed at the threshold now, so the source learns
+        nothing and audits nothing, as a predictor's lookup leaves it
+        untaught (gem5 src/cpu/pred/conditional.hh).
+        """
+        threshold_nats = self.threshold_now()
+        return self.verdict_at(job, result, threshold_nats)
+
+    def verdict_at(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        threshold_nats: float,
+    ) -> decoding_records.Verdict:
+        """The verdict row's decision at a fixed threshold: nothing learns."""
+        fixed = threshold_sources.FixedThreshold(threshold_nats)
+        return self.verdict.decide(job, result, fixed)
+
+    def threshold_now(self) -> float:
+        """The threshold the next verdict reads, in nats."""
+        summary = self.threshold.summary()
+        return summary["threshold"]
+
+    def _refuse_checked_boundary_contradictions(self) -> None:
+        """Checked boundaries start no strong work on a provisional input.
+
+        A window decoded on a boundary not final yet may be decoded
+        again (windows/input_checks.py), so its verdict waits; these
+        start the strong decode or learn from the verdict at once.
+        """
+        if self.run_both_at_once:
+            raise ValueError(
+                "checked boundaries escalate a window only once the "
+                "boundaries its decode read are final; run_both_at_once "
+                "starts the strong decode with every window (the two "
+                "policies contradict; pick one)"
+            )
+        if self.threshold.audits_by_escalating:
+            raise ValueError(
+                "online threshold calibration audits each window's "
+                "verdict; under checked boundaries a window may be "
+                "decoded again and its first verdict dropped, which the "
+                "audit would count; use a fixed threshold"
+            )
 
     def _refuse_absorbing_window_contradictions(
         self, plan: decoding_records.RunShape
@@ -152,11 +215,14 @@ def _refuse_flush_terminal(scheme) -> None:
 
 
 def _refuse_eager_serial_boundaries(boundary_policy) -> None:
-    if boundary_policy.ships_provisional_boundaries:
+    """A provisional boundary that ships must be checked again."""
+    if not boundary_policy.ships_provisional_boundaries:
+        return
+    if not boundary_policy.rechecks_provisional_boundaries:
         raise ValueError(
-            "serial switching requires held boundaries: an eagerly "
-            "shipped provisional boundary is never corrected when "
-            "the strong result later revises the window"
+            "serial switching requires held or checked boundaries: an "
+            "eagerly shipped provisional boundary is never corrected "
+            "when the strong result later revises the window"
         )
 
 

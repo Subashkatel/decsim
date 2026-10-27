@@ -26,13 +26,13 @@ BUFFER_ROUNDS = 2
 def _empty_plan() -> window_records.WindowPlan:
     return window_records.WindowPlan(
         windows={},
-        window_count={},
-        op_windows={},
-        successors={},
-        rounds_by_operation={},
+        window_count_by_stream={},
+        windows_by_stream={},
+        successors_by_stream={},
+        rounds_by_stream={},
         total_windows=0,
-        windowed_by_operation={},
-        batch_preceding_idle_rounds_by_operation={},
+        windowed_by_stream={},
+        batch_preceding_idle_rounds_by_stream={},
     )
 
 
@@ -40,18 +40,16 @@ def _resolved(operation_id, round_count: int):
     geometry = types.SimpleNamespace(
         commit_round_count=COMMIT_ROUNDS,
         buffer_round_count=BUFFER_ROUNDS,
-        code_name="surface",
     )
     return types.SimpleNamespace(
         operation_id=operation_id,
         code_geometry=geometry,
         round_count=round_count,
-        spatial_node_count=17,
     )
 
 
-def _stream(operation_id="stream"):
-    return program_records.Operation(operation_id, "stream", (0,))
+def _stream(stream_id="stream"):
+    return program_records.Operation(stream_id, "stream", (0,))
 
 
 class _FiniteSource:
@@ -115,6 +113,7 @@ def _planner(source=None) -> window_planner.WindowPlanner:
     plan = _empty_plan()
     planner = window_planner.WindowPlanner(resolved, plan, ())
     planner.scheme = scheme
+    planner.layouts = scheme.stream_layouts()
     planner.models = models
     planner.start()
     return planner
@@ -188,7 +187,6 @@ def test_a_finite_source_fixes_the_stream_windows_in_its_own_order(
     stream = _stream()
     limit = planner.register_stream(stream, physical_round_limit)
     assert limit == 5
-    assert planner.is_finite_stream("stream")
     assert planner.grow_stream("stream", 0, None) == []
     created = planner.grow_stream("stream", 5, None)
     geometries = [
@@ -206,11 +204,25 @@ def test_the_seal_clips_the_window_holding_the_last_round():
     planner.grow_stream("stream", 5, 5)
     first, second = planner.windows_of("stream")
     assert (second.commit_lo, second.commit_hi) == (4, 5)
-    clipped = planner.trim_stream_tail("stream", 5)
-    assert clipped is second
+    change = planner.close_stream_tail("stream", 5)
+    assert change.clipped == (second,)
     assert (second.commit_hi, second.buffer_hi, second.round_count) == (5, 7, 4)
     assert (first.commit_hi, first.buffer_hi) == (3, 5)
-    assert planner.trim_stream_tail("stream", 20) is None
+
+
+def test_a_cut_keeps_the_read_start_a_restart_moved_back():
+    planner = _planner()
+    stream = _stream()
+    planner.register_stream(stream, None)
+    planner.grow_stream("stream", 5, None)
+    restart = planner.reslice_window(("stream", 1), 2, None)
+    assert restart.round_count == 7
+
+    moved = planner.cut_stream_after("stream", 6)
+
+    assert moved == []
+    assert (restart.buffer_lo, restart.buffer_hi) == (2, 8)
+    assert restart.round_count == 7
 
 
 @pytest.mark.parametrize("boundary", [1, 2, 3, 4, 5, 6, 7])
@@ -227,11 +239,12 @@ def test_a_closed_boundary_ends_a_commit_region_and_restarts_the_stride(
     stream = _stream()
     planner.register_stream(stream, None)
     planner.grow_stream("stream", boundary, None)
-    clipped = planner.trim_stream_tail("stream", boundary)
+    change = planner.close_stream_tail("stream", boundary)
+    (clipped,) = change.clipped
     assert clipped.commit_hi == boundary
     stream_round_count = boundary + 7
     planner.grow_stream("stream", stream_round_count, stream_round_count)
-    planner.trim_stream_tail("stream", stream_round_count)
+    planner.close_stream_tail("stream", stream_round_count)
     commits = _commit_spans(planner)
     after = _spans_after(commits, boundary)
     first_round_after = boundary + 1
@@ -279,7 +292,7 @@ def test_a_cut_on_a_window_edge_leaves_the_stride():
     stream = _stream()
     planner.register_stream(stream, None)
     planner.grow_stream("stream", 4, None)
-    assert planner.cut_stream_after("stream", 6) is None
+    assert planner.cut_stream_after("stream", 6) == []
     planner.grow_stream("stream", 7, None)
     commits = _commit_spans(planner)
     assert commits == [(1, 3), (4, 6), (7, 9)]
@@ -382,7 +395,7 @@ def _shifted_spans(geometries: tuple, round_shift: int) -> list:
 def test_idle_rounds_fold_only_into_a_batch_style_operation():
     plan = _empty_plan()
     window = window_records.Window(
-        operation_id=7,
+        stream_id=7,
         window_index=0,
         commit_lo=1,
         commit_hi=6,
@@ -390,7 +403,7 @@ def test_idle_rounds_fold_only_into_a_batch_style_operation():
         round_count=6,
     )
     plan.windows[(7, 0)] = window
-    plan.batch_preceding_idle_rounds_by_operation[7] = True
+    plan.batch_preceding_idle_rounds_by_stream[7] = True
     built = built_window_models.BuiltWindowModels()
     models = window_planner.WindowModels(built)
     models.decoder = _Decoder()
@@ -410,7 +423,7 @@ def _window_reading_from(index: int, buffer_lo: int, commit_lo: int):
     buffer_hi = commit_lo + 4
     round_count = buffer_hi - buffer_lo + 1
     return window_records.Window(
-        operation_id=7,
+        stream_id=7,
         window_index=index,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -432,7 +445,7 @@ def test_the_start_floors_follow_out_of_order_starts_and_a_reslice():
     for index, (buffer_lo, commit_lo) in enumerate(starts):
         window = _window_reading_from(index, buffer_lo, commit_lo)
         plan.windows[(7, index)] = window
-    plan.op_windows[7] = [0, 1, 2, 3]
+    plan.windows_by_stream[7] = [0, 1, 2, 3]
     planner = window_planner.WindowPlanner((), plan, ())
     floors = planner.start_floors_of(7)
     assert list(floors) == [1, 4, 4, 9]

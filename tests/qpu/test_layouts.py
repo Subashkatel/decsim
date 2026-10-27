@@ -49,16 +49,6 @@ class RecordingLayout:
         self.calls.append(("codes", None))
         return [self.code]
 
-    def spatial_nodes_for(self, operation, *, base_spatial_node_count):
-        self.calls.append(("spatial_nodes_for", operation))
-        return base_spatial_node_count
-
-    def patch_spatial_nodes_for(
-        self, patch_identity, *, base_spatial_node_count
-    ):
-        self.calls.append(("patch_spatial_nodes_for", patch_identity))
-        return base_spatial_node_count
-
     def resources_for(self, operation):
         self.calls.append(("resources_for", operation))
         qubits = frozenset(operation.qubits)
@@ -125,10 +115,8 @@ def test_a_layout_written_outside_decsim_hears_every_hook_of_a_run():
     view = program_records.OperationPlanningView.from_operation(operation)
     assert calls_by_name["codes"] == [None]
     assert calls_by_name["code_for_operation"] == [view]
-    assert calls_by_name["spatial_nodes_for"] == [view]
     assert calls_by_name["resources_for"] == [view]
     assert calls_by_name["code_for_patch"] == [11]
-    assert calls_by_name["patch_spatial_nodes_for"] == [11]
 
 
 def test_a_layout_that_declares_two_codes_is_refused():

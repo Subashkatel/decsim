@@ -27,6 +27,19 @@ CONTROLLER_TO_QPU = "controller_to_qpu"  # the instruction back
 
 
 @dataclass(frozen=True)
+class StoreHop:
+    """A hop that lands in a store: its row, and where its bits sat.
+
+    A store's controller write is one; each escalate edge into the
+    store's pool lands its regions over its own (escalation/
+    strong_redecode.py).
+    """
+
+    path_name: LinkPath
+    source_name: str
+
+
+@dataclass(frozen=True)
 class RequestTransferRelation:
     """Provenance tying one transfer to the decoder request it serves."""
 
@@ -49,44 +62,62 @@ class BoundaryTransferRelation:
 
 
 @dataclass(frozen=True)
+class RoundCopyRelation:
+    """Provenance of a round's copy into another pool's store.
+
+    A window of that pool reads the round, so the controller writes it
+    there too (windows/round_retention.py CopiedReads); a per-round
+    measure counts each round's own write once and skips its copies.
+    """
+
+    store_name: str
+
+
+@dataclass(frozen=True)
 class TransferAttribution:
     """Whose transfer this is.
 
-    The range counts past the operation's end the way its window does;
-    round_keys names every round the bits carry, a lookahead window's
-    next-operation rounds under their own operation.
+    owner_id is the decode stream whose rounds or window the bits carry,
+    or the operation a decision or command is for. The range counts past
+    the stream's end the way its window does; round_keys names every
+    round the bits carry, a lookahead window's next-stream rounds under
+    their own stream.
     """
 
-    # An operation id is whatever the front end chose; the links never
-    # look inside it.
-    operation_id: Any
+    # An id is whatever the front end chose; the links never look inside
+    # it.
+    owner_id: Any
     patch_ids: tuple
     window_id: Optional[int]
     first_round: Optional[int]
     last_round: Optional[int]
     relation: Optional[
-        Union[RequestTransferRelation, BoundaryTransferRelation]
+        Union[
+            RequestTransferRelation,
+            BoundaryTransferRelation,
+            RoundCopyRelation,
+        ]
     ] = None
     round_keys: tuple = ()
 
     @classmethod
     def for_round(
         cls,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         patch_ids: tuple,
         round_index: int,
     ) -> "TransferAttribution":
-        """One round of one operation, its patches in stable order."""
+        """One round of one stream, its patches in stable order."""
         ordered_patch_ids = tuple(
             sorted(patch_ids, key=identity_records.stable_identity_bytes)
         )
         return cls(
-            operation_id=operation_id,
+            owner_id=stream_id,
             patch_ids=ordered_patch_ids,
             window_id=None,
             first_round=round_index,
             last_round=round_index,
-            round_keys=((operation_id, round_index),),
+            round_keys=((stream_id, round_index),),
         )
 
     @classmethod
@@ -104,7 +135,7 @@ class TransferAttribution:
         first_round, last_round = _read_range(window)
         relation = RequestTransferRelation(request_key)
         return cls(
-            operation_id=operation.id,
+            owner_id=window.stream_id,
             patch_ids=tuple(ordered_patches),
             window_id=window.window_index,
             first_round=first_round,
@@ -134,7 +165,7 @@ class TransferAttribution:
         first_round, last_round = _read_range(window)
         relation = RequestTransferRelation(request_key)
         return cls(
-            operation_id=job.operation_id,
+            owner_id=job.stream_id,
             patch_ids=patch_ids,
             window_id=job.window_id,
             first_round=first_round,
@@ -160,14 +191,14 @@ class TransferAttribution:
         round_keys = []
         for packet in carried:
             fragments.extend(packet.fragments)
-            round_keys.append((packet.operation_id, packet.round_index))
+            round_keys.append((packet.stream_id, packet.round_index))
         patch_ids = round_records.fragment_patch_ids(fragments)
         ordered_patch_ids = tuple(
             sorted(patch_ids, key=identity_records.stable_identity_bytes)
         )
         relation = RequestTransferRelation(region.request_key)
         return cls(
-            operation_id=first_packet.operation_id,
+            owner_id=first_packet.stream_id,
             patch_ids=ordered_patch_ids,
             window_id=region.request_key.window_id,
             first_round=first_packet.round_index,
@@ -182,7 +213,7 @@ class TransferAttribution:
     ) -> "TransferAttribution":
         """The packed round's transfer: every patch of the round."""
         patch_ids = round_records.fragment_patch_ids(packet.fragments)
-        return cls.for_round(packet.operation_id, patch_ids, packet.round_index)
+        return cls.for_round(packet.stream_id, patch_ids, packet.round_index)
 
 
 class PayloadSelection(Enum):

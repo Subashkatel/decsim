@@ -41,11 +41,9 @@ BITS_PER_ROUND = 2
 PROBE_ROUND = ("probe", 0)
 
 
-def packet(
-    round_index: int, operation_id=1
-) -> round_records.SyndromeRoundPacket:
+def packet(round_index: int, stream_id=1) -> round_records.SyndromeRoundPacket:
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=operation_id,
+        stream_id=stream_id,
         patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0),
@@ -53,7 +51,7 @@ def packet(
         fragment_index=0,
     )
     return round_records.SyndromeRoundPacket(
-        operation_id, round_index, (fragment,)
+        stream_id, round_index, (fragment,)
     )
 
 
@@ -67,7 +65,7 @@ def packed(round_index: int) -> round_records.PackedRound:
 def unsized_packet(round_index: int) -> round_records.SyndromeRoundPacket:
     """A timing-only round: it carries no bits and states no size."""
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=None,
@@ -231,9 +229,9 @@ class PacketStoreWithHoldCounts:
 
 
 def sized_packet(round_key, bits: int) -> round_records.SyndromeRoundPacket:
-    operation_id, round_index = round_key
+    stream_id, round_index = round_key
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=operation_id,
+        stream_id=stream_id,
         patch_ids=(0,),
         round_index=round_index,
         bits=None,
@@ -241,7 +239,7 @@ def sized_packet(round_key, bits: int) -> round_records.SyndromeRoundPacket:
         fragment_index=0,
     )
     return round_records.SyndromeRoundPacket(
-        operation_id, round_index, (fragment,)
+        stream_id, round_index, (fragment,)
     )
 
 
@@ -335,6 +333,26 @@ def test_an_unheld_round_is_freed_on_arrival_and_a_held_one_is_not():
     assert freed_unheld is True
     assert freed_held is False
     assert the_store.occupancy == 1
+
+
+def test_a_stream_closed_while_a_hold_names_it_is_served_until_it_ends():
+    """A strong decode let run out still reads the rounds of a closed stream.
+
+    The stream's result is delivered and its store asked to close it;
+    the hold's reader still gets its rounds, and the stream closes when
+    that hold ends.
+    """
+    the_store = store()
+    reads = decoding_records.WindowReads((1, 0))
+    the_store.register_hold(reads, [(1, 2)])
+
+    the_store.close_stream(1)
+    is_served_while_held = the_store.has_stream(1)
+    the_store.release_hold(reads)
+    is_served_after = the_store.has_stream(1)
+
+    assert is_served_while_held is True
+    assert is_served_after is False
 
 
 def test_settlement_reports_a_hold_on_a_round_never_written():

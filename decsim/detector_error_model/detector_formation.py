@@ -38,7 +38,8 @@ def build_formation_table(
     """Read the recipe of every detector and observable off the circuit.
 
     measurement_rounds is the front end's packet schedule, one round per
-    absolute measurement index. detector_rounds is each detector's declared
+    absolute measurement index; None or empty reads each measurement's
+    round off its DETECTOR group. detector_rounds is each detector's declared
     round in 1..round_count; a detector forms only once every bit it reads
     has arrived, so it may not precede them. live_reach marks a live
     stream's table. A table is kept by its circuit's text and these
@@ -519,8 +520,12 @@ def _round_of_each_measurement(
     round_count: int,
     measurement_rounds: Optional[dict[int, int]],
 ) -> tuple[list[int], Optional[int]]:
-    """One round per absolute measurement, declared or read off the circuit."""
-    if measurement_rounds is None:
+    """One round per absolute measurement, declared or read off the circuit.
+
+    An empty schedule declares nothing, as a finite circuit left without
+    one does (records/workload.py FiniteCircuit).
+    """
+    if not measurement_rounds:
         reader = _MeasurementRoundReader(round_count)
         return reader.read(circuit)
     measurement_count = 0

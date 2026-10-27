@@ -22,9 +22,11 @@ import decsim.qpu.stim_device as stim_device
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import decsim.topology.fabrics as fabrics
 import decsim.topology.graph_layout as graph_layout
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.built_window_models as built_window_models
+import decsim.windows.routers as routers
 import decsim.windows.schemes.sandwich as sandwich_scheme
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
@@ -108,10 +110,10 @@ def _chained_stim_run(terminal_policy: str) -> machine_module.Machine:
     return machine_module.Machine.build(graph, 0)
 
 
-def test_a_modelled_window_never_reads_the_next_operations_rounds():
+def test_a_modelled_window_never_reads_the_next_streams_rounds():
     """Its model ends at its own last round, so its decode refuses it."""
     lookahead = _chained_stim_run("lookahead")
-    with pytest.raises(RuntimeError, match="does not match job operation"):
+    with pytest.raises(RuntimeError, match="does not match job stream"):
         lookahead.run()
     machine = _chained_stim_run("flush")
     machine.run()
@@ -151,22 +153,19 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
 def _stream_planner() -> window_planner.WindowPlanner:
     plan = window_records.WindowPlan(
         windows={},
-        window_count={},
-        op_windows={},
-        successors={},
-        rounds_by_operation={},
+        window_count_by_stream={},
+        windows_by_stream={},
+        successors_by_stream={},
+        rounds_by_stream={},
         total_windows=0,
-        windowed_by_operation={},
-        batch_preceding_idle_rounds_by_operation={},
+        windowed_by_stream={},
+        batch_preceding_idle_rounds_by_stream={},
     )
-    geometry = types.SimpleNamespace(
-        commit_round_count=3, buffer_round_count=2, code_name="surface"
-    )
+    geometry = types.SimpleNamespace(commit_round_count=3, buffer_round_count=2)
     resolved = types.SimpleNamespace(
         operation_id="stream",
         code_geometry=geometry,
         round_count=9,
-        spatial_node_count=17,
     )
     cache = built_window_models.BuiltWindowModels()
     built = window_planner.WindowModels(cache)
@@ -174,6 +173,7 @@ def _stream_planner() -> window_planner.WindowPlanner:
     scheme = sliding_scheme.SlidingWindowScheme()
     planner = window_planner.WindowPlanner([resolved], plan, ())
     planner.scheme = scheme
+    planner.layouts = scheme.stream_layouts()
     planner.models = built
     planner.start()
     return planner
@@ -272,7 +272,7 @@ def test_a_round_arriving_after_the_last_window_committed_is_refused():
     """
     machine = _weak_run()
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=0,
+        stream_id=0,
         patch_ids=(0,),
         round_index=2,
         bits=None,
@@ -283,3 +283,54 @@ def test_a_round_arriving_after_the_last_window_committed_is_refused():
     window_manager = machine.windows.window_manager
     with pytest.raises(RuntimeError, match="round 2 of M arrived after"):
         window_manager.accept_window_input(packet)
+
+
+def test_a_lookahead_window_reads_its_successors_rounds_copied_to_its_pool():
+    """Operation 1 decodes on fpga_b, whose store is on the host.
+
+    Its last window looks ahead into operation 2's rounds 1-3, which
+    enter at weak; the controller copies them into fpga_b's store as it
+    writes them (controller/round_destinations.py), and each copy's
+    landing wakes the windows that read across the end it lands past.
+    """
+    operations = [
+        declared_run.memory_operation(1),
+        declared_run.memory_operation(2, decoder_boundary_predecessors=(1,)),
+    ]
+    windows = window_settings.WindowSettings(terminal_policy="lookahead")
+    graph = declared_run.weak_only_graph(
+        rounds=6, operations=operations, windows=windows
+    )
+    algorithm = decoders.PresetLatencyDecoder.Settings(
+        declared_run.DECLARED_MICROSECONDS["weak"]
+    )
+    fpga_b = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE
+    )
+    rule = routers.ByPatch.Settings(pool_by_patch=((1, "fpga_b"), (2, "weak")))
+    stored = machines.with_store_per_pool(
+        graph, rule, (("fpga_b", fpga_b),), site=fabrics.HOST
+    )
+    machine = machine_module.Machine.build(stored, 0)
+
+    result = machine.run()
+
+    transfers = result.link_traffic["transfers"]
+    copy_into = {"copy_into": "fpga_b_buffer"}
+    copies = [
+        row for row in transfers if row["attribution"]["relation"] == copy_into
+    ]
+    copied = [row["attribution"]["rounds_by_stream"] for row in copies]
+    reads = [record.last_rounds_read for record in _fetches_of(machine, 1)]
+    assert result.terminal_status == "complete"
+    assert [spans[0]["round_lo"] for spans in copied] == [1, 2, 3]
+    assert reads == [((1, 6),), ((1, 6), (2, 3))]
+
+
+def _fetches_of(machine, stream_id) -> list:
+    """The fetch stage of each decode of one stream's windows, in order."""
+    fetches = []
+    for record in machine.observation.stages.records:
+        if (record.stage, record.stream_id) == ("fetch", stream_id):
+            fetches.append(record)
+    return fetches

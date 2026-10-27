@@ -22,6 +22,7 @@ import decsim.escalation.strong_window_shapes as shapes
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.routes as route_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.statistics.registry as statistics_registry
 import tests.declared_run as declared_run
@@ -37,11 +38,13 @@ EDGE_HOPS = route_records.EdgeHops(
     "weak_to_strong",
     "strong_to_weak",
 )
+# the edge's forward hop, its rounds read out of the weak store
+ARRIVAL = transfer_records.StoreHop("weak_to_strong", "weak_buffer")
 
 
 def _weak_job(owed_boundaries: int = 0) -> decoding_records.DecodeJob:
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=2,
         commit_lo=4,
         commit_hi=6,
@@ -50,7 +53,7 @@ def _weak_job(owed_boundaries: int = 0) -> decoding_records.DecodeJob:
     )
     window.deps_remaining = owed_boundaries
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=2,
         round_count=6,
         window=window,
@@ -62,7 +65,7 @@ def _strong_job(sequence: int) -> decoding_records.DecodeJob:
         1, 2, window_records.STRONG_POOL_ID, sequence
     )
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=2,
         round_count=9,
         label="strong(mem1 W2)",
@@ -99,12 +102,12 @@ class _Shape:
 
     def release_conditions(self, assignment):
         del assignment
-        stored_data_of_operation = None
+        stored_data_of_stream = None
         if self.missing_rounds:
-            stored_data_of_operation = 1
+            stored_data_of_stream = 1
         return pending_module.ReleaseConditions(
             committed_windows=self.waits_on,
-            stored_data_of_operation=stored_data_of_operation,
+            stored_data_of_stream=stored_data_of_stream,
             name="far_boundary",
             released_description="far-side weak boundary determined",
         )
@@ -142,12 +145,13 @@ class _DecoderOutput:
 class _Retention:
     """The weak syndrome buffer's rounds, one three-bit fragment each."""
 
-    def escalated_rounds(self, round_keys, target=None):
-        del target
+    def escalated_rounds(self, stream_id, round_keys, target=None):
+        del stream_id, target
+
         packets = []
-        for operation_id, round_index in round_keys:
+        for stream_id, round_index in round_keys:
             fragment = round_records.RetainedSyndromeFragment(
-                operation_id=operation_id,
+                stream_id=stream_id,
                 patch_ids=(0,),
                 round_index=round_index,
                 bits=(1, 0, 1),
@@ -155,27 +159,39 @@ class _Retention:
                 fragment_index=0,
             )
             packet = round_records.SyndromeRoundPacket(
-                operation_id, round_index, (fragment,)
+                stream_id, round_index, (fragment,)
             )
             packets.append(packet)
         return tuple(packets)
 
 
 class _StrongReceiver:
-    """The strong syndrome buffer's receiving end, recording the landing."""
+    """The strong syndrome buffer's receiving end, recording the landing.
+
+    A reserved round is coming until the store holds it.
+    """
 
     def __init__(self) -> None:
         self.reserved = 0
         self.reserved_bits = 0
         self.landed = []
+        self.coming = set()
 
     def reserve_region(self, region):
         self.reserved += len(region.packets)
         self.reserved_bits += region.wire_bits
+        self.coming.update(region.round_keys)
 
-    def receive_region(self, region, on_stored):
-        self.landed.append(region)
+    def is_round_coming(self, round_key) -> bool:
+        return round_key in self.coming
+
+    def receive_region(self, region, on_stored, arrival):
+        self.landed.append((region, arrival))
+        self.store(region)
         on_stored()
+
+    def store(self, region):
+        self.coming.difference_update(region.round_keys)
 
 
 class _FormingStrongReceiver(_StrongReceiver):
@@ -183,11 +199,13 @@ class _FormingStrongReceiver(_StrongReceiver):
 
     def __init__(self) -> None:
         _StrongReceiver.__init__(self)
-        self.stored_callbacks = []
+        self.forming = []
 
-    def receive_region(self, region, on_stored):
-        self.landed.append(region)
-        self.stored_callbacks.append(on_stored)
+    def receive_region(self, region, on_stored, arrival):
+        # the redecode needs no word back; the round stays coming instead
+        del on_stored
+        self.landed.append((region, arrival))
+        self.forming.append(region)
 
 
 class _StrongOutput:
@@ -230,7 +248,7 @@ def _redecode(shape, receiver_row=_StrongReceiver):
     strong_output = _StrongOutput()
     queue = _DecodeQueue()
     verdict = _Verdict()
-    redecode = strong_redecode_module.StrongRedecode(engine, EDGE_HOPS)
+    redecode = strong_redecode_module.StrongRedecode(engine, EDGE_HOPS, ARRIVAL)
     redecode.shape = shape
     redecode.pending = pending_module.PendingStrongWindows()
     redecode.retention = _Retention()
@@ -291,11 +309,11 @@ class _Builder:
     def __init__(self) -> None:
         self.sequence = 20
 
-    def new_request_key(self, operation_id, window_id, pool):
+    def new_request_key(self, stream_id, window_id, pool):
         """The next request key of the run."""
         self.sequence += 1
         return window_records.DecoderRequestKey(
-            operation_id, window_id, pool, self.sequence
+            stream_id, window_id, pool, self.sequence
         )
 
 
@@ -593,8 +611,8 @@ def test_a_held_windows_missing_rounds_are_carried_up_once_and_land():
     assert region.round_keys == REGION_ROUND_KEYS
     assert region.wire_bits == 9
     assert redecode.strong_receiver.reserved == 3
-    assert redecode.strong_receiver.landed == [region]
-    assert redecode.carried_round_keys == set()
+    assert redecode.strong_receiver.landed == [(region, ARRIVAL)]
+    assert redecode.strong_receiver.coming == set()
     assert _call_names(queue) == ["await", "enqueue"]
     assert not redecode.has_pending()
 
@@ -620,13 +638,13 @@ def test_a_region_still_forming_at_its_landing_is_not_carried_again():
     _region, landed = output.regions[0]
     landed()
     redecode.submit_if_stored_data_releases(1)
-    carried_while_forming = set(redecode.carried_round_keys)
-    (stored,) = receiver.stored_callbacks
-    stored()
+    coming_while_forming = set(receiver.coming)
+    (forming,) = receiver.forming
+    receiver.store(forming)
 
     assert len(output.regions) == 1
-    assert carried_while_forming == set(REGION_ROUND_KEYS)
-    assert redecode.carried_round_keys == set()
+    assert coming_while_forming == set(REGION_ROUND_KEYS)
+    assert receiver.coming == set()
 
 
 class _NoConditionRedo(shapes.RedoWindow):

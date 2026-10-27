@@ -28,6 +28,7 @@ import pytest
 
 import decsim.confidence.complementary as complementary
 import decsim.decoders.belief_matching.decoder as belief_matching
+import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
@@ -356,7 +357,7 @@ def _log_index(machine, needle: str) -> int:
 
 
 def _claim(machine, window_index: int):
-    store = machine.windows.window_manager.retention.weak_store
+    store = machine.windows.window_manager.retention.store_of_stream(1)
     claim = decoding_records.PotentialRestart((1, window_index))
     if not store.has_hold(claim):
         return None
@@ -506,6 +507,15 @@ def test_a_re_read_width_with_no_referent_is_refused():
         )
 
 
+def test_a_timing_only_strong_tier_over_a_decoding_weak_tier_is_refused():
+    """A timing-only redo has no value to replace the weak one with."""
+    decoding = weak_base_switching(3, 0.01, 1.0)
+    timing_only = decoders.PresetLatencyDecoder.Settings(10.0)
+    mixed = decoding.with_settings(machines.STRONG_POOL, algorithm=timing_only)
+    with pytest.raises(ValueError, match="whose redo would leave"):
+        machine_module.Machine.build(mixed, 0)
+
+
 def test_the_double_window_lands_in_the_declared_backlog_regime():
     """1 us rounds against a 10 us weak decode: W1 escalates with W2 landed.
 
@@ -653,13 +663,13 @@ def test_the_shipped_components_fill_the_shapes_six_window_side_ports():
 
 
 def test_a_courier_that_only_pins_a_face_fills_the_courier_port():
-    """The port lists the one method the escalation side calls.
+    """The port lists the two methods the escalation side calls.
 
-    strong_job_payloads calls pin_strong_face and nothing else
-    (strong_window_shapes.py, the walk over folded_boundaries), so a
-    courier supplied from outside decsim answers the whole port with
-    that one method. STYLE.md rule 7: a port carries the methods one
-    component needs from another.
+    The redo window asks which pool committed a face, to pin it when
+    that side learns of the escalation, and pins it (strong_window_
+    shapes.py), so a courier supplied from outside decsim answers the
+    whole port with those two. STYLE.md rule 7: a port carries the
+    methods one component needs from another.
     """
     courier = _RecordingCourier()
     assert isinstance(courier, ports.BoundaryCourier)
@@ -705,6 +715,35 @@ def _watch_pin_and_start(engine, delivered_ticks, started_ticks):
 
     window_boundaries.BoundaryCourier._pin_delivered = delivered
     decode_requests.WindowInputGate.mask_input = start
+
+
+def test_a_redo_window_pin_leaves_the_chip_with_its_escalation():
+    """The pin crosses the cable beside the escalation, not after it.
+
+    Under held boundaries the neighbour's commit a redo window pins on
+    is final before the verdict, so the boundary condition is already
+    determined (Toshio et al. 2510.25222 Fig. 12 caption) when the
+    window is assigned to the strong decoder (App. C). Sent only once
+    the rounds land, the pin waited one more leg of the cable, here 400
+    room cycles, that the chip had no message to start it by.
+    """
+    machine = _slow_boundary_machine(declared_run.REDO_WINDOW)
+    result = machine.run()
+    pins = _cable_sends(result, boundary=True)
+    escalations = _cable_sends(result, boundary=False)
+    assert pins
+    assert pins <= escalations
+
+
+def _cable_sends(result, *, boundary: bool) -> set:
+    """(window index, send tick) of the chip's sends up to the host."""
+    transfers = result.link_traffic["transfers"]
+    return {
+        (transfer["attribution"]["window_id"], transfer["send_ticks"])
+        for transfer in transfers
+        if transfer["path"] == "weak_to_strong"
+        and is_boundary(transfer) is boundary
+    }
 
 
 def _slow_boundary_machine(strong_window) -> machine_module.Machine:
@@ -1152,6 +1191,11 @@ class _RecordingCourier:
         self.pinned.append(
             (source_key, destination, model, operation, request_key)
         )
+
+    def committed_pool(self, source_key):
+        """Every face this courier holds was committed on the chip."""
+        del source_key
+        return window_records.WEAK_POOL_ID
 
 
 def _folding_shape(retention, courier):

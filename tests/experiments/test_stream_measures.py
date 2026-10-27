@@ -8,14 +8,29 @@ leave no window, stage, frame write or round event behind.
 """
 
 import collections
+import dataclasses
 import math
 
 import pytest
 
+import decsim.decoders.decoders as decoders
+import decsim.decoders.settings as decoder_settings
 import decsim.experiments.collect as collect
 import decsim.experiments.measure as measure
+import decsim.experiments.stream_command as stream_command
 import decsim.experiments.stream_measures as stream_measures
+import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
+import decsim.observe.settings as observe_settings
+import decsim.presets.machines as machines
+import decsim.qpu.settings as qpu_settings
+import decsim.records.program as program_records
+import decsim.records.windows as window_records
+import decsim.records.workload as workload_records
+import decsim.windows.schemes.region_sliding as region_sliding
+import decsim.windows.settings as window_settings
+import tests.declared_run as declared_run
+import tests.patch_pools as patch_pools
 import tests.stream_machines as stream_machines
 
 SEED = 17
@@ -101,6 +116,16 @@ def _differences(folded, shot) -> list:
     return differences
 
 
+def _kept_whole(task: collect.Task, rounds: int, warmup: int):
+    """The task's patches as a stream that keeps every ledger whole.
+
+    measure_shot reads the whole ledgers; the stream folds as it goes.
+    """
+    streamed = stream_command.stream_machine(task, rounds, warmup)
+    observation = dataclasses.replace(streamed.observation, folds_windows=False)
+    return dataclasses.replace(streamed, observation=observation)
+
+
 def _value_pairs(folded, shot) -> list:
     pairs = []
     for name, summary in folded.values.items():
@@ -112,9 +137,12 @@ def _value_pairs(folded, shot) -> list:
 
 
 def _pool_pairs(folded, shot) -> list:
-    return [
+    pairs = [
         (name, folded.pools[name], getattr(shot, name)) for name in POOL_FIELDS
     ]
+    shot_rows = [dataclasses.asdict(row) for row in shot.pools]
+    pairs.append(("pool rows", folded.pool_rows, shot_rows))
+    return pairs
 
 
 def _growth_differences(folded, shot) -> list:
@@ -168,3 +196,106 @@ def test_a_stream_that_lets_each_window_go_measures_the_same_and_keeps_none(
     assert observation.stages.records_for(100, 0) == ()
     assert observation.frame_corrections.committed == []
     assert observation.round_events.events == []
+
+
+def test_patches_on_a_pool_each_beside_a_shared_strong_pool_measure_alike():
+    shared = patch_pools.shared_strong_per_patch()
+    task = collect.Task("patches", shared, {})
+    graph = _kept_whole(task, 30, 0)
+    machine, result, folded = _run(graph)
+    stream_task = collect.Task("patches", graph, {})
+    shot = collect.Shot(stream_task, SEED, machine, result, 0.0)
+
+    measured = measure.measure_shot(shot)
+
+    pools = [row["pool"] for row in folded.pool_rows]
+    assert _differences(folded, measured) == []
+    assert pools == ["weak", "w1", "w2", "strong"]
+
+
+def test_a_pools_row_counts_the_windows_committed_past_the_warmup():
+    one_pool = patch_pools.one_pool()
+    per_patch = patch_pools.pool_per_patch(one_pool)
+    task = collect.Task("patches", per_patch, {})
+    graph = _kept_whole(task, 30, 10)
+    machine, result, folded = _run(graph)
+    stream_task = collect.Task("patches", graph, {})
+    shot = collect.Shot(stream_task, SEED, machine, result, 0.0)
+
+    measured = measure.measure_shot(shot)
+
+    committed = [row["committed_windows"] for row in folded.pool_rows]
+    assert _differences(folded, measured) == []
+    assert 0 < sum(committed) < folded.decoded_windows
+
+
+def test_the_escalated_share_is_sampled_off_the_frames_commits_in_order():
+    graph = stream_machines.stream_graph(RUNS[3], folds=False)
+    machine, _result, folded = _run(graph)
+    observation = machine.observation
+    windows = observation.windows.windows
+    _weak_pools, strong_pools = machine.layout.tier_pools()
+    every = stream_measures.ESCALATION_SAMPLED_EVERY
+    expected = []
+    escalated = 0
+    commits = observation.frame_corrections.committed
+    for count, record in enumerate(commits, start=1):
+        escalated += window_records.PoolId(record.tier) in strong_pools
+        if count % every == 0:
+            first_round = windows[record.window_key].commit_lo
+            expected.append((count, escalated, first_round))
+
+    assert folded.escalation_series == expected
+    assert len(expected) >= 2
+    assert expected[-1][1] > 0
+
+
+READ_HOP_MICROSECONDS = 5.0
+
+
+def _two_patch_graph(folds: bool):
+    """Two patches idling a round each, decoded on two units at once.
+
+    Each stream counts its windows from 0, so both lay a window 0, and
+    every decode's input rides the one read hop.
+    """
+    memory = program_records.OpKind.MEMORY
+    operations = tuple(
+        program_records.Operation(
+            index, f"memory {index}", ((0, index),), kind=memory
+        )
+        for index in range(2)
+    )
+    program = workload_records.Workload(
+        operations, {0: 1, 1: 1}, patch_streams=True
+    )
+    settings = workload_settings.WorkloadSettings.running(program)
+    scheme = region_sliding.RegionSlidingScheme.Settings()
+    windows = window_settings.WindowSettings(scheme=scheme)
+    hops = dict.fromkeys(declared_run.DECLARED_HOP_MICROSECONDS, 0.0)
+    hops["read_written"] = READ_HOP_MICROSECONDS
+    fabric = declared_run.declared_fabric(**hops)
+    observation = observe_settings.ObservationSettings(folds_windows=folds)
+    qpu = qpu_settings.QpuSettings(distance=3)
+    base = machines.base(
+        settings, windows, qpu, observation=observation, fabric=fabric
+    )
+    algorithm = decoders.PresetLatencyDecoder.Settings(0.1)
+    pool = decoder_settings.DecoderPoolSettings(
+        algorithm=algorithm, engine=declared_run.DECLARED_ENGINE, unit_count=2
+    )
+    pooled = machines.with_pool(base, pool)
+    return machines.with_frame(pooled)
+
+
+def test_each_streams_window_0_keeps_its_own_input_hop_when_let_go():
+    whole = _two_patch_graph(folds=False)
+    lean = _two_patch_graph(folds=True)
+    _machine, _result, kept = _run(whole)
+
+    _machine, _result, folded = _run(lean)
+
+    input_hop = folded.values["input_link_per_window"]
+    assert input_hop["count"] == 2
+    assert input_hop["mean"] == READ_HOP_MICROSECONDS
+    assert folded == kept

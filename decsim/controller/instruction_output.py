@@ -1,17 +1,20 @@
 """The controller's output: commands and decisions to the QPU.
 
-A decision lands here over frame_to_controller. A release starts its
-operation's command; a result return is reported to the QPU. Either then
-pays the decision-to-pulse cost of the control processor's issue
-pipeline (QubiC, Fruitwala 2404.15260 Sec. III and IV; QICK 2110.00557
+Every command is prepared ahead and queued for its start boundary: a
+control processor runs ahead of the qubits' timeline and plays each
+queued pulse at its time (QICK 2110.00557 Sec. III.A; eQASM 1808.02449
+Sec. 3.1). A decision lands here over frame_to_controller, pays the
+decision-to-pulse cost of the control processor's branch once (QICK
 measures 16 clocks for the conditional and jump and 20 for the next
-pulse), crosses controller_to_qpu, and starts on the QPU's next cycle
-boundary. A preloaded command skips the output path: it was prepared
-before the simulated interval.
+pulse, Sec. IV.A; QubiC, Fruitwala 2404.15260 Sec. III and IV), and
+crosses controller_to_qpu. A release then lets its queued command fire
+on the next cycle boundary, so a release that lands before the
+operation is otherwise ready costs it nothing: the condition only gates
+a pulse already on the timeline (eQASM Sec. 3.5, fast conditional
+execution).
 """
 
 import dataclasses
-import functools
 from collections.abc import Callable
 
 import decsim.config as config
@@ -27,8 +30,8 @@ class InstructionOutput:
     """The digital-to-QPU path; implements the InstructionReceiver port.
 
     Trace source: output_event(ControllerOutputEvent) with kinds
-    PRELOADED_COMMAND, DECISION_AVAILABLE, CONTROL_DECISION_ISSUED and
-    CONTROL_PULSE_COMMAND_ISSUED, each carrying its payload.
+    PRELOADED_COMMAND, DECISION_AVAILABLE and CONTROL_DECISION_ISSUED,
+    each carrying its payload.
     """
 
     link = ports.Port(ports.Link)
@@ -50,22 +53,10 @@ class InstructionOutput:
         command: program_records.RunOperationBody,
         on_started: Callable[[int], None],
     ) -> None:
-        """A command prepared before the run starts at the next boundary."""
+        """A queued command starts at the next boundary."""
         operation_id = command.operation.id
         self._fire("PRELOADED_COMMAND", operation_id, command)
         self._start(command, on_started)
-
-    def send_command(
-        self,
-        command: program_records.RunOperationBody,
-        on_started: Callable[[int], None],
-    ) -> None:
-        """A feedback-selected command pays the pulse cost and the crossing."""
-        operation_id = command.operation.id
-        deliver = functools.partial(self._start, on_started=on_started)
-        self._send(
-            command, operation_id, "CONTROL_PULSE_COMMAND_ISSUED", deliver
-        )
 
     def relay_instruction(
         self,
@@ -74,16 +65,13 @@ class InstructionOutput:
     ) -> None:
         """Take a Pauli-frame decision at the landing of frame_to_controller.
 
-        A release is consumed here and its command crosses the output path in
-        send_command. A result return crosses the output path to the execution
-        runtime, the classical program that branches on the outcome, since the
-        QPU device holds no register an outcome lands in (QubiC branches on the
-        control processor, Fruitwala et al. 2404.15260).
+        Either kind crosses the output path to the execution runtime, the
+        classical program that branches on the outcome, since the QPU device
+        holds no register an outcome lands in (QubiC branches on the control
+        processor, Fruitwala et al. 2404.15260). A release there lets its
+        operation's queued command go.
         """
         self._fire("DECISION_AVAILABLE", decision.target_operation_id, decision)
-        if decision.releases_operation:
-            deliver(decision)
-            return
         self._send(
             decision,
             decision.target_operation_id,
@@ -108,7 +96,7 @@ class InstructionOutput:
     def _send(self, payload, operation_id, event_kind: str, deliver) -> None:
         """Pay the pulse cost, then cross controller_to_qpu to deliver."""
         attribution = transfer_records.TransferAttribution(
-            operation_id=operation_id,
+            owner_id=operation_id,
             patch_ids=(),
             window_id=None,
             first_round=None,

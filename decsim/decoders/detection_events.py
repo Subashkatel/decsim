@@ -120,7 +120,7 @@ def _round_keys_of(job: decoding_records.DecodeJob) -> tuple:
     """
     keys = []
     for payload in job.payloads:
-        key = (payload.operation_id, payload.round_index)
+        key = (payload.stream_id, payload.round_index)
         if key not in keys:
             keys.append(key)
     if keys:
@@ -129,5 +129,5 @@ def _round_keys_of(job: decoding_records.DecodeJob) -> tuple:
     if decoder_input is None:
         return ()
     for round_input in decoder_input.rounds:
-        keys.append((round_input.operation_id, round_input.round_index))
+        keys.append((round_input.stream_id, round_input.round_index))
     return tuple(keys)

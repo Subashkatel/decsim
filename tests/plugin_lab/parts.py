@@ -126,6 +126,7 @@ class WeightCut:
         name = "weight_cut"
         reads_threshold = False
         reads_consensus = False
+        reads_source_queue = False
         cut: float = 0.0
 
         def build(self) -> "WeightCut":

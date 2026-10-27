@@ -240,7 +240,7 @@ class WindowDecoderBase(DecoderBase):
         model = job.detector_error_model
         if model is None:
             return decoding_records.DecodeResult(
-                job.operation_id, job.window_id
+                job.stream_id, job.window_id
             ), 0
         faults = model.require_faults(self.fault_representation)
         syndrome = payload_syndrome(job)
@@ -416,7 +416,7 @@ def result_from_selected_faults(
     boundary_data = dependency_residual(model, residual_detector_ids)
     crossing_commit = _crossing_commit(model, placed_faults, committed)
     return decoding_records.DecodeResult(
-        job.operation_id,
+        job.stream_id,
         job.window_id,
         correction=correction,
         logical_observables=logical_observables,

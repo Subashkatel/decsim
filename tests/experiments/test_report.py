@@ -7,7 +7,9 @@ shot's own counters, with the memory class the path crosses, so a
 folder folded from shards carries the rows one unsharded run would have
 written. shot_stats.csv holds one row per shot per part, statistic and
 field, the shot's registry rows as they are, and stat_values.csv each
-task's count of every value, added over its shots. latency_samples.csv
+task's count of every value, added over its shots. shot_pools.csv holds
+one row per shot per pool, which pool_summary.csv folds per task and
+pool as sweep.csv folds shots.csv. latency_samples.csv
 holds
 one measured algorithm wall clock per decoded window, recorded only for
 a decoder named by a table row, each beside its window's inter-arrival,
@@ -30,6 +32,7 @@ import decsim.experiments.measure as measure
 import decsim.experiments.report as report
 import decsim.records.decoding as decoding_records
 import tests.experiments.run_files as run_files
+import tests.patch_pools as patch_pools
 
 # one task, every copy and move counted, two shots
 COUNTING = {
@@ -43,6 +46,18 @@ def measured_shots(count: int) -> list:
     measurements = []
     for seed in range(count):
         measurement = run_files.measured_shot(seed, **COUNTING)
+        measurements.append(measurement)
+    return measurements
+
+
+def _measured_patch_shots(count: int) -> list:
+    """The per-patch machine of tests/patch_pools.py, one shot a seed."""
+    machine = patch_pools.shared_strong_per_patch()
+    task = collect.Task("patches", machine, {})
+    measurements = []
+    for seed in range(count):
+        shot = collect.run_shot(task, seed)
+        measurement = measure.measure_shot(shot)
         measurements.append(measurement)
     return measurements
 
@@ -139,6 +154,42 @@ def test_the_summary_is_derived_from_the_shots_own_statistics(tmp_path):
     assert busy["time_mean"] == pytest.approx(busy_mean)
     assert busy["peak"] == busy_peak
     assert units["per_shot"] == 1
+
+
+def test_a_shots_pool_rows_are_its_measured_pools():
+    measurements = _measured_patch_shots(1)
+    (measurement,) = measurements
+
+    rows = report.shot_pool_rows(measurements)
+
+    pools = [row["pool"] for row in rows]
+    loads = [row["offered_load"] for row in rows]
+    measured_loads = [pool.offered_load for pool in measurement.pools]
+    assert pools == ["weak", "w1", "w2", "strong"]
+    assert loads == measured_loads
+
+
+def test_a_tasks_pool_summary_folds_each_pools_rows_over_its_shots(tmp_path):
+    """A mean load, the largest queue, the windows added, pool by pool."""
+    first, second = _measured_patch_shots(2)
+    _rows, run_dir = run_files.folded_run(tmp_path, [first, second])
+    summary_path = run_dir / "pool_summary.csv"
+
+    summary = report.read_rows(summary_path)
+
+    w1 = summary[1]
+    first_w1 = first.pools[1]
+    second_w1 = second.pools[1]
+    mean_load = (first_w1.offered_load + second_w1.offered_load) / 2
+    largest_queue = max(first_w1.queue_max, second_w1.queue_max)
+    committed = first_w1.committed_windows + second_w1.committed_windows
+    escalated = first_w1.escalated_windows + second_w1.escalated_windows
+    assert [row["pool"] for row in summary] == ["weak", "w1", "w2", "strong"]
+    assert w1["shots"] == 2
+    assert w1["offered_load"] == pytest.approx(mean_load)
+    assert w1["queue_max"] == largest_queue
+    assert w1["committed_windows"] == committed
+    assert w1["escalated_windows"] == escalated
 
 
 # statistics written as each piece's sums, a row per task and key

@@ -67,12 +67,70 @@ def test_the_stream_is_the_memory_protected_and_read_out_at_its_last_round():
     assert circuit_owner == owner.id
 
 
-def test_a_memory_of_several_patches_is_refused():
+def test_a_one_patch_memorys_protect_and_readout_take_the_ids_after_it():
+    workload = producers.memory_circuit(TASK, 9, 3, 0.002)
+    lowered = _lowered(workload)
+
+    streamed = memory_stream.memory_stream(lowered, 500)
+
+    (owner,) = streamed.dynamic_streams
+    begin, finish = streamed.operations
+    assert (owner.id, begin.id, finish.id) == (1, 2, 3)
+
+
+def test_each_memory_patch_streams_with_its_own_protect_and_readout():
     workload = producers.memory_patches(TASK, 9, 2, 3, 0.002)
     lowered = _lowered(workload)
 
-    with pytest.raises(ValueError, match="not implemented yet: a stream runs"):
+    streamed = memory_stream.memory_stream(lowered, 100)
+
+    owners = [(owner.id, owner.patches) for owner in streamed.dynamic_streams]
+    operations = [
+        (operation.id, operation.name, operation.patches)
+        for operation in streamed.operations
+    ]
+    regions = [
+        (region.stream_id, region.start_operation_id, region.end_operation_id)
+        for region in streamed.protected_regions
+    ]
+    circuit_owners = [owner for owner, _program in streamed.physical_circuits]
+    assert owners == [(1, (0,)), (2, (1,))]
+    assert operations == [
+        (3, "protect", (0,)),
+        (4, "readout", (0,)),
+        (5, "protect", (1,)),
+        (6, "readout", (1,)),
+    ]
+    assert regions == [(1, 3, 4), (2, 5, 6)]
+    assert circuit_owners == [1, 2]
+
+
+def test_a_memory_with_no_circuit_is_refused():
+    workload = producers.memory_without_circuit(9, 2, 0.002)
+    lowered = _lowered(workload)
+
+    with pytest.raises(ValueError) as refused:
         memory_stream.memory_stream(lowered, 100)
+
+    assert str(refused.value) == (
+        "not implemented yet: a stream samples each memory's Stim circuit, "
+        "and memory0 has none (workload.code_task is none)"
+    )
+
+
+def test_a_workload_that_runs_its_own_stream_is_refused():
+    circuit = _generated(4)
+    program = memory_stream.repeated_memory(circuit)
+    workload = producers.live_memory(program, 3)
+    lowered = _lowered(workload)
+
+    with pytest.raises(ValueError) as refused:
+        memory_stream.memory_stream(lowered, 100)
+
+    assert str(refused.value) == (
+        "not implemented yet: a stream runs memory patches' Stim circuits, "
+        "and this workload already runs streams of its own"
+    )
 
 
 def test_a_circuit_stim_wrote_with_no_repeat_block_is_refused():

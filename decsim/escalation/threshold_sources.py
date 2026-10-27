@@ -5,8 +5,10 @@ the paper's constant g_th (Toshio et al. 2510.25222 Sec. III A, step 3).
 TableThreshold looks a task's facts up in an offline calibration csv
 before the machine is built, then decides as FixedThreshold does.
 OnlineThreshold starts at a value and adapts it across a task's
-shots with a rate tracker and an audit lane; one instance per task is
-shared by its shots. A record reads the task's facts off the task's
+shots with a rate tracker and an audit lane; RateThreshold with the
+rate tracker alone, which holds a target escalated share and reads no
+strong answer. One instance of either per task is shared by its
+shots. A record reads the task's facts off the task's
 settings, as a gem5 Parent.x proxy reads x off the object above it
 (src/python/m5/proxy.py:116-148). A record takes decibels and hands out
 nats, the unit a gap is compared in.
@@ -22,6 +24,8 @@ from collections.abc import Mapping
 from typing import Optional
 
 import decsim.config as config
+import decsim.escalation.target_steps as target_steps
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 
 # The task's facts a calibration table keys its rows on, each column
@@ -74,6 +78,7 @@ class FixedThreshold:
     """
 
     audits_by_escalating = False
+    reads_source_queue = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -120,6 +125,10 @@ class FixedThreshold:
         """A fixed threshold learns nothing."""
         del window_key
         del result
+
+    def summary(self) -> dict:
+        """The threshold, which never moves."""
+        return {"threshold": self.threshold_nats}
 
 
 class TableThreshold(FixedThreshold):
@@ -366,6 +375,7 @@ class OnlineThreshold:
     """
 
     audits_by_escalating = True
+    reads_source_queue = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -478,7 +488,7 @@ class OnlineThreshold:
         if self.controller.tracker.window_count % 100 == 0:
             self._record("sample")
         if audited:
-            key = (job.operation_id, job.window_id)
+            key = (job.stream_id, job.window_id)
             self._pending_audits[key] = tuple(result.logical_observables)
             self._record("audit")
             return False
@@ -519,6 +529,147 @@ class OnlineThreshold:
 
     def _record(self, event: str) -> None:
         tracker = self.controller.tracker
+        self.trajectory.append((tracker.window_count, tracker.threshold, event))
+
+
+class RateThreshold:
+    """Hold a target share of windows escalated, from the gaps alone.
+
+    The rate tracker without audits: it reads no strong
+    answer and no truth, so it costs nothing but the escalations it
+    makes. It starts at a calibrated threshold, the one that escalated
+    the target on calibration shots (experiments/basic_case/
+    threshold_plots.py), and moves step_decibels a window by Gibbs and
+    Candes's update, unclipped, which bounds the long-run escalated
+    share around the target for any gap sequence (EscalationRateTracker).
+    One instance persists across a task's shots.
+
+    With steps, the outer loop (target_steps.TargetSteps) sets
+    the target: before each window the source reads the windows waiting
+    for the source pool and the loop steps the share by their trend. The
+    tracker's bound holds for a moving target, its long-run share then
+    the targets' average (Gibbs and Candes, arXiv:2106.00170, Sec. 4).
+    The backlog is a stream's, so a run of shots refuses it
+    (collect_command.py): each shot starts empty.
+    """
+
+    audits_by_escalating = False
+    source_queue = ports.Port(ports.DecodeQueue, optional=True)
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The start in decibels, the target share and the step."""
+
+        threshold_decibels: float
+        target_escalation_rate: float
+        step_decibels: float = 0.25
+        steps: Optional[target_steps.TargetSteps.Settings] = None
+
+        def __post_init__(self) -> None:
+            checked_decibels(self.threshold_decibels, "threshold_decibels")
+            rate = self.target_escalation_rate
+            if not config.is_number(rate) or not 0.0 < rate < 1.0:
+                raise ValueError(
+                    f"target_escalation_rate must be in (0, 1) (got {rate!r})"
+                )
+            step = self.step_decibels
+            if not config.is_number(step) or not 0.0 < step < math.inf:
+                raise ValueError(
+                    f"step_decibels must be positive and finite (got {step!r})"
+                )
+
+        @property
+        def threshold_nats(self) -> float:
+            """Where the tracker starts, as the weight a gap is in."""
+            return decibels_to_nats(self.threshold_decibels)
+
+        def at_task(self, facts: Mapping) -> "RateThreshold.Settings":
+            """The card is the same at every task; its source is not."""
+            del facts
+            return self
+
+        def for_task(self, facts: Mapping) -> "RateThreshold":
+            """The one instance a task's shots share."""
+            del facts
+            step_nats = decibels_to_nats(self.step_decibels)
+            tracker = EscalationRateTracker(
+                target_escalation_rate=self.target_escalation_rate,
+                threshold=self.threshold_nats,
+                step=step_nats,
+            )
+            steps = None
+            if self.steps is not None:
+                steps = self.steps.build()
+            return RateThreshold(tracker, steps)
+
+        def build(self) -> "RateThreshold":
+            """Refused: the source learns across a task's shots."""
+            raise ValueError(
+                "a rate threshold learns across a task's shots, so it is "
+                "built once per task by for_task and shared: collect.Task "
+                "builds it, and Machine.build takes it as online_threshold "
+                "for one machine"
+            )
+
+    def __init__(
+        self,
+        tracker: EscalationRateTracker,
+        steps: Optional[target_steps.TargetSteps] = None,
+    ) -> None:
+        self.tracker = tracker
+        self.steps = steps
+        # (window count, threshold) at the start and every hundredth window
+        self.trajectory: list = []
+        self._record("start")
+
+    def decide_keep(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> bool:
+        """Keep unless the gap is under the tracker's threshold."""
+        del job
+        if self.steps is not None:
+            self._step_the_target()
+        escalated = self.tracker.observe(result.soft_output.gap)
+        if self.tracker.window_count % 100 == 0:
+            self._record("sample")
+        return not escalated
+
+    def learn_from_strong_result(
+        self, window_key: tuple, result: decoding_records.DecodeResult
+    ) -> None:
+        """The tracker reads no strong answer."""
+        del window_key
+        del result
+
+    def summary(self) -> dict:
+        """The tracker's counters, its live threshold, the loop's checks."""
+        tracker = self.tracker
+        summary = {
+            "windows": tracker.window_count,
+            "escalated": tracker.escalated_count,
+            "escalation_rate": tracker.escalation_rate(),
+            "threshold": tracker.threshold,
+            "target_escalation_rate": tracker.target_escalation_rate,
+        }
+        if self.steps is not None:
+            summary["target_steps"] = list(self.steps.trajectory)
+        return summary
+
+    @property
+    def reads_source_queue(self) -> bool:
+        """Whether an outer loop reads the source pool's queue."""
+        return self.steps is not None
+
+    def _step_the_target(self) -> None:
+        """The loop reads the backlog; the tracker takes its share."""
+        waiting = self.source_queue.waiting_jobs()
+        self.steps.observe(waiting)
+        self.tracker.target_escalation_rate = self.steps.target
+
+    def _record(self, event: str) -> None:
+        tracker = self.tracker
         self.trajectory.append((tracker.window_count, tracker.threshold, event))
 
 

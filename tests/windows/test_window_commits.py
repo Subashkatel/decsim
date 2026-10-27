@@ -20,10 +20,12 @@ import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph_layout as graph_layout
 import decsim.windows.escalate_edges as escalate_edges
+import decsim.windows.input_checks as input_checks
 import decsim.windows.revision_rules as revision_rules
 import decsim.windows.window_commits as window_commits
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
+import tests.one_entry as one_entry
 
 
 def _reference_layout():
@@ -129,7 +131,7 @@ class _Fixture:
     ) -> None:
         self.engine = engine_module.Engine()
         self.window = window_records.Window(
-            operation_id=4,
+            stream_id=4,
             window_index=1,
             commit_lo=4,
             commit_hi=6,
@@ -192,20 +194,21 @@ class _Fixture:
         committer.decoder_output = decoder_output
         committer.results = self.results
         committer.edges = edges
+        committer.router = one_entry.router()
         self.committer = committer
-        self.verdict = window_commits.WindowVerdict(
-            self.engine, window_records.WEAK_POOL_ID
-        )
+        self.verdict = window_commits.WindowVerdict(self.engine)
         self.verdict.planner = planner
         self.verdict.tracker = tracker
+        self.verdict.router = one_entry.router(decode_queue=self.decode_queue)
         self.verdict.edges = edges
-        self.verdict.decode_queue = self.decode_queue
         self.verdict.committer = committer
+        # no boundary lands here, so every input reads final
+        self.verdict.input_checks = input_checks.InputChecks()
 
     def job(self, tier, sequence, awaiting=False) -> decoding_records.DecodeJob:
         request_key = window_records.DecoderRequestKey(4, 1, tier, sequence)
         job = decoding_records.DecodeJob(
-            operation_id=4, window_id=1, round_count=5, request_key=request_key
+            stream_id=4, window_id=1, round_count=5, request_key=request_key
         )
         self.verdicts[request_key] = awaiting
         return job

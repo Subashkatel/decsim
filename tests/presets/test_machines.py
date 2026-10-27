@@ -6,19 +6,35 @@ bound, each pool sits where its decoder runs, the weak base's hops are
 one 250 MHz fridge cycle (4 ns, 2605.04892 line 1063), and a strong tier
 adds the strong store and pool on the host, the escalation wire and the
 strong window's shape (window_settings.switching_windows).
+
+A router, or a router before the stores, that names only the entry pool
+runs shot for shot as the machine without it: the referent is the
+regression suite's whole-shot digest (tests/regression), recorded
+before a router could sit in front of a pool. With a pool and a store
+per patch, every window still reads the rounds it read from the one
+store, so it answers as it did (tests/patch_pools.py).
 """
 
 import dataclasses
+import functools
 
+import pytest
+
+import decsim.frontends.lattice_surgery as lattice_surgery
 import decsim.presets.clocks as clocks
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
 import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph_layout as graph_layout
+import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
+import tests.controller.test_patch_streams as patch_stream_tests
 import tests.declared_run as declared_run
 import tests.escalation.test_strong_window_shapes as shape_tests
+import tests.frontends.test_patch_lives as patch_lives_tests
+import tests.patch_pools as patch_pools
+import tests.regression.test_shot_results as regression
 import tests.topology.test_graph_layout as layout_tests
 
 # one fridge cycle at 250 MHz, in ticks
@@ -218,3 +234,99 @@ def test_an_escalation_grows_a_chain_one_pool_and_edge_at_a_time():
         ("switching", "weak_buffer"),
         ("deep_switching", "strong_buffer"),
     ]
+
+
+ONE_POOL = routers.OnePool.Settings(machines.WEAK_POOL)
+SWITCHING_SHAPES = ("redo_window_switching", "cluster_gap_switching")
+
+
+@pytest.mark.parametrize("name", SWITCHING_SHAPES)
+def test_a_router_naming_only_the_entry_pool_runs_shot_for_shot_as_none(name):
+    shape = regression.SHAPES[name]
+    routed = functools.partial(_routed, shape)
+
+    routed_digest = regression.shot_digest(routed)
+    plain_digest = regression.shot_digest(shape)
+
+    assert routed_digest == plain_digest
+
+
+@pytest.mark.parametrize("name", SWITCHING_SHAPES)
+def test_a_store_per_pool_with_only_the_entry_pool_runs_as_one_store(name):
+    shape = regression.SHAPES[name]
+    stored = functools.partial(_stored, shape)
+
+    stored_digest = regression.shot_digest(stored)
+    plain_digest = regression.shot_digest(shape)
+
+    assert stored_digest == plain_digest
+
+
+def test_a_patch_table_naming_only_the_entry_pool_runs_as_no_router(tmp_path):
+    """The T gate's three patch streams, every one routed to weak."""
+    plain = _t_gate(tmp_path)
+    table = (((0, 0), "weak"), ((0, 1), "weak"), ((1, 0), "weak"))
+    rule = routers.ByPatch.Settings(pool_by_patch=table)
+    routed = machines.with_router(plain, rule, ())
+    stored = machines.with_store_per_pool(plain, rule, ())
+
+    plain_digest = regression.shot_digest(lambda: plain)
+    routed_digest = regression.shot_digest(lambda: routed)
+    stored_digest = regression.shot_digest(lambda: stored)
+
+    assert routed_digest == plain_digest
+    assert stored_digest == plain_digest
+
+
+def test_a_store_per_pool_sends_the_factorys_decodes_to_the_pool_named():
+    plain = machines.weak_baseline(3, 0.001, 1.0)
+    rule = routers.OnePool.Settings("weak")
+    weak = plain.part(machines.WEAK_POOL)
+    fpga_b = weak.settings
+
+    stored = machines.with_store_per_pool(
+        plain, rule, (("fpga_b", fpga_b),), factory_pool="fpga_b"
+    )
+
+    router = stored.part(machines.ROUTER)
+    assert router.settings.factory_pool == "fpga_b"
+
+
+def test_a_store_per_pool_answers_every_window_as_one_shared_store_does():
+    """Three patches escalating to one strong pool, its rounds carried.
+
+    An escalated window's strong decode reads the rounds kept in the
+    store of the pool that escalated it, here one of three stores.
+    """
+    shared_store = patch_pools.shared_strong_per_patch()
+    store_per_pool = patch_pools.shared_strong_per_patch(True)
+    shared_shot = patch_pools.shot(shared_store)
+    per_pool_shot = patch_pools.shot(store_per_pool)
+
+    shared_answers = patch_pools.answers(shared_shot)
+    per_pool_answers = patch_pools.answers(per_pool_shot)
+
+    committing = patch_pools.committing_pools(per_pool_shot)
+    assert committing == {"weak", "w1", "w2", "strong"}
+    assert per_pool_answers == shared_answers
+
+
+def _routed(shape):
+    machine = shape()
+    return machines.with_router(machine, ONE_POOL, ())
+
+
+def _stored(shape):
+    machine = shape()
+    return machines.with_store_per_pool(machine, ONE_POOL, ())
+
+
+def _t_gate(tmp_path):
+    path = tmp_path / "t_gate.lss"
+    path.write_text(patch_lives_tests.T_GATE)
+    workload = lattice_surgery.read_schedule(path, patch_stream_tests.DISTANCE)
+    decode_microseconds = patch_stream_tests.T_GATE_DECODE_MICROSECONDS
+    _settings, plain = patch_stream_tests.patch_stream_graph(
+        workload, decode_microseconds
+    )
+    return plain

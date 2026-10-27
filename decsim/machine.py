@@ -182,6 +182,9 @@ class Machine:
             recorded_signal,
         )
         target_by_source = layout.target_by_source()
+        decoders_part.refuse_timing_only_redo(
+            pools, target_by_source, plan.device
+        )
         decoder_manager = graph.held("decoder_manager")
         decoders = decoders_part.Decoders.build(
             decoder_manager,
@@ -189,6 +192,7 @@ class Machine:
             engine,
             pools,
             target_by_source,
+            layout.devices,
         )
         return cls.assemble(
             graph,
@@ -229,49 +233,48 @@ class Machine:
         """
         root_seed = _root_seed(seed)
         edges = escalation_build.escalate_edges_of(switching_parts)
-        weak_name, strong_name = layout.entry_edge_stores()
-        weak_store = readout.store_named(weak_name)
-        strong_store = readout.store_named(strong_name)
+        factory_pool = layout.factory_pool()
+        factory_queue = decoders.manager_of(factory_pool)
         qpu.connect(
             readout_receiver=readout.controller,
             runtime=control.execution_runtime,
             idle_rounds=control.idle_rounds,
-            decode_queue=decoders.decoder_manager,
+            decode_queue=factory_queue,
         )
         readout.connect(
             windows=windows.window_manager,
             retention=windows.retention,
+            router=windows.router,
         )
         input_fold = decoders.decoder_manager.input_fold()
-        routed_sides = _routed_sides(layout, readout, decoders)
+        entry_sides = _entry_sides(layout, readout, decoders, windows)
         windows.connect(
-            weak_store=weak_store,
-            strong_store=strong_store,
-            store_output=readout.primary_output,
+            writes=readout.destinations,
             primary_decoder=decoders.primary_decoder,
             target_decoders=decoders.target_decoders,
-            decode_queue=decoders.decoder_manager,
             edges=edges,
             input_fold=input_fold,
             frame=control.pauli_frame,
             conditional_release=control.conditional_release,
             factory=qpu.factory,
             detection_events=readout.detection_events,
-            routed_sides=routed_sides,
+            entry_sides=entry_sides,
         )
         control.connect(
             qpu=qpu.device,
             factory=qpu.factory,
             windows=windows.window_manager,
-            decode_queue=decoders.decoder_manager,
+            entry_queues=windows.router,
         )
         for part in switching_parts:
             part.connect(plan, readout, windows, decoders)
         escalation_build.join_the_chain(switching_parts)
-        if switching_parts:
-            entry_switching = switching_parts[0]
-            # a window's solves join on the entry edge's signal alone
-            windows.gap_join.signal = entry_switching.confidence_signal
+        for part in switching_parts:
+            # an entry pool's solves join on the signal of its own edge
+            part.bind_entry_join(windows)
+        escalation_build.bind_strong_result_learners(
+            edges, windows.router, decoders
+        )
         # the managers hear their rows before the planner compiles a
         # model, and the sender asks the wired window side where it reads
         decoders.start()
@@ -285,7 +288,7 @@ class Machine:
             engine, keeps_series=keeps_series
         )
         decoders.attach_statistics(run_statistics)
-        statistics_parts = (control, readout, *switching_parts)
+        statistics_parts = (control, readout, windows, *switching_parts)
         _attach_statistics(run_statistics, statistics_parts)
         observation = _observe(
             graph,
@@ -336,7 +339,7 @@ class Machine:
         region = self.observation.region_of_interest
         if region is not None:
             round_events = self.observation.round_events
-            region.check_begun(round_events.rounds_read_out_by_operation)
+            region.check_begun(round_events.rounds_read_out_by_stream)
         for part in self.switching_parts:
             part.check_settled()
         self.windows.check_settled()
@@ -507,29 +510,52 @@ def _process_name(
     return f"decsim {kind} d{distance} seed{seed}"
 
 
-def _routed_sides(
+def _entry_sides(
     layout: layout_module.Layout,
     readout: readout_part.Readout,
     decoders: decoders_part.Decoders,
+    windows: windows_part.Windows,
 ) -> tuple:
-    """Each entry pool past the first: its manager and its store's end.
+    """Every entry pool's manager, store, store end and join, each alike.
 
-    The entry store sends to each over a hop of its own (layout
-    StoreReader); none of them has an edge leaving it yet, so none has
-    a join.
+    The store a pool reads sends to it over a hop of its own (layout
+    StoreReader). A pool that computes a confidence joins its solves on
+    its own manager's results (build/windows.py).
     """
-    entry_pools = layout.entry_pools
-    if len(entry_pools) == 1:
-        return ()
-    entry_store = readout.stores[0]
     sides = []
-    for entry in entry_pools[1:]:
+    for entry in layout.entry_pools:
         pool = entry.pool
         manager = decoders.manager_of(pool)
-        store_output = entry_store.output_for(pool)
-        side = routers.EntrySide(pool, manager, store_output)
+        gap_join = windows.join_of(pool)
+        if gap_join is not None:
+            gap_join.decode_queue = manager
+        side = _entry_side(readout, entry, manager, gap_join)
         sides.append(side)
     return tuple(sides)
+
+
+def _entry_side(
+    readout: readout_part.Readout,
+    entry: layout_module.PoolPlan,
+    manager: ports.DecodeQueue,
+    gap_join: Optional[ports.WindowGapJoin],
+) -> routers.EntrySide:
+    """One entry pool's side: its store and the end that sends to it.
+
+    A run with no decoder has an idle pool that reads no store.
+    """
+    store_parts = readout.store_parts(entry.store)
+    if store_parts is None:
+        return routers.EntrySide(entry.pool, manager, None, gap_join)
+    store_output = store_parts.output_for(entry.pool)
+    return routers.EntrySide(
+        entry.pool,
+        manager,
+        store_output,
+        gap_join,
+        store=store_parts.store,
+        is_store_written=store_parts.is_written,
+    )
 
 
 def _root_seed(value) -> Optional[int]:
@@ -565,6 +591,7 @@ def _capture_result(machine: Machine) -> result_records.RunResult:
     stamps = machine.observation.runtime_stamps
     waits = stamps.magic_state_wait.values()
     magic_state_stall_ticks = sum(waits)
+    gate_stalls = _gate_stalls(machine, operation_by_id, ordered_ids)
     return result_records.RunResult(
         terminal_status="complete",
         event_queue_empty=True,
@@ -576,7 +603,40 @@ def _capture_result(machine: Machine) -> result_records.RunResult:
         operation_results=tuple(rows),
         link_traffic=link_traffic,
         data_movement=data_movement,
+        gate_stalls=gate_stalls,
     )
+
+
+def _gate_stalls(machine: Machine, operation_by_id: dict, ordered_ids) -> tuple:
+    """A GateStall per feedback-blocked operation, from the stamps."""
+    stamps = machine.observation.runtime_stamps
+    boundary_at_or_after = machine.qpu.device.boundary_at_or_after
+    stalls = []
+    for operation_id in ordered_ids:
+        blocker_id = operation_by_id[operation_id].blocked_by
+        if blocker_id is None:
+            continue
+        blocker_done = stamps.body_done.get(blocker_id)
+        ready = stamps.otherwise_ready[operation_id]
+        released = stamps.decode_release[operation_id]
+        started = stamps.op_start[operation_id]
+        unblocked_start = boundary_at_or_after(ready)
+        reaction = None
+        if blocker_done is not None:
+            reaction = released - blocker_done
+        stall_ticks = started - unblocked_start
+        stall = result_records.GateStall(
+            operation_id=operation_id,
+            blocked_by=blocker_id,
+            blocker_done_ticks=blocker_done,
+            ready_ticks=ready,
+            released_ticks=released,
+            started_ticks=started,
+            stall_ticks=stall_ticks,
+            reaction_ticks=reaction,
+        )
+        stalls.append(stall)
+    return tuple(stalls)
 
 
 def _data_movement_value(
@@ -614,11 +674,12 @@ def _operation_result(
 
 
 def _operation_truth(operation, binding, truth_for):
-    """A segment contribution has no independently sampled logical truth.
+    """A segment has no independently sampled logical truth.
 
     Sinter's _CompiledStimThenDecodeSampler.sample compares predictions
-    and actual_obs for the same complete circuit shot. A stream segment
-    contributes only its commit interval, so only its owner is scored.
+    and actual_obs for the same complete circuit shot. A segment's value
+    is its stream's frame through the segment's end, which the source
+    samples no observable for, so only the stream's owner is scored.
     """
     stream_id = operation.stream_id
     if binding is not None:

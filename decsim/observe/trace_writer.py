@@ -75,14 +75,14 @@ def thread_order(
 
 def round_text(round_key: tuple) -> str:
     """A round key as the args carry it: `op:index`."""
-    operation_id, round_index = round_key
-    return f"{operation_id}:{round_index}"
+    stream_id, round_index = round_key
+    return f"{stream_id}:{round_index}"
 
 
 def window_text(window_key: tuple) -> str:
     """A window key as the args carry it: `op:index`."""
-    operation_id, window_id = window_key
-    return f"{operation_id}:{window_id}"
+    stream_id, window_id = window_key
+    return f"{stream_id}:{window_id}"
 
 
 def request_text(
@@ -92,7 +92,7 @@ def request_text(
     if request_key is None:
         return ""
     return (
-        f"{request_key.operation_id}:{request_key.window_id}:"
+        f"{request_key.stream_id}:{request_key.window_id}:"
         f"{request_key.pool.word}:{request_key.run_sequence}"
     )
 
@@ -162,7 +162,7 @@ class TraceWriter:
 
     def round_emitted(self, readout: round_records.QPUReadout) -> None:
         """One readout, at the boundary the QPU reads it out at."""
-        round_key = (readout.operation_id, readout.round_index)
+        round_key = (readout.stream_id, readout.round_index)
         args = {"round": round_text(round_key), "bits": readout.size_bits}
         name = f"emitted round {readout.round_index}"
         self._instant("QPU", name, "round", args)
@@ -194,7 +194,7 @@ class TraceWriter:
         fragment (or its release from the line) to its packing; its place in
         the bound is taken at its emission.
         """
-        round_key = (event.operation_id, event.round_index)
+        round_key = (event.stream_id, event.round_index)
         if event.kind == "BINARY_AVAILABLE":
             self._begin_assembly(capacity, round_key, event)
             return
@@ -209,7 +209,7 @@ class TraceWriter:
         The wait opens at the QPU's emission, so fragments arriving while it
         waits find its key open and open no place.
         """
-        round_key = (event.operation_id, event.round_index)
+        round_key = (event.stream_id, event.round_index)
         if event.kind == "STALLED":
             self._begin_waiting_round(round_key, event)
             return
@@ -223,7 +223,7 @@ class TraceWriter:
         The workspace frees the round at packing, so the wait for store room is
         a residence of its own, from refusal to admission.
         """
-        round_key = (event.operation_id, event.round_index)
+        round_key = (event.stream_id, event.round_index)
         if event.kind == "STALLED":
             self._begin_held_round(round_key, event)
             return
@@ -253,14 +253,14 @@ class TraceWriter:
             "channel": record.channel,
             "queue_wait_ticks": transfer.queue_wait_ticks,
             "delivery_tick": transfer.delivery_ticks,
-            "operation": attribution.operation_id,
+            "owner": attribution.owner_id,
         }
         if attribution.window_id is not None:
-            window_key = (attribution.operation_id, attribution.window_id)
+            window_key = (attribution.owner_id, attribution.window_id)
             args["window"] = window_text(window_key)
         if attribution.round_keys:
             round_keys = attribution.round_keys
-            args["rounds_by_operation"] = _rounds_by_operation(round_keys)
+            args["rounds_by_stream"] = _rounds_by_stream(round_keys)
         name = _move_name(attribution)
         if attribution.window_id is None:
             category = "round,link"
@@ -271,7 +271,7 @@ class TraceWriter:
         self._complete(thread, name, category, start, duration, args)
         self._flow_over_move(thread, attribution, transfer)
         if attribution.window_id is not None:
-            window_key = (attribution.operation_id, attribution.window_id)
+            window_key = (attribution.owner_id, attribution.window_id)
             self._step_window_flow(thread, window_key, start)
 
     def frame_landed(self, record: transfer_records.FrameRecord) -> None:
@@ -349,7 +349,7 @@ class TraceWriter:
         """One consumer token keeps the listed rounds alive."""
         args = {
             "holder": _holder_text(holder),
-            "rounds_by_operation": _rounds_by_operation(round_keys),
+            "rounds_by_stream": _rounds_by_stream(round_keys),
             "transfer": "reference",
         }
         self._instant(store_name, "hold registered", "hold", args)
@@ -395,7 +395,7 @@ class TraceWriter:
         thread = f"{store_name} port {port_index}"
         duration = completion_tick - start_tick
         args = {
-            "rounds_by_operation": _rounds_by_operation(round_keys),
+            "rounds_by_stream": _rounds_by_stream(round_keys),
             "arrival": arrival_tick,
             "waited_ticks": start_tick - arrival_tick,
         }
@@ -418,7 +418,7 @@ class TraceWriter:
         """Every round the window reads is readable in its store."""
         args = {
             "window": window_text(window.key),
-            "rounds_by_operation": _rounds_by_operation(read_keys),
+            "rounds_by_stream": _rounds_by_stream(read_keys),
             "commit": f"{window.commit_lo}..{window.commit_hi}",
         }
         name = f"W{window.window_index} ready"
@@ -426,7 +426,7 @@ class TraceWriter:
 
     def job_enqueued(self, job: decoding_records.DecodeJob) -> None:
         """A window's decode request joins its ready queue."""
-        window_key = (job.operation_id, job.window_id)
+        window_key = (job.stream_id, job.window_id)
         args = {
             "window": window_text(window_key),
             "request": request_text(job.request_key),
@@ -534,7 +534,7 @@ class TraceWriter:
     ) -> None:
         """One of a window's solves waits for that window's others."""
         del result
-        window_key = (job.operation_id, job.window_id)
+        window_key = (job.stream_id, job.window_id)
         args = {
             "window": window_text(window_key),
             "request": request_text(job.request_key),
@@ -583,11 +583,11 @@ class TraceWriter:
     ) -> None:
         """The job's input is in the unit's own memory."""
         thread = _unit_thread(unit.name)
-        window_key = (job.operation_id, job.window_id)
+        window_key = (job.stream_id, job.window_id)
         args = {
             "window": window_text(window_key),
             "request": request_text(job.request_key),
-            "rounds_by_operation": _job_rounds_by_operation(job),
+            "rounds_by_stream": _job_rounds_by_stream(job),
             "bits": _landed_bits(job),
             "transfer": "copy",
             "capacity_bits": unit.memory.capacity_bits,
@@ -644,7 +644,7 @@ class TraceWriter:
         pair, a speculative strong decode), so the record names its unit. A
         cancelled stage carries the mark, so the trace shows where it stopped.
         """
-        window_key = (record.operation_id, record.window_id)
+        window_key = (record.stream_id, record.window_id)
         thread = _unit_thread(record.unit_name)
         args = {
             "window": window_text(window_key),
@@ -1136,21 +1136,21 @@ def _copied_identity(key) -> dict:
     """
     if isinstance(key, tuple):
         return {"round": round_text(key)}
-    window_key = (key.operation_id, key.window_id)
+    window_key = (key.stream_id, key.window_id)
     window = window_text(window_key)
-    rounds = _job_rounds_by_operation(key)
-    return {"window": window, "rounds_by_operation": rounds}
+    rounds = _job_rounds_by_stream(key)
+    return {"window": window, "rounds_by_stream": rounds}
 
 
-def _job_rounds_by_operation(job: decoding_records.DecodeJob) -> dict:
+def _job_rounds_by_stream(job: decoding_records.DecodeJob) -> dict:
     """The rounds a job's landed input holds, by operation."""
     decoder_input = job.decoder_input
     if decoder_input is None:
         return {}
     round_keys = []
     for round_input in decoder_input.rounds:
-        round_keys.append((round_input.operation_id, round_input.round_index))
-    return _rounds_by_operation(round_keys)
+        round_keys.append((round_input.stream_id, round_input.round_index))
+    return _rounds_by_stream(round_keys)
 
 
 def _holder_text(holder) -> str:
@@ -1168,21 +1168,21 @@ def _holder_text(holder) -> str:
     return kind_name
 
 
-def _rounds_by_operation(round_keys) -> dict:
-    """Each operation's rounds among the keys as `lo..hi`, by operation.
+def _rounds_by_stream(round_keys) -> dict:
+    """Each stream's rounds among the keys as `lo..hi`, by stream.
 
-    A lookahead window reads its operation's last rounds and the next
-    operation's first ones, so one range over every key would name
-    rounds of one operation that the other owns.
+    A lookahead window reads its stream's last rounds and the next
+    stream's first ones, so one range over every key would name rounds
+    of one stream that the other owns.
     """
-    indices_by_operation = {}
-    for operation_id, round_index in round_keys:
-        operation = str(operation_id)
-        indices = indices_by_operation.setdefault(operation, [])
+    indices_by_stream = {}
+    for stream_id, round_index in round_keys:
+        stream = str(stream_id)
+        indices = indices_by_stream.setdefault(stream, [])
         indices.append(round_index)
     ranges = {}
-    for operation, indices in indices_by_operation.items():
-        ranges[operation] = f"{min(indices)}..{max(indices)}"
+    for stream, indices in indices_by_stream.items():
+        ranges[stream] = f"{min(indices)}..{max(indices)}"
     return ranges
 
 
@@ -1239,7 +1239,7 @@ def _job_round_keys(job: decoding_records.DecodeJob) -> tuple:
         return ()
     keys = []
     for round_input in decoder_input.rounds:
-        keys.append((round_input.operation_id, round_input.round_index))
+        keys.append((round_input.stream_id, round_input.round_index))
     return tuple(keys)
 
 

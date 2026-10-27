@@ -46,6 +46,7 @@ from typing import Optional
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.rounds as round_records
+import decsim.records.transfers as transfer_records
 import decsim.trace_source as trace_source
 
 # how a store takes its rounds, as the module docstring says
@@ -55,29 +56,20 @@ INTAKES = (WRITTEN, LANDED)
 
 
 @dataclasses.dataclass(frozen=True)
-class Hop:
-    """A hop that lands in a store: its row, and where its bits sat."""
-
-    path_name: str
-    source_name: str
-
-
-@dataclasses.dataclass(frozen=True)
 class StoreIntake:
     """How one store takes its rounds.
 
     name is the store's, the line it narrates on and the copy's target;
     seat is its place on the path, as detection_events.formed_at names
     it; shape is one of INTAKES. controller_write is the hop the
-    controller writes over, and escalation the hop an escalated region
-    lands over, None for a store no escalation reaches.
+    controller writes over; an escalated region names the hop it lands
+    over itself, since each edge into the store's pool has its own.
     """
 
     name: str
     seat: str
     shape: str
-    controller_write: Hop
-    escalation: Optional[Hop] = None
+    controller_write: transfer_records.StoreHop
 
 
 class SyndromeRoundReceiver:
@@ -144,14 +136,37 @@ class SyndromeRoundReceiver:
         announcement. A round of a closed operation never lands here:
         the window manager refuses a round its plan does not expect.
         """
+        finish = functools.partial(self._finish_write, on_published)
+        self._form_then_write(packed, finish)
+
+    def receive_copy(
+        self,
+        packed: round_records.PackedRound,
+        on_stored: Callable[[], None],
+    ) -> None:
+        """Form one written copy of another pool's round, then store it.
+
+        A window of this store's pool reads the round
+        (controller/round_destinations.py); its own store publishes it,
+        so here it only wakes the windows that read it, then on_stored.
+        """
+        finish = functools.partial(self._finish_copy, on_stored)
+        self._form_then_write(packed, finish)
+
+    def _form_then_write(
+        self,
+        packed: round_records.PackedRound,
+        finish: Callable[[round_records.PackedRound], None],
+    ) -> None:
+        """The formation cycles, when this seat forms the round; the write."""
         formation_cycles = self.detection_events.cycles_at(self.intake.seat, 1)
         if formation_cycles == 0:
-            self._write(packed, on_published)
+            self._write(packed, finish)
             return
         clock = self.detection_events.clock
         edge = clock.edge(formation_cycles, self.engine.now)
         delay = edge - self.engine.now
-        write = functools.partial(self._write, packed, on_published)
+        write = functools.partial(self._write, packed, finish)
         self.engine.schedule(delay, write, label="detection event formation")
 
     def send_memory_round(
@@ -198,18 +213,28 @@ class SyndromeRoundReceiver:
         widths = self._stored_widths(region)
         carried = region.carried_packets
         for packet, bits in zip(carried, widths, strict=True):
-            round_key = (packet.operation_id, packet.round_index)
+            round_key = (packet.stream_id, packet.round_index)
             stated = round_records.stated_bits(bits)
             self.reserved_bits_by_round[round_key] = stated
+
+    def is_round_coming(self, round_key: tuple) -> bool:
+        """Whether a round is on its way in: room reserved, not stored yet.
+
+        Every edge into this store's pool asks before it carries a
+        round, so a round two edges' regions read crosses once.
+        """
+        return round_key in self.reserved_bits_by_round
 
     def receive_region(
         self,
         region: round_records.EscalatedRegion,
         on_stored: Callable[[], None],
+        arrival: transfer_records.StoreHop,
     ) -> None:
         """Take an escalated region that landed here: every round its slot.
 
-        on_stored runs once the store holds every round.
+        arrival is the edge's hop it landed over. on_stored runs once
+        the store holds every round.
         """
         packet_bits = []
         for packet in region.carried_packets:
@@ -219,7 +244,7 @@ class SyndromeRoundReceiver:
             region.rounds_before,
             region.packets,
             packet_bits,
-            self.intake.escalation,
+            arrival,
             on_stored,
         )
 
@@ -242,29 +267,40 @@ class SyndromeRoundReceiver:
     def _write(
         self,
         landed: round_records.PackedRound,
-        on_published: Callable[[], None],
+        finish: Callable[[round_records.PackedRound], None],
     ) -> None:
         """Ask the store when the formed round's write completes."""
         packed = self._as_stored(landed)
         stored_bits = round_records.fragment_wire_bits(packed.packet.fragments)
         written_tick = self.store.book_write(packed.round_key, stored_bits)
         if written_tick == self.engine.now:
-            self._finish_write(packed, on_published)
+            finish(packed)
             return
         delay = written_tick - self.engine.now
-        finish = functools.partial(self._finish_write, packed, on_published)
-        self.engine.schedule(delay, finish, label="syndrome buffer write")
+        finish_later = functools.partial(finish, packed)
+        self.engine.schedule(delay, finish_later, label="syndrome buffer write")
 
     def _finish_write(
         self,
-        packed: round_records.PackedRound,
         on_published: Callable[[], None],
+        packed: round_records.PackedRound,
     ) -> None:
         self._give_back_reservation(packed)
         self._take_slot(packed, self.engine.now)
         self._fire_published(packed)
         self.windows.accept_window_input(packed.packet)
         on_published()
+
+    def _finish_copy(
+        self,
+        on_stored: Callable[[], None],
+        packed: round_records.PackedRound,
+    ) -> None:
+        """Store the copy and wake its readers; its own store publishes it."""
+        self._give_back_reservation(packed)
+        self._take_slot(packed, self.engine.now)
+        self.windows.accept_copied_round(self.store, packed.packet)
+        on_stored()
 
     def _send_memory_round_on(
         self,
@@ -288,8 +324,8 @@ class SyndromeRoundReceiver:
         self.output.send_memory_round(packed, delivered)
 
     def _deliver_memory_round(self, packed: round_records.PackedRound) -> None:
-        source_operation_id = packed.route.source_operation_id
-        self.memory_arrivals.receive_memory_round(source_operation_id)
+        source_stream_id = packed.route.source_stream_id
+        self.memory_arrivals.receive_memory_round(source_stream_id)
         self._fire_event("FEEDBACK_MEMORY_DELIVERED", packed)
 
     def _stored_widths(self, region: round_records.EscalatedRegion) -> list:
@@ -354,7 +390,7 @@ class SyndromeRoundReceiver:
         round_key: tuple,
         bits: Optional[int],
         packet: round_records.SyndromeRoundPacket,
-        hop: Hop,
+        hop: transfer_records.StoreHop,
     ) -> None:
         """The copy the intake made, and its line in the I/O trace."""
         self.trace.copy_made.fire(
@@ -369,7 +405,7 @@ class SyndromeRoundReceiver:
         rounds_before: tuple,
         packets: tuple,
         packet_bits,
-        hop: Hop,
+        hop: transfer_records.StoreHop,
         on_stored: Callable[[], None],
     ) -> None:
         """Land the rounds once this seat has formed them, if it forms them.
@@ -397,7 +433,7 @@ class SyndromeRoundReceiver:
         rounds_before: tuple,
         packets: tuple,
         packet_bits,
-        hop: Hop,
+        hop: transfer_records.StoreHop,
         on_stored: Callable[[], None],
     ) -> None:
         """Each round as the store holds it; its copy reports the hop's bits.
@@ -455,7 +491,7 @@ class SyndromeRoundReceiver:
         self,
         packet: round_records.SyndromeRoundPacket,
         packet_bits: Optional[int],
-        hop: Hop,
+        hop: transfer_records.StoreHop,
     ) -> None:
         """Store the round, or drop it when its operation already closed.
 
@@ -464,9 +500,9 @@ class SyndromeRoundReceiver:
         clears its reserve only in the push that fills the slot
         (src/dev/net/pktfifo.hh).
         """
-        round_key = (packet.operation_id, packet.round_index)
+        round_key = (packet.stream_id, packet.round_index)
         del self.reserved_bits_by_round[round_key]
-        if self.store.has_operation(packet.operation_id):
+        if self.store.has_stream(packet.stream_id):
             self._store_landing(packet, packet_bits, hop)
             return
         self._drop_landing(packet, packet_bits, hop)
@@ -475,14 +511,14 @@ class SyndromeRoundReceiver:
         self,
         packet: round_records.SyndromeRoundPacket,
         packet_bits: Optional[int],
-        hop: Hop,
+        hop: transfer_records.StoreHop,
     ) -> None:
         self.store.accept_packed_round(packet, publication_tick=self.engine.now)
-        round_key = (packet.operation_id, packet.round_index)
+        round_key = (packet.stream_id, packet.round_index)
         self._narrate_intake(round_key, packet_bits, packet, hop)
         if self.windows is not None:
             self.windows.accept_room_round(
-                self.store, packet.operation_id, packet.round_index
+                self.store, packet.stream_id, packet.round_index
             )
         # Arrival can create a live window's first hold. Publish before
         # reclamation, as gem5 services targets before freeing an entry
@@ -493,7 +529,7 @@ class SyndromeRoundReceiver:
         self,
         packet: round_records.SyndromeRoundPacket,
         packet_bits: Optional[int],
-        hop: Hop,
+        hop: transfer_records.StoreHop,
     ) -> None:
         """The operation closed while the round crossed: it has no reader.
 
@@ -502,7 +538,7 @@ class SyndromeRoundReceiver:
         round must not enter the store. The copy still fires: the bits
         crossed the hop and the link charged them.
         """
-        round_key = (packet.operation_id, packet.round_index)
+        round_key = (packet.stream_id, packet.round_index)
         self.trace.copy_made.fire(
             round_key, packet_bits, hop.source_name, self.intake.name
         )
@@ -511,22 +547,26 @@ class SyndromeRoundReceiver:
         )
 
     def _received_text(
-        self, packet: round_records.SyndromeRoundPacket, hop: Hop
+        self,
+        packet: round_records.SyndromeRoundPacket,
+        hop: transfer_records.StoreHop,
     ) -> str:
         defects = packet.defects_text()
         holds = self.store.held_rounds_description()
         return (
-            f"received round {packet.round_index} of op {packet.operation_id} "
+            f"received round {packet.round_index} of stream {packet.stream_id} "
             f"from {hop.path_name}; {defects}; holds {holds}"
         )
 
     def _dropped_text(
-        self, packet: round_records.SyndromeRoundPacket, hop: Hop
+        self,
+        packet: round_records.SyndromeRoundPacket,
+        hop: transfer_records.StoreHop,
     ) -> str:
         holds = self.store.held_rounds_description()
         return (
-            f"dropped round {packet.round_index} of op {packet.operation_id} "
-            f"from {hop.path_name}: op {packet.operation_id} "
+            f"dropped round {packet.round_index} of stream {packet.stream_id} "
+            f"from {hop.path_name}: stream {packet.stream_id} "
             f"closed while the round crossed; holds {holds}"
         )
 
@@ -534,9 +574,9 @@ class SyndromeRoundReceiver:
         self._fire_event("PUBLISHED", packed)
 
     def _fire_event(self, kind: str, packed: round_records.PackedRound) -> None:
-        operation_id, round_index = packed.round_key
+        stream_id, round_index = packed.round_key
         event = round_records.RoundEvent.of(
-            kind, self.engine.now, operation_id, round_index, packed.route
+            kind, self.engine.now, stream_id, round_index, packed.route
         )
         self.trace.round_event.fire(event)
 

@@ -58,7 +58,7 @@ class RecordingInner(decoder_module.DecoderBase):
 
     def decode(self, job):
         self.decode_ticks.append(self.engine.now)
-        return decoding_records.DecodeResult(job.operation_id, job.window_id)
+        return decoding_records.DecodeResult(job.stream_id, job.window_id)
 
 
 class ElapsedRecorder(decoder_module.DecoderBase):
@@ -98,7 +98,7 @@ def decode_job(window_id=0, round_count=3):
         1, window_id, window_records.WEAK_POOL_ID, window_id
     )
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=window_id,
         round_count=round_count,
         label=f"W{window_id}",
@@ -435,7 +435,7 @@ def _job_of_rounds(round_bits) -> decoding_records.DecodeJob:
     payloads = []
     for round_index, bits in enumerate(round_bits, start=1):
         fragment = round_records.RetainedSyndromeFragment(
-            operation_id=1,
+            stream_id=1,
             patch_ids=(0,),
             round_index=round_index,
             bits=None,
@@ -445,7 +445,7 @@ def _job_of_rounds(round_bits) -> decoding_records.DecodeJob:
         payloads.append(fragment)
     round_count = len(round_bits)
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=round_count, payloads=payloads
+        stream_id=1, window_id=0, round_count=round_count, payloads=payloads
     )
 
 

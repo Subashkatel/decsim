@@ -30,13 +30,13 @@ def _with_edge(answer_route: str) -> route_records.Routes:
         answer_route=answer_route,
     )
     pools = (WEAK_HOPS, STRONG_HOPS)
-    return routes_build.generated(pools, (edge,), WEAK)
+    return routes_build.generated(pools, (edge,))
 
 
 def test_a_run_with_no_edge_answers_each_pool_on_its_own_hop():
     """The weak answer stays on the chip; the strong one names its request."""
     pools = (WEAK_HOPS, STRONG_HOPS)
-    routes = routes_build.generated(pools, (), WEAK)
+    routes = routes_build.generated(pools, ())
     assert routes.answer(WEAK) == route_records.AnswerRoute(
         None, "weak_to_frame", 0
     )
@@ -67,13 +67,14 @@ def test_an_edges_boundaries_are_the_four_routes_of_its_two_pools():
 def test_an_answer_through_the_weak_chip_goes_down_then_home_on_the_chip():
     """Down the reverse hop with its name, home on the weak hop without."""
     routes = _with_edge(route_records.THROUGH_WEAK_CHIP)
-    assert routes.answer(STRONG) == route_records.AnswerRoute(
+    assert routes.answer(STRONG, WEAK) == route_records.AnswerRoute(
         down="strong_to_weak",
         home="weak_to_frame",
         commit_cycles=route_records.CHIP_COMMIT_CYCLES,
     )
     assert routes.name_bits_by_answer_hop == {
         "weak_to_frame": 0,
+        "strong_to_frame": NAME_BITS,
         "strong_to_weak": NAME_BITS,
     }
 
@@ -104,8 +105,8 @@ def test_a_chain_names_only_the_hops_that_cross_the_wall():
             answer_route=route_records.THROUGH_WEAK_CHIP,
         ),
     )
-    routes = routes_build.generated(pools, edges, chip)
-    assert routes.answer(osd) == route_records.AnswerRoute(
+    routes = routes_build.generated(pools, edges)
+    assert routes.answer(osd, relay) == route_records.AnswerRoute(
         "osd_to_relay", "relay_to_frame", 1
     )
     assert routes.boundary(relay, osd) == route_records.BoundaryRoute(
@@ -117,5 +118,41 @@ def test_a_chain_names_only_the_hops_that_cross_the_wall():
     assert routes.name_bits_by_answer_hop == {
         "chip_to_frame": 0,
         "relay_to_frame": NAME_BITS,
+        "osd_to_frame": NAME_BITS,
         "osd_to_relay": 0,
     }
+
+
+def test_a_pool_two_edges_target_answers_each_down_its_own_edge():
+    """Two chips share one host pool, each joining its own window's answer.
+
+    Toshio's weak decoders share one strong decoder (2510.25222 Sec.
+    III C); through the weak chip, the answer goes to the chip that asked.
+    """
+    other = window_records.PoolId("other")
+    other_hops = route_records.PoolHops(
+        other, "fridge", "other_to_frame", "other_to_other"
+    )
+    edges = (
+        route_records.EdgeHops(
+            WEAK,
+            STRONG,
+            "weak_to_strong",
+            "strong_to_weak",
+            answer_route=route_records.THROUGH_WEAK_CHIP,
+        ),
+        route_records.EdgeHops(
+            other,
+            STRONG,
+            "other_to_strong",
+            "strong_to_other",
+            answer_route=route_records.THROUGH_WEAK_CHIP,
+        ),
+    )
+    pools = (WEAK_HOPS, other_hops, STRONG_HOPS)
+    routes = routes_build.generated(pools, edges)
+    homes = [routes.answer(STRONG, WEAK), routes.answer(STRONG, other)]
+    assert homes == [
+        route_records.AnswerRoute("strong_to_weak", "weak_to_frame", 1),
+        route_records.AnswerRoute("strong_to_other", "other_to_frame", 1),
+    ]

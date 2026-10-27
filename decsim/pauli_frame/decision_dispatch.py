@@ -41,7 +41,7 @@ class DecisionDispatch:
             self.engine.schedule(0, landed, label="pauli frame->controller")
             return
         attribution = transfer_records.TransferAttribution(
-            operation_id=decision.target_operation_id,
+            owner_id=decision.target_operation_id,
             patch_ids=(),
             window_id=None,
             first_round=None,

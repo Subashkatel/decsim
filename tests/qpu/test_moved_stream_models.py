@@ -5,7 +5,8 @@ WindowSlicer, the way GrowingStimModels slices it: every window's rows,
 columns, priors, observables, owned mask, handoffs, positions,
 coordinates and bases must be the same, and a fault must keep one name
 across every window that holds it (probe p1, Adroit config_proto/
-probes8d, at d=3, 5 and 11).
+probes8d, at d=3, 5 and 11). The streams of one program share its short
+circuits, as sinter compiles a decoder once per task (circuit_builds).
 """
 
 import numpy
@@ -45,7 +46,7 @@ def _windows(commit_rounds: int, buffer_rounds: int) -> list:
         buffer_hi = commit_hi + buffer_rounds
         round_count = buffer_hi - commit_lo + 1
         window = window_records.Window(
-            operation_id=100,
+            stream_id=100,
             window_index=len(windows),
             commit_lo=commit_lo,
             commit_hi=commit_hi,
@@ -63,7 +64,7 @@ def _window_at(window_index: int, commit_lo: int) -> window_records.Window:
     commit_hi = commit_lo + 4
     buffer_hi = commit_lo + 9
     return window_records.Window(
-        operation_id=100,
+        stream_id=100,
         window_index=window_index,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -256,11 +257,23 @@ def test_a_window_far_into_the_stream_moves_the_interior_model():
     assert checks_differ.nnz == 0
 
 
+def test_the_streams_of_one_program_share_its_short_circuits():
+    first_program = _program()
+    first = moved_stream_models.MovedStimModels(first_program, REQUIREMENT)
+    # each shot installs its own copy of the program
+    copy = _program()
+    second = moved_stream_models.MovedStimModels(copy, REQUIREMENT)
+    other_program = memory_programs.memory_program(3, "Z", 0.004)
+    other = moved_stream_models.MovedStimModels(other_program, REQUIREMENT)
+    assert second.frames is first.frames
+    assert other.frames is not first.frames
+
+
 def test_a_closed_boundary_and_a_second_finish_are_refused():
     program = _program()
     models = moved_stream_models.MovedStimModels(program, REQUIREMENT)
     window = window_records.Window(
-        operation_id=100,
+        stream_id=100,
         window_index=0,
         commit_lo=1,
         commit_hi=3,

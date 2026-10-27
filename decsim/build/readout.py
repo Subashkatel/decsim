@@ -13,6 +13,7 @@ import decsim.build.layout as layout_module
 import decsim.config as config
 import decsim.controller.controller as controller_module
 import decsim.controller.round_assembly as round_assembly
+import decsim.controller.round_destinations as round_destinations
 import decsim.controller.round_transmission as round_transmission
 import decsim.controller.settings as controller_settings_module
 import decsim.controller.syndrome_round_sender as syndrome_round_sender
@@ -33,8 +34,9 @@ import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 class StoreParts:
     """One store, its outgoing end and its receiving end, and its plan.
 
-    other_outputs holds an outgoing end per entry pool past the first a
-    router feeds from this store, as (pool, output) pairs.
+    output sends to the pool the plan names as its reader;
+    other_outputs holds an outgoing end per other entry pool a router
+    feeds from this store, as (pool, output) pairs.
     """
 
     plan: layout_module.StorePlan
@@ -43,10 +45,17 @@ class StoreParts:
     receiver: receiver_module.SyndromeRoundReceiver
     other_outputs: tuple = ()
 
+    @property
+    def is_written(self) -> bool:
+        """Whether the controller writes this store, not lands rounds in it."""
+        return self.plan.intake.shape == receiver_module.WRITTEN
+
     def output_for(
         self, pool: window_records.PoolId
     ) -> round_output.SyndromeBufferOutput:
-        """The outgoing end that sends to one of the other entry pools."""
+        """The outgoing end that sends to one pool that reads the store."""
+        if pool.word == self.plan.reader:
+            return self.output
         for reader_pool, output in self.other_outputs:
             if reader_pool == pool:
                 return output
@@ -57,9 +66,9 @@ class StoreParts:
 class Readout:
     """Every component a round passes on its way into the stores.
 
-    stores holds each store the layout reads, the entry store first: the
-    one the controller writes, whose outgoing end serves the plan's
-    windows.
+    stores holds each store the layout reads, the first entry pool's
+    first; destinations says which of them each round goes to, None on
+    a run with no decoder.
     """
 
     controller: controller_module.Controller
@@ -73,6 +82,7 @@ class Readout:
     store_transfers: window_transfers.WindowTransfers
     memory_arrivals: memory_rounds.MemoryRoundArrivals
     stores: tuple
+    destinations: Optional[round_destinations.RoundDestinations]
 
     @classmethod
     def build(
@@ -98,10 +108,8 @@ class Readout:
         packing_line = syndrome_round_sender.HeldRounds(engine)
         in_flight_bound = controller_settings.packing_rounds_in_flight
         rounds_in_flight = round_assembly.RoundsInFlight(in_flight_bound)
-        landing_path = _landing_path(store_plans)
-        sender = syndrome_round_sender.SyndromeRoundSender(engine, landing_path)
-        write_path = layout.controller_write_hop()
-        transmitter = round_transmission.RoundTransmitter(engine, write_path)
+        sender = syndrome_round_sender.SyndromeRoundSender(engine)
+        transmitter = round_transmission.RoundTransmitter(engine)
         held_rounds = syndrome_round_sender.HeldRounds(engine)
         store_transfers = window_transfers.WindowTransfers(engine)
         memory_arrivals = memory_rounds.MemoryRoundArrivals(engine)
@@ -109,6 +117,7 @@ class Readout:
         for plan in store_plans:
             parts = _store_parts(plan, machine_clock, engine)
             stores.append(parts)
+        destinations = _destinations(layout, stores)
         readout = cls(
             controller=controller,
             detection_events=detection_events,
@@ -121,11 +130,12 @@ class Readout:
             store_transfers=store_transfers,
             memory_arrivals=memory_arrivals,
             stores=tuple(stores),
+            destinations=destinations,
         )
         readout._wire_the_controller_path(links)
         for parts in readout.stores:
             readout._wire_the_store(parts, links)
-        readout._wire_the_entry_store()
+        readout._wire_the_entry_stores(layout)
         return readout
 
     def store_parts(self, name: str) -> Optional[StoreParts]:
@@ -146,24 +156,22 @@ class Readout:
             return None
         return parts.store
 
-    @property
-    def primary_output(self) -> Optional[round_output.SyndromeBufferOutput]:
-        """The entry store's outgoing end; None with no store."""
-        if not self.stores:
-            return None
-        entry = self.stores[0]
-        return entry.output
-
     def connect(
         self,
         windows: ports.WindowInput,
         retention: ports.WindowRetention,
+        router: ports.StreamRouting,
     ) -> None:
-        """Tell the window side of every round that lands."""
+        """Tell the window side of every round that lands.
+
+        The router says which entry pool's store is each round's own.
+        """
         self.memory_arrivals.windows = windows
         self.store_transfers.retention = retention
         for parts in self.stores:
             parts.receiver.windows = windows
+        if self.destinations is not None:
+            self.destinations.router = router
 
     def check_settled(self) -> None:
         """No round is still on its way; the stores before the waiting line.
@@ -200,6 +208,7 @@ class Readout:
         self.rounds_in_flight.transmitter = self.transmitter
         self.rounds_in_flight.syndrome_round_sender = self.syndrome_round_sender
         self.syndrome_round_sender.link = links
+        self.syndrome_round_sender.destinations = self.destinations
         self.syndrome_round_sender.transmitter = self.transmitter
         self.syndrome_round_sender.packing_line = self.packing_line
         self.syndrome_round_sender.held_rounds = self.held_rounds
@@ -211,8 +220,9 @@ class Readout:
     def _wire_the_store(self, parts: StoreParts, links: ports.Link) -> None:
         """One store between its receiving end and its outgoing end.
 
-        A written store takes its rounds from the transmitter; a landed
-        one tells the memory arrivals of each round it stores.
+        A written store takes its rounds from the transmitter, which is
+        handed the store's side with each round; a landed one tells the
+        memory arrivals of each round it stores.
         """
         store = parts.store
         output = parts.output
@@ -229,23 +239,29 @@ class Readout:
         receiver.store = store
         receiver.output = output
         receiver.detection_events = self.detection_events
-        if parts.plan.intake.shape == receiver_module.WRITTEN:
-            self.transmitter.receiver = receiver
+        if parts.is_written:
             return
         receiver.memory_arrivals = self.memory_arrivals
 
-    def _wire_the_entry_store(self) -> None:
-        """The store the plan's windows read: the one the sender writes.
+    def _wire_the_entry_stores(self, layout: layout_module.Layout) -> None:
+        """The stores the plan's windows read: the ones the sender writes.
 
-        It tells the seats what leaves it: every read holds its rounds
+        Each tells the seats what leaves it: every read holds its rounds
         there until they have landed and formed, so a round that leaves
-        it is formed nowhere after.
+        it is formed nowhere after. With a store per entry pool a round
+        may sit in several, so each tells the destinations, which tell
+        the seats when it left the last.
         """
-        if not self.stores:
-            return
-        entry = self.stores[0]
-        entry.store.detection_events = self.detection_events
-        self.syndrome_round_sender.receiver = entry.receiver
+        names = layout.entry_stores()
+        retirement = self.detection_events
+        if len(names) > 1:
+            self.destinations.detection_events = self.detection_events
+            retirement = self.destinations
+        for name in names:
+            parts = self.store_parts(name)
+            if parts is None:
+                continue
+            parts.store.detection_events = retirement
 
 
 def build_detection_events(
@@ -324,20 +340,42 @@ def _store_parts(
     return StoreParts(plan, store, output, receiver, tuple(other_outputs))
 
 
-def _landing_path(store_plans: tuple) -> Optional[transfer_records.LinkPath]:
-    """The hop the entry store's rounds land over; None for a written one.
+def _destinations(
+    layout: layout_module.Layout, stores: list
+) -> Optional[round_destinations.RoundDestinations]:
+    """Which store each round goes to: one side per entry store, by pool.
 
-    An entry store the controller writes takes its rounds through the
-    transmitter; one that takes them landed, as a strong-only run's
-    strong store does, is reached over its controller hop.
+    A written store is reached through the transmitter, a landed one, as
+    a strong-only run's strong store is, over its controller hop. A run
+    with no decoder builds no store, so its rounds go nowhere.
     """
-    if not store_plans:
+    if not stores:
         return None
-    entry = store_plans[0]
-    intake = entry.intake
-    if intake.shape == receiver_module.WRITTEN:
-        return None
-    return intake.controller_write.path_name
+    side_by_store = {}
+    side_by_pool = {}
+    for entry in layout.entry_pools:
+        side = side_by_store.get(entry.store)
+        if side is None:
+            side = _store_side(stores, entry.store)
+            side_by_store[entry.store] = side
+        side_by_pool[entry.pool] = side
+    return round_destinations.RoundDestinations(side_by_pool)
+
+
+def _store_side(stores: list, name: str) -> round_destinations.StoreSide:
+    """One entry store as the controller writes it."""
+    for parts in stores:
+        if parts.plan.name != name:
+            continue
+        intake = parts.plan.intake
+        return round_destinations.StoreSide(
+            name=name,
+            store=parts.store,
+            receiver=parts.receiver,
+            write_path=intake.controller_write.path_name,
+            is_landed=not parts.is_written,
+        )
+    raise RuntimeError(f"the entry store {name} was not built")
 
 
 def _check_the_store_prices(

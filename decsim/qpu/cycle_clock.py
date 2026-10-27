@@ -203,13 +203,18 @@ class QPUDevice:
                     f"{operation.name} fires round "
                     f"{running.emitted_round_count}/{command.round_count}",
                 )
-                payloads = self.syndrome_source.round_payloads(
-                    operation, running.emitted_round_count
-                )
-                self._deliver(payloads, operation)
+                self._emit_body_round(command, running.emitted_round_count)
             if running.emitted_round_count == command.round_count:
                 del self._live.running_by_operation_id[operation_id]
                 self._finish_command(command)
+
+    def _emit_body_round(
+        self, command: program_records.RunOperationBody, round_index: int
+    ) -> None:
+        """The body's round, one readout group per stream it emits into."""
+        for emitter in _emitters(command):
+            payloads = self.syndrome_source.round_payloads(emitter, round_index)
+            self._deliver(payloads, emitter)
 
     def _start_waiting_commands(self) -> None:
         waiting = self._live.commands_waiting
@@ -226,16 +231,19 @@ class QPUDevice:
         operation = command.operation
         for patch in program_records.patches_of(operation):
             self._live.idle_by_patch.pop(patch, None)
+            if command.round_count:
+                self._live.prepared_patches.add(patch)
         if command.round_count == 0:
             self._run_instant_command(command)
             return
         if command.emits_detector_data:
-            self.syndrome_source.begin_operation(
-                operation,
-                command.round_count,
-                command.source_round_count,
-                round_period_ticks=self.clock.period_ticks,
-            )
+            for emitter in _emitters(command):
+                self.syndrome_source.begin_operation(
+                    emitter,
+                    command.round_count,
+                    command.source_round_count,
+                    round_period_ticks=self.clock.period_ticks,
+                )
         running = _RunningOperation(command, 0)
         self._live.running_by_operation_id[operation.id] = running
 
@@ -255,10 +263,33 @@ class QPUDevice:
         self, command: program_records.RunOperationBody
     ) -> None:
         operation = command.operation
+        patches = program_records.patches_of(operation)
+        if operation.kind is program_records.OpKind.DISCARD:
+            self._live.prepared_patches.difference_update(patches)
+        else:
+            self._idle_after(operation)
+        self.runtime.body_done(operation)
+
+    def _idle_after(self, operation: program_records.Operation) -> None:
+        """The operation's prepared patches idle until another claims them.
+
+        A patch is prepared just in time: an X or Z eigenstate is made at
+        the start of the first operation that measures the patch, and an
+        injection measures rounds itself (Litinski 1808.02892 Sec. 1:
+        initialization "can be done simultaneously with the subsequent
+        lattice surgery"). Before that a patch holds a state that can be
+        made again at any time, so no outcome depends on its rounds
+        (Bombín et al. 2303.04846 Eq. 4). So an operation that runs no
+        round, a skipped conditional correction, prepares nothing, and a
+        discarded patch measures no more rounds (swiper/device_manager.py
+        _generate_syndrome_round activates only the patches a running
+        instruction measures, and a DISCARD drops them).
+        """
         for patch in program_records.patches_of(operation):
+            if patch not in self._live.prepared_patches:
+                continue
             idle = _IdlePatch(operation.id, 0)
             self._live.idle_by_patch.setdefault(patch, idle)
-        self.runtime.body_done(operation)
 
     def _deliver(
         self,
@@ -290,7 +321,7 @@ class QPUDevice:
         if stated_tick < now:
             raise RuntimeError(
                 f"the syndrome source sends readout {readout.round_index} "
-                f"of operation {readout.operation_id!r} at tick "
+                f"of operation {readout.stream_id!r} at tick "
                 f"{stated_tick}, before tick {now} it was read out at"
             )
         waiting_until = self._last_departure_of(readout.patch_ids)
@@ -323,13 +354,20 @@ class QPUDevice:
         emitted = round_records.RoundEvent.of(
             "EMITTED",
             self.engine.now,
-            readout.operation_id,
+            readout.stream_id,
             readout.round_index,
             route,
             readout.patch_ids,
         )
         self.trace.round_event.fire(emitted)
         self.readout_receiver.accept_qpu_readout(readout, route)
+
+
+def _emitters(command: program_records.RunOperationBody) -> tuple:
+    """The views the body emits through: its segments, or the operation."""
+    if command.segments:
+        return command.segments
+    return (command.operation,)
 
 
 def _fragment_slots(operation, payload_count: int) -> tuple[int, int]:
@@ -382,11 +420,14 @@ class _LiveOperations:
 
     scheduled_boundaries and last_emitted_boundary keep a boundary from
     being scheduled or emitted twice; departure_tick_by_patch is the latest
-    waiting readout's tick, so a later one queues behind it.
+    waiting readout's tick, so a later one queues behind it;
+    prepared_patches are those a body has run a round on since their
+    last discard.
     """
 
     running_by_operation_id: dict = dataclasses.field(default_factory=dict)
     idle_by_patch: dict = dataclasses.field(default_factory=dict)
+    prepared_patches: set = dataclasses.field(default_factory=set)
     commands_waiting: list = dataclasses.field(default_factory=list)
     scheduled_boundaries: set = dataclasses.field(default_factory=set)
     last_emitted_boundary: int = 0

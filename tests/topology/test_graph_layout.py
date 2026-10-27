@@ -12,6 +12,7 @@ import dataclasses
 import pytest
 
 import decsim.confidence.cluster as cluster
+import decsim.decoders.execution_slots as execution_slots
 import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
 import decsim.escalation.settings as escalation_settings
@@ -21,6 +22,7 @@ import decsim.presets.machines as machines
 import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
+import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
 import decsim.topology.graph_layout as graph_layout
 import decsim.windows.routers as routers
@@ -158,8 +160,7 @@ def test_the_entry_store_is_written_and_a_targets_store_landed():
 
     assert entry_store.intake.shape == receiver_module.WRITTEN
     assert deep_store.intake.shape == receiver_module.LANDED
-    assert deep_store.intake.escalation.path_name == "strong_to_deep"
-    assert deep_store.intake.escalation.source_name == "strong_buffer"
+    assert deep_edge.hops.forward == "strong_to_deep"
     assert deep_edge.carried_from == "strong_buffer"
 
 
@@ -214,6 +215,28 @@ def test_pools_no_edge_joins_are_refused():
         laid_out(cut)
 
 
+def test_a_chain_that_comes_back_to_a_pool_it_passed_is_refused():
+    """The chain weak, b, c, d escalates back into b, a pool it passed."""
+    graph_with_circle = declared_run.weak_only_graph(rounds=3)
+    switching = declared_run.declared_switching()
+    weak = graph_with_circle.part("weak")
+    pool = weak.settings
+    for source, target in (("weak", "b"), ("b", "c"), ("c", "d")):
+        graph_with_circle = machines.with_escalation(
+            graph_with_circle, source, target, pool, switching
+        )
+    graph_with_circle = machines.with_escalation_to(
+        graph_with_circle, "d", "b", switching, switching_name="d_to_b"
+    )
+
+    with pytest.raises(graph.GraphError) as refusal:
+        laid_out(graph_with_circle)
+
+    message = str(refusal.value)
+    assert "['b', 'c', 'd'] escalate in a circle" in message
+    assert "from weak comes back to b" in message
+
+
 def test_a_router_makes_each_pool_it_feeds_an_entry_pool():
     routed = _routed_chain()
 
@@ -224,18 +247,33 @@ def test_a_router_makes_each_pool_it_feeds_an_entry_pool():
     assert layout.router.rule == _ROUTED_BY_PATCH
 
 
-def test_an_edge_from_an_entry_pool_past_the_first_is_refused():
-    """Only the first entry pool escalates yet."""
+def test_two_entry_pools_escalate_to_one_shared_strong_pool():
+    """Toshio's N_window weak decoders and a single strong decoder.
+
+    2510.25222 Sec. III C: fpga_b escalates to the strong pool the
+    weak pool escalates to, which is laid out once.
+    """
     routed = _routed_chain()
     switching = graph.Part("routed_switching", DEEP_SWITCHING_SLOT)
-    without_deep_edge = routed.without_part(DEEP_SWITCHING)
     results = graph.Wire(f"{_ROUTED_POOL}.escalate", "routed_switching.results")
-    redecode = graph.Wire("routed_switching.redecode", f"{DEEP_POOL}.escalated")
-    with_edge = without_deep_edge.with_part(switching)
-    escalating = with_edge.with_wires(results, redecode)
+    redecode = graph.Wire(
+        "routed_switching.redecode", f"{machines.STRONG_POOL}.escalated"
+    )
+    with_edge = routed.with_part(switching)
+    sharing = with_edge.with_wires(results, redecode)
 
-    with pytest.raises(graph.GraphError, match="not implemented yet"):
-        laid_out(escalating)
+    layout = laid_out(sharing)
+    pool_names = [plan.names.seat for plan in layout.pools]
+    routed_id = window_records.PoolId(_ROUTED_POOL)
+    routed_edge = layout.edge_leaving(routed_id)
+
+    assert pool_names == [
+        machines.WEAK_POOL,
+        _ROUTED_POOL,
+        machines.STRONG_POOL,
+        DEEP_POOL,
+    ]
+    assert routed_edge.hops.target.word == machines.STRONG_POOL
 
 
 def test_a_pool_reached_by_no_edge_and_no_router_is_refused():
@@ -280,3 +318,102 @@ def _pool_seeds(layout) -> list:
 
 def _policy_seeds(layout) -> list:
     return [plan.policy_seed for plan in layout.edges]
+
+
+def _store_per_pool_chain() -> graph.Machine:
+    """The chain whose router feeds weak's store and fpga_b's own."""
+    chain = chain_machine()
+    weak = chain.part(machines.WEAK_POOL)
+    return machines.with_store_per_pool(
+        chain, _ROUTED_BY_PATCH, ((_ROUTED_POOL, weak.settings),)
+    )
+
+
+def test_a_router_before_the_stores_gives_each_entry_pool_a_written_store():
+    stored = _store_per_pool_chain()
+    layout = laid_out(stored)
+    routed_id = window_records.PoolId(_ROUTED_POOL)
+    routed = layout.pool(routed_id)
+    routed_store = layout.store(routed.store)
+    entry_stores = layout.entry_stores()
+
+    assert entry_stores == (machines.WEAK_STORE, "fpga_b_buffer")
+    assert routed_store.intake.shape == receiver_module.WRITTEN
+    assert routed_store.other_readers == ()
+    assert routed_store.intake.controller_write.path_name == (
+        "controller_to_fpga_b_buffer"
+    )
+
+
+def test_a_router_that_feeds_both_a_store_and_a_pool_is_refused():
+    stored = _store_per_pool_chain()
+    weak = stored.part(machines.WEAK_POOL)
+    loose = graph.Part("loose", weak.settings)
+    grown = stored.with_part(loose)
+    wire = graph.Wire(f"{machines.ROUTER}.windows", "loose.rounds")
+    mixed = grown.with_wires(wire)
+
+    with pytest.raises(graph.GraphError, match="both stores and pools"):
+        laid_out(mixed)
+
+
+def test_a_router_that_feeds_a_store_no_pool_reads_is_refused():
+    stored = _store_per_pool_chain()
+    unread = stored.without_part(_ROUTED_POOL)
+
+    with pytest.raises(graph.GraphError) as refusal:
+        laid_out(unread)
+
+    assert str(refusal.value) == (
+        "the router feeds the store fpga_b_buffer, which no pool reads: a "
+        "router before the stores feeds one store per entry pool"
+    )
+
+
+def test_a_device_shared_by_a_sites_pools_is_laid_out_at_that_site():
+    chain = chain_machine()
+    slots = execution_slots.ExecutionSlots.Settings(2)
+    device = graph.Part("gpu", slots, fabrics.HOST)
+    shared = chain.with_part(device)
+
+    layout = laid_out(shared)
+
+    (device,) = layout.devices
+    assert (device.name, device.site) == ("gpu", fabrics.HOST)
+    assert device.settings.slot_count == 2
+
+
+def test_a_second_device_at_one_site_is_refused():
+    chain = chain_machine()
+    slots = execution_slots.ExecutionSlots.Settings(2)
+    gpu = graph.Part("gpu", slots, fabrics.HOST)
+    cpu = graph.Part("cpu", slots, fabrics.HOST)
+    shared = chain.with_part(gpu)
+    doubled = shared.with_part(cpu)
+
+    with pytest.raises(graph.GraphError, match="another device already sits"):
+        laid_out(doubled)
+
+
+def test_a_device_at_a_site_with_no_pool_is_refused():
+    chain = chain_machine()
+    slots = execution_slots.ExecutionSlots.Settings(2)
+    device = graph.Part("gpu", slots, "rack")
+    lone = chain.with_part(device)
+
+    with pytest.raises(graph.GraphError, match="where no pool sits"):
+        laid_out(lone)
+
+
+def test_a_pool_the_router_feeds_and_an_edge_reaches_is_refused():
+    routed = _routed_chain()
+    both = machines.with_escalation_to(
+        routed,
+        DEEP_POOL,
+        _ROUTED_POOL,
+        DEEP_SWITCHING_SLOT,
+        switching_name="deep_to_fpga_b",
+    )
+
+    with pytest.raises(graph.GraphError, match="fed by the router and reached"):
+        laid_out(both)

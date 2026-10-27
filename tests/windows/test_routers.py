@@ -132,6 +132,20 @@ def test_routing_by_patch_changes_no_correction_on_one_decoder():
         assert by_patch == one_pool
 
 
+def test_a_one_pool_rule_naming_a_pool_the_router_misses_is_refused():
+    one_unit = _two_memories()
+    pools = ((SECOND_POOL, _weak_pool()),)
+    nowhere = routers.OnePool.Settings("nowhere")
+    routed = machines.with_router(one_unit, nowhere, pools)
+
+    with pytest.raises(
+        ValueError,
+        match=r"router.rule.pool names the pool 'nowhere', which the "
+        r"router's windows port does not reach",
+    ):
+        machine_module.Machine.build(routed, 0)
+
+
 def _two_memories() -> graph.Machine:
     """The declared weak-only machine running mem1 and mem2, 9 rounds."""
     operations = [
@@ -180,9 +194,9 @@ def _real_two_memories() -> graph.Machine:
     )
     operations = []
     for index in range(2):
-        operation_id = index + 1
+        stream_id = index + 1
         operation = program_records.Operation(
-            id=operation_id,
+            id=stream_id,
             name=f"mem{index}",
             qubits=(index,),
             patches=(index,),

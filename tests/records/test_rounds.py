@@ -11,7 +11,7 @@ import decsim.records.windows as window_records
 
 def make_fragment(**overrides):
     values = {
-        "operation_id": 7,
+        "stream_id": 7,
         "patch_ids": ("patch-a",),
         "round_index": 3,
         "bits": (0, 1),
@@ -25,7 +25,7 @@ def make_fragment(**overrides):
 def test_a_timing_only_readout_retains_no_bits():
     """A readout with no bits stays a timing-only fragment."""
     readout = round_records.QPUReadout(
-        operation_id="operation",
+        stream_id="operation",
         patch_ids=("patch",),
         round_index=2,
         bits=None,
@@ -82,7 +82,7 @@ def test_defect_text_counts_positions_across_the_fragments_in_order():
     first_fragment = make_fragment(bits=(0, 1), fragment_index=0)
     second_fragment = make_fragment(bits=(1, 0, 1), fragment_index=1)
     packet = round_records.SyndromeRoundPacket(
-        operation_id=7,
+        stream_id=7,
         round_index=3,
         fragments=(first_fragment, second_fragment),
     )

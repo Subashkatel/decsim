@@ -14,7 +14,6 @@ import decsim.decoders.settings as decoder_settings
 import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.presets.machines as machines
-import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
@@ -80,9 +79,9 @@ def switching_graph(
     strong_decoder = decoder_settings.DecoderPoolSettings(
         algorithm=strong, engine=declared_run.DECLARED_ENGINE
     )
-    boundary_policy = boundary_policies.Held.Settings()
-    if strong_window.absorbs_weak_windows:
-        boundary_policy = boundary_policies.Eager.Settings()
+    # the windows take the strong window's boundary row, as
+    # window_settings.switching_windows gives it
+    boundary_policy = strong_window.boundary_policy
     workload = declared_run.declared_workload(None, rounds)
     qpu = declared_run.declared_qpu(round_microseconds)
     if scheme is None:

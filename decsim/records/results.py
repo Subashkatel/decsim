@@ -24,6 +24,31 @@ class LogicalOperationResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class GateStall:
+    """One feedback-blocked operation's wait for its blocker's decode.
+
+    The ticks are the blocker's body done (None for an external
+    blocker), the operation's otherwise-ready (every start gate but the
+    release open), the release crossing the output path, and the QPU's
+    start. stall_ticks is the start less the first round boundary at or
+    after otherwise-ready, where the operation would have started had
+    nothing waited on a decode; reaction_ticks is the release
+    less the blocker's body done: from the outcome's rounds to the moment
+    it can control further logic, decoding and communication both
+    (Bombín et al. 2303.04846 Sec. II).
+    """
+
+    operation_id: int
+    blocked_by: int
+    blocker_done_ticks: Optional[int]
+    ready_ticks: int
+    released_ticks: int
+    started_ticks: int
+    stall_ticks: int
+    reaction_ticks: Optional[int]
+
+
+@dataclasses.dataclass(frozen=True)
 class RunResult:
     """What one completed run computed; the gate hashes these fields."""
 
@@ -41,6 +66,8 @@ class RunResult:
     # the copies, references and moves of the data path; None unless the
     # observation section asked for them
     data_movement: Optional[dict]
+    # a GateStall per feedback-blocked operation, in operation order
+    gate_stalls: tuple = ()
 
 
 class UnitTask(Protocol):

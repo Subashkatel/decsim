@@ -10,6 +10,12 @@ a window's pool is known when the window is planned, and a boundary
 that leaves for it rides to that pool.
 
     by_patch  each patch's windows to the pool its table names
+    one_pool  every window to the one entry pool, the rule of a machine
+              with no router part
+
+Every machine has a router, so every part asks one owner which entry
+pool decodes a window, and the line of edges a window may climb starts
+there (windows/escalate_edges.py).
 
 A rule that reads the run's state (the least loaded pool, a backlog, a
 round) has no paper behind it and is not built; the rule slot takes a
@@ -81,41 +87,84 @@ class ByPatch:
             """Every operation's first patch has an entry pool."""
             table = dict(self.pool_by_patch)
             for pool_name in table.values():
-                _refuse_a_pool_not_routed_to(pool_name, pool_names)
+                _refuse_a_pool_not_routed_to(
+                    "pool_by_patch", pool_name, pool_names
+                )
             for operation in operations:
                 _refuse_an_unrouted_operation(operation, table)
+
+
+class OnePool:
+    """Every window to the one entry pool: a machine with no router part."""
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The one entry pool, by its part's name."""
+
+        pool: str
+        name = "one_pool"
+
+        def pool_for(self, operation: program_records.Operation) -> str:
+            """The one pool."""
+            del operation
+            return self.pool
+
+        def check_operations(
+            self, operations: tuple, pool_names: tuple
+        ) -> None:
+            """The one pool is one the router's windows port reaches.
+
+            A machine with no router part names its entry pool itself, so
+            only a router a run sets can name a pool it does not reach.
+            """
+            del operations
+            _refuse_a_pool_not_routed_to("pool", self.pool, pool_names)
 
 
 @dataclasses.dataclass(frozen=True)
 class EntrySide:
     """What one entry pool's windows are asked through.
 
-    decode_queue is the pool's manager, store_output the entry store's
-    end that sends to it, and gap_join the join of its solves, None when
-    no edge leaves it.
+    decode_queue is the pool's manager; store the store it reads, where
+    its windows' reads are held, and store_output that store's end that
+    sends to it; is_store_written whether the controller writes the
+    store, so its arrivals are the rounds published to the windows;
+    gap_join the join of its solves, None when it computes no
+    confidence. A run with no decoder reads no store.
     """
 
     pool: window_records.PoolId
     decode_queue: Any
     store_output: Any
     gap_join: Optional[Any] = None
+    store: Optional[ports.RetainedRounds] = None
+    is_store_written: bool = True
 
 
 class Router:
     """Sends each window to the entry pool its rule names.
 
-    sides holds every entry pool's side but the first, whose objects the
-    window side holds itself (build/windows.py): a machine of one entry
-    pool has no router.
+    It holds every entry pool's side, the first's as any other's, so no
+    part keeps a first entry pool of its own: a part asks the router.
     """
 
     tracker = ports.Port(round_tracker_module.RoundTracker)
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The router's rule (this module's rows)."""
+        """The router's rule (this module's rows), and the factory's pool.
+
+        factory_pool names the pool the magic-state factory's correction
+        decodes go to; None names the one entry pool of a machine with
+        one. No paper sets decoders aside for a factory: DecoNet decodes
+        15-to-1 distillation on its per-qubit decoders (2504.11805 Sec.
+        VIII-F) and VQD decodes the factory's storage patches in its
+        shared pool (2406.17995 Sec. 5.3), so a run names which pool
+        serves them (build/layout.py factory_pool).
+        """
 
         rule: RuleSettings = ByPatch.Settings()
+        factory_pool: Optional[str] = None
         name = "router"
 
         def build(self) -> "Router":
@@ -127,30 +176,62 @@ class Router:
         self.side_by_pool: dict = {}
 
     def add_side(self, side: EntrySide) -> None:
-        """One entry pool past the first, reached through this router."""
+        """One entry pool, reached through this router."""
         self.side_by_pool[side.pool] = side
 
     def pool_for(self, window: window_records.Window) -> window_records.PoolId:
         """The entry pool that decodes this window."""
-        operation = self.tracker.operation_by_id[window.operation_id]
+        return self.pool_of_stream(window.stream_id)
+
+    def pool_of_stream(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> window_records.PoolId:
+        """The entry pool that decodes every window of the stream."""
+        operation = self.tracker.operation_by_id[stream_id]
         name = self.rule.pool_for(operation)
         return window_records.PoolId(name)
 
-    def side_of(self, pool: window_records.PoolId) -> Optional[EntrySide]:
-        """The side of an entry pool past the first; None for any other."""
-        return self.side_by_pool.get(pool)
+    def is_entry(self, pool: window_records.PoolId) -> bool:
+        """Whether the pool decodes windows the router sends it."""
+        return pool in self.side_by_pool
+
+    def queue_for(
+        self, operation: program_records.Operation
+    ) -> ports.DecodeQueue:
+        """The manager of the entry pool that decodes the operation."""
+        name = self.rule.pool_for(operation)
+        pool = window_records.PoolId(name)
+        side = self.side(pool)
+        return side.decode_queue
+
+    def side(self, pool: window_records.PoolId) -> EntrySide:
+        """The side of an entry pool.
+
+        A part asks only for the pool a window was routed to, so a pool
+        with no side is a broken contract.
+        """
+        found = self.side_by_pool.get(pool)
+        if found is None:
+            raise RuntimeError(
+                f"{pool.word} is no entry pool of this router; its entry "
+                f"pools are {[entry.word for entry in self.side_by_pool]}"
+            )
+        return found
 
     def sides(self) -> tuple:
-        """Every entry pool's side past the first, in build order."""
+        """Every entry pool's side, in build order."""
         sides = self.side_by_pool.values()
         return tuple(sides)
 
 
-def _refuse_a_pool_not_routed_to(pool_name: str, pool_names: tuple) -> None:
+def _refuse_a_pool_not_routed_to(
+    field: str, pool_name: str, pool_names: tuple
+) -> None:
     if pool_name in pool_names:
         return
     raise ValueError(
-        f"router.rule.pool_by_patch names the pool {pool_name!r}, which "
+        f"router.rule.{field} names the pool {pool_name!r}, which "
         f"the router's windows port does not reach; it reaches "
         f"{list(pool_names)}"
     )

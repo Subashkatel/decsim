@@ -54,12 +54,15 @@ class VerdictSettings(Protocol):
 
     reads_threshold says whether the verdict decides on the edge's
     threshold; reads_consensus whether it decides on an ensemble's
-    agreement, the consensus row's soft output.
+    agreement, the consensus row's soft output; reads_source_queue
+    whether it reads the source pool's waiting jobs, a port the build
+    binds.
     """
 
     name: str
     reads_threshold: bool
     reads_consensus: bool
+    reads_source_queue: bool
 
     def build(self) -> ports.EscalationVerdict:
         """A fresh verdict."""
@@ -221,4 +224,12 @@ class SwitchingSettings:
                 f"verdict; strong_window {shape.name} defers it until "
                 f"the far weak boundary exists (the two policies "
                 f"contradict; pick one)"
+            )
+        boundary_policy = shape.boundary_policy.build()
+        if boundary_policy.rechecks_provisional_boundaries:
+            raise ValueError(
+                f"switching.deadline starts the target decode before the "
+                f"verdict; strong_window {shape.name} with checked "
+                f"boundaries starts it only once the window's input is "
+                f"final (the two policies contradict; pick one)"
             )

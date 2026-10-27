@@ -21,6 +21,7 @@ from typing import Any, Optional, Union
 
 import decsim.controller.policies as idle_policies
 import decsim.controller.settings as controller_settings
+import decsim.decoders.execution_slots as execution_slots
 import decsim.decoders.settings as decoder_settings
 import decsim.detector_error_model.settings as detection_event_settings
 import decsim.escalation.settings as escalation_settings
@@ -102,9 +103,11 @@ class PartKind:
 # it. The controller sends rounds to every store, and the frame takes
 # corrections from every pool. A pool's results reach a switching part,
 # an escalate edge, whose verdict sends a window it escalates on to the
-# re-decode of the pool it targets; a pool takes at most one edge in and
-# one out, so the pools form a tree from each pool that decodes first:
-# one, or each pool a router feeds.
+# re-decode of the pool it targets. A pool sends to at most one edge,
+# since no design sends one result to two decoders, but takes any number
+# in: one strong pool may serve every weak pool, as Delfosse's decoding
+# units serve every lazy decoder (2001.11427 Sec. V) and Toshio's single
+# strong decoder its N_window weak ones (2510.25222 Sec. III C).
 _QPU_PORTS = (
     Port("readout", OUTPUT, MEASUREMENTS),
     Port("pulses", INPUT, COMMANDS),
@@ -125,7 +128,7 @@ _DECODER_POOL_PORTS = (
     Port("rounds", INPUT, ROUNDS),
     Port("corrections", OUTPUT, CORRECTIONS, is_required=False),
     Port("escalate", OUTPUT, ESCALATIONS, is_required=False),
-    Port("escalated", INPUT, REDECODES, is_required=False),
+    Port("escalated", INPUT, REDECODES, is_many=True, is_required=False),
 )
 # A router sits between the entry store and the entry pools: the store's
 # reads reach it, and its windows reach every pool it routes to.
@@ -147,8 +150,10 @@ _PAULI_FRAME_PORTS = (
     Port("decisions", OUTPUT, DECISIONS),
 )
 # The parts off the path hold no port: their records set how the parts
-# on it behave. The defaults are a timing-only run of distance-three
-# surface code patches with no frame.
+# on it behave. A device is one: placed at a site, its slots are shared
+# by every pool placed there (decoders/execution_slots.py). The defaults
+# are a timing-only run of distance-three surface code patches with no
+# frame.
 _DEFAULT_QPU = qpu_settings.QpuSettings()
 _DEFAULT_CONTROLLER = controller_settings.ControllerSettings()
 _DEFAULT_IDLE_POLICY = idle_policies.SeparateDecodeJobsSettings()
@@ -216,6 +221,7 @@ KINDS = (
         is_many=True,
     ),
     PartKind("router", routers.Router.Settings, _ROUTER_PORTS),
+    PartKind("device", execution_slots.ExecutionSlots.Settings, is_many=True),
     PartKind(
         WORKLOAD,
         Union[workload_settings.WorkloadSettings, ports.WorkloadMakerSettings],

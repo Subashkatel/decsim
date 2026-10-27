@@ -57,14 +57,14 @@ ENGINE_CARD = decoder_settings.EngineSettings(clock=ENGINE_CLOCK)
 FRAME_CLOCK = config.Clock(4000)
 SOURCE = decoding_records.SoftOutputSource(method="matching-gap")
 WINDOW = window_records.Window(
-    operation_id=1,
+    stream_id=1,
     window_index=1,
     commit_lo=4,
     commit_hi=6,
     buffer_hi=9,
     round_count=6,
 )
-JOB = decoding_records.DecodeJob(operation_id=1, window_id=1, round_count=6)
+JOB = decoding_records.DecodeJob(stream_id=1, window_id=1, round_count=6)
 BOTH_TIERS = (
     window_records.WEAK_POOL_ID,
     window_records.STRONG_POOL_ID,
@@ -347,6 +347,7 @@ class _KeepEverything:
     """
 
     audits_by_escalating = False
+    reads_source_queue = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings(threshold_sources.FixedThreshold.Settings):
@@ -433,9 +434,61 @@ def test_serial_switching_refuses_eager_boundaries_at_build():
     eager = boundary_policies.Eager.Settings()
     serial = _serial_switching_graph(eager)
     with pytest.raises(
-        ValueError, match="serial switching requires held boundaries"
+        ValueError, match="serial switching requires held or checked boundaries"
     ):
         machine_module.Machine.build(serial, 0)
+
+
+def test_serial_switching_runs_on_checked_boundaries():
+    """A checked boundary ships at once and is checked when final."""
+    redo = _checked_redo_window()
+    machine = fabric.switching_machine(
+        rounds=9, escalated_windows={0}, strong_window=redo
+    )
+    result = machine.run()
+    assert result.terminal_status == "complete"
+
+
+def test_checked_boundaries_beside_run_both_at_once_are_refused():
+    """A strong decode started with every window would start on a guess."""
+    redo = _checked_redo_window()
+    with pytest.raises(
+        ValueError, match="checked boundaries escalate a window only once"
+    ):
+        fabric.switching_machine(
+            rounds=9,
+            escalated_windows=set(),
+            strong_window=redo,
+            run_both_at_once=True,
+        )
+
+
+def test_an_online_source_under_checked_boundaries_is_refused():
+    """A verdict dropped with its decode would still be in the audit."""
+    online = _always_auditing_online_threshold(threshold=2.0)
+    online_settings = threshold_sources.OnlineThreshold.Settings(
+        threshold_decibels=20.0
+    )
+    redo = _checked_redo_window()
+    switching = declared_run.declared_switching(
+        threshold=online_settings, strong_window=redo
+    )
+    with pytest.raises(
+        ValueError, match="under checked boundaries a window may be decoded"
+    ):
+        fabric.switching_machine(
+            rounds=9,
+            escalated_windows=set(),
+            strong_window=redo,
+            switching=switching,
+            online_threshold=online,
+        )
+
+
+def _checked_redo_window() -> strong_window_shapes.RedoWindow.Settings:
+    """The redo window with the checked boundary row."""
+    checked = boundary_policies.Checked.Settings()
+    return strong_window_shapes.RedoWindow.Settings(boundary_policy=checked)
 
 
 def test_the_double_window_refuses_held_boundaries_at_build():
@@ -463,7 +516,7 @@ class DelegatingWindowScheme:
     """A windowing scheme row a study adds: sliding windows, wrapped.
 
     It fills the WindowingScheme port by holding a sliding scheme and
-    passing every call to it, and it declares the three facts the port
+    passing every call to it, and it declares the facts the port
     asks a row to declare. That is what a new row is: one class, the
     declarations, and nothing else changes (gem5's port API, arXiv
     2007.03152 lines 489-491).
@@ -472,6 +525,7 @@ class DelegatingWindowScheme:
     has_trailing_tail_context = True
     commits_in_one_serial_chain = True
     supports_dynamic_streams = True
+    reads_across_couplings = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -492,7 +546,7 @@ class DelegatingWindowScheme:
 
     def plan_operation(
         self,
-        operation_id: int,
+        stream_id: int,
         round_count: int,
         *,
         commit_round_count: int,
@@ -500,11 +554,15 @@ class DelegatingWindowScheme:
     ):
         """The windows the sliding scheme lays out."""
         return self.inner.plan_operation(
-            operation_id,
+            stream_id,
             round_count,
             commit_round_count=commit_round_count,
             buffer_round_count=buffer_round_count,
         )
+
+    def stream_layouts(self):
+        """The sliding scheme's stream layouts."""
+        return self.inner.stream_layouts()
 
     def data_complete(self, window, *, readiness) -> bool:
         """Whether the window has every round it reads."""
@@ -601,7 +659,7 @@ def test_a_weak_result_with_no_soft_output_escalates_its_window():
     tier rather than being kept on a confidence nobody computed.
     """
     policy = _switching_policy(20.0)
-    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
+    job = decoding_records.DecodeJob(stream_id=1, window_id=0, round_count=3)
     bare = decoding_records.DecodeResult(1, 0)
 
     verdict = policy.verdict_for_weak_result(job, bare)
@@ -628,7 +686,7 @@ def test_a_gap_at_the_papers_threshold_is_kept_and_one_below_escalates():
     """The equality case is a keep, which is Toshio's Fig. 12 caption."""
     threshold = threshold_sources.decibels_to_nats(20.0)
     policy = _switching_policy(20.0)
-    job = decoding_records.DecodeJob(operation_id=1, window_id=0, round_count=3)
+    job = decoding_records.DecodeJob(stream_id=1, window_id=0, round_count=3)
 
     a_hair_under = threshold - 1e-9
     well_over = threshold + 1.0
@@ -657,3 +715,57 @@ def test_an_online_source_under_a_verdict_that_reads_no_threshold_is_refused():
 
     with pytest.raises(ValueError, match="reads no threshold"):
         policies.Switching(online, False, status, reads_threshold=False)
+
+
+def test_a_verdict_without_learning_reads_a_moving_threshold_and_moves_it_not():
+    """A checkpoint's closing window asks; the rate tracker hears nothing.
+
+    The tracker starts at 15 dB; a gap under it escalates, one over it
+    is kept, as the learning verdict decides on the same threshold.
+    """
+    rate = threshold_sources.RateThreshold.Settings(15.0, 0.1)
+    source = rate.for_task({})
+    policy = policies.Switching(threshold=source)
+    threshold = threshold_sources.decibels_to_nats(15.0)
+    gap_below = threshold - 0.5
+    gap_above = threshold + 0.5
+    below = _result(gap_below)
+    above = _result(gap_above)
+    summary_before = source.summary()
+
+    escalated = policy.verdict_without_learning(JOB, below)
+    kept = policy.verdict_without_learning(JOB, above)
+
+    assert escalated is decoding_records.Verdict.ESCALATE
+    assert kept is decoding_records.Verdict.KEEP
+    assert source.summary() == summary_before
+    assert policy.threshold_now() == pytest.approx(threshold)
+
+
+def test_a_verdict_at_a_threshold_reads_that_threshold_and_moves_none():
+    """A static chain asks at its own threshold (observe/answer_checks.py).
+
+    The tracker sits at 15 dB and the gap on it: at 5 dB the row keeps
+    the result, at 25 dB it escalates it, and the tracker hears nothing.
+    """
+    rate = threshold_sources.RateThreshold.Settings(15.0, 0.1)
+    source = rate.for_task({})
+    policy = policies.Switching(threshold=source)
+    gap = threshold_sources.decibels_to_nats(15.0)
+    result = _result(gap)
+    low = threshold_sources.decibels_to_nats(5.0)
+    high = threshold_sources.decibels_to_nats(25.0)
+    summary_before = source.summary()
+
+    kept = policy.verdict_at(JOB, result, low)
+    escalated = policy.verdict_at(JOB, result, high)
+
+    assert kept is decoding_records.Verdict.KEEP
+    assert escalated is decoding_records.Verdict.ESCALATE
+    assert source.summary() == summary_before
+
+
+def test_a_fixed_threshold_summary_is_its_threshold():
+    source = threshold_sources.FixedThreshold(2.0)
+
+    assert source.summary() == {"threshold": 2.0}

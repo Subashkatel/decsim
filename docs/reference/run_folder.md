@@ -26,7 +26,7 @@ with another `code_state.patch`, is refused:
 
 | Name | Written by | What it is |
 | --- | --- | --- |
-| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one task, its additive files (`shots.csv`, `shot_links.csv`, `shot_stats.csv`, `stat_values.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`, `window_outcomes.csv`) without the swept columns, an online task's calibrator as the piece left it in `state.pickle`, which the task's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
+| `pieces/<id>/<first>-<last>/` | `decsim/experiments/pieces.py`, `write` | one piece: seeds `first` to `last` of one task, its additive files (`shots.csv`, `shot_links.csv`, `shot_pools.csv`, `shot_stats.csv`, `stat_values.csv`, `window_samples.csv`, `latency_samples.csv`, `shot_data_movement.csv`, `window_confidence.csv`, `confidence_histogram.csv`, `window_outcomes.csv`) without the swept columns, an online task's calibrator as the piece left it in `state.pickle`, which the task's next piece starts from, and `piece.json`. Its files are written into a hidden staging folder of the writer's own beside it and the folder is renamed into place last, so a piece folder exists only whole; of two writers of one piece the first to rename wins and the other drops its copy; a run skips a piece whose folder exists, and a staging folder a killed writer left is passed over |
 | `piece.json` | `decsim/experiments/pieces.py`, `write` | the piece's `task_id`, `first_seed` and `count` (its other counts are its own `shots.csv` columns summed: `is_scored`, `logical_failure`, `sim_wall_seconds`, `executed_rounds` and the `*_windows` status columns), its `confidence_shot_count` (the shots its confidence rows cover, `all`, or null when no confidence signal ran; a fold refuses a task whose pieces differ in it, a piece without it included), the `state_sha256` of an online task's `state.pickle`, its `peak_memory_mb` (the peak resident memory of the process that ran it, read when the piece ended), and the `commit`, `dirty`, `patch_sha256` (the sha256 of the tree's `code_state.patch`, null when it has none), `python`, `packages` (each third-party top-level module the process that ran the shots had imported, and its version: the module's own `__version__`, else its installed distribution's; read in that process, so a pooled worker names the decoder package it loaded), `host`, `processor_model`, `slurm_job_id`, `slurm_array_job_id` and `slurm_array_task_id` of the process that ran it (a run and a fold refuse a folder holding a piece whose tree is not the one its `run.json` names: another commit, the same commit clean against dirty, or another patch, since its rows would pool two simulators under one `run.json`) |
 | `tasks/<name>/machine.json`, `tasks/<name>/inputs/` | `decsim/experiments/run_folder.py`, `write_task_record` | each task's record and workload, below, written before any shot and only once every task of the experiment has built and been accepted, so a refused one changes no record. A name the folder holds for a task of another id is refused, and so is a task whose shot runs no round, which sizes no piece. The record also holds `rounds_per_shot`, the QEC rounds the plan gives a shot, each patch's rounds added up over every operation that sends detector data, which sizes the task's pieces (a live stream also idles through its feedback wait, rounds only its run knows), and `experiment`: its `collection`, whether its threshold is `adaptive`, and the `algorithm` that decodes its windows, which `decsim run --fold` folds it by, whatever its run file says later |
 
@@ -46,6 +46,8 @@ gives (`decsim/experiments/report.py`, `fold_pieces`).
 | --- | --- | --- |
 | `shots.csv` | `decsim/experiments/report.py`, `shot_rows` | one row per shot |
 | `shot_links.csv` | `decsim/experiments/report.py`, `shot_link_rows`, `summed_link_rows` | one row per shot per link, or per piece per link when the task's `record_options.is_statistics_per_shot` is false |
+| `shot_pools.csv` | `decsim/experiments/report.py`, `shot_pool_rows` | one row per shot per decoder pool |
+| `pool_summary.csv` | `decsim/experiments/report.py`, `pool_summary_rows` | one row per task and decoder pool, written by the fold |
 | `shot_stats.csv` | `decsim/experiments/report.py`, `shot_statistics_rows`, `summed_statistics_rows` | one row per shot per part, statistic and field, or per piece when the task's `record_options.is_statistics_per_shot` is false |
 | `stat_summary.csv` | `decsim/experiments/report.py`, `statistic_summary_rows` | one row per task, part, statistic and derived measure, written by the fold |
 | `stat_values.csv` | `decsim/experiments/report.py`, `statistic_value_rows` | one row per task, part, statistic and distinct value: how many times it was seen, or for a level how many ticks it was held |
@@ -94,7 +96,8 @@ tasks first set them (`decsim/experiments/run_folder.py`,
 `swept_values`). Every other file below names its task by the same
 columns, and `algorithm` follows them: the `name` of the decoder record
 of the tier that decodes the plan's windows, such as `pymatching`, or a
-priced row's latency in microseconds in its place
+priced row's latency in microseconds in its place; entry pools of
+several kinds are named together, `union_find+pymatching`
 (`decsim/experiments/measure.py`, `active_decoder_kind`). The values the design fixed come
 first and what was measured after, one variable per column, which is
 Wickham's tidy table (Tidy Data, J. Stat. Softw. 59(10), 2014, section
@@ -116,7 +119,7 @@ name (`_us` microseconds, `_bits`, `_per_shot`).
 | `load` | service time, boundary handoff and input hop per window, divided by the interval between windows arriving; above 1 the decoder cannot keep up |
 | `throughput_windows_per_us`, `throughput_rounds_per_us` | what the machine got through |
 | `max_queued_windows` | the most jobs that waited in the ready queue at once; a depth counts only when time passes at it, so a job that joins and leaves in one tick never waited |
-| `weak_queue_max`, `strong_queue_max` | the most jobs that waited in each tier's ready queue at once, by the same rule. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. |
+| `weak_queue_max`, `strong_queue_max` | the most jobs that waited in each tier's ready queue at once, by the same rule. The tier that decodes the planned windows owns the default pool's number, so under `strong_only` that number is in the strong column. A tier the run does not build reads zero. A tier is every pool at its depth: the weak tier every entry pool, the strong tier every pool an entry pool escalates to (`decsim/build/layout.py`, `tier_pools`); a tier of several pools reads its largest pool's queue here, and its busy fraction and offered load below over all its units. `shot_pools.csv` has each pool's own. |
 | `weak_busy_fraction`, `strong_busy_fraction` | the time-weighted fraction of each tier's units whose compute was busy, over the whole run from tick 0 to its last event, the drain after the last round included, so it is not the tier's offered load |
 | `weak_offered_load`, `strong_offered_load` | each tier's load: its units' busy time over its unit count times the span the QPU generated the rounds over, rho = lambda E[S] / c. The span runs from the QPU's first readout to its last plus one round period, an idle patch's rounds included, so a delay the source puts on a readout's departure does not stretch it, and operations that run side by side share it rather than add up. The run drains every decode, so the busy time is the work the rounds offered the tier; above 1 the tier gets work faster than it finishes it and falls behind. A tier the run does not build reads zero |
 | `escalated_windows`, `strong_decoded_rounds`, `strong_service_sum_us` | the windows the strong tier committed, the rounds its decodes read, and their service added up; a task divides the sum by the windows |
@@ -154,7 +157,7 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `buffer_fill` | the first round of a window arriving, to the last: the wait on the QPU |
 | `admission_wait` | the window's data complete in the weak syndrome buffer, to its decode job entering the queue: the window side's decision (`windows.decision_cycles`), and any earlier request of the window that was withdrawn, as a restart window's is when a `double_window` strong window re-slices it; zero otherwise |
 | `store_read` | the committing decode's dispatch, to the end of its input's read in its tier's syndrome buffer, before the input hop: a store that prices reads, its port waits included; zero for a store that prices none |
-| `dep_block` | the wait for what the decode depends on: in the queue, from the job's entry to its predecessor's boundary arriving, since a window that owes a boundary takes no unit (`decsim/decoders/decode_dispatch.py`); and for an escalated window, the escalated rounds and the selection, to the first tick the decode may compute, less its input hop and its store read; zero when nothing was owed |
+| `dep_block` | the wait for what the decode depends on: in the queue, from the job's entry to its predecessor's boundary arriving, since a window that owes a boundary takes no unit (`decsim/decoders/decode_dispatch.py`), or, under checked boundaries, to the final boundary that sent a window decoded on a guess to be decoded again, its dropped decode included; and for an escalated window, the escalated rounds and the selection, to the first tick the decode may compute, less its input hop and its store read; zero when nothing was owed |
 | `compute_wait` | that first startable tick, to the compute starting: the wait for the unit's own compute, busy with another decode |
 | `queue_wait` | queued, or the predecessor's boundary arriving when later, to a unit assigned: the wait for a unit only |
 | `input_link_per_window` | a unit assigned, to the input in that unit's memory |
@@ -165,9 +168,10 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `service` | the compute start, to the decode done: the fetch, the algorithm and the release, and nothing the decode waited for outside the unit. A strong backend's queue holds the unit, so `backend_queue_wait` is inside |
 | `confidence` | the committing decode's end, to the verdict on the window's answer: the confidence signal's own computation, which is the walk under `cluster_gap` and the other forced-class solve's remaining time under `complementary_gap`, and zero for an escalated window whose strong decode began after the verdict |
 | `selection_wait` | the verdict, or the committing decode's end when later, to its answer leaving for the frame: a finished strong answer kept in its unit's output slot until the verdict's selection has crossed `weak_to_strong`, which a speculative strong decode under `run_both_at_once` waits for, and zero for every other window |
+| `input_check_wait` | the verdict, or the committing decode's end when later, to the boundaries that decode read on a guess being final and the same, under checked boundaries (`decsim/windows/input_checks.py`), so the kept answer may leave for the frame; zero for a window whose decode read final boundaries |
 | `weak_attempt` | a unit taking an escalated window's weak job, to the verdict that escalated it: the attempt whose result did not commit, zero when the first decode committed |
 | `escalation_link_per_window` | the weak decoder to the strong decoder: the escalation hop, from the selection's send to the landing of the rounds the strong store lacked, zero for a window that did not escalate |
-| `dd_per_window` | the boundary handoff into the window: the first boundary sent to it, to the last landing, zero for a window no boundary reaches |
+| `dd_per_window` | the boundary handoff into the window: the first boundary sent to it, to the last landing, zero for a window no boundary reaches; under checked boundaries the last landing is the final boundary's, so the span holds the wait for it |
 | `output_link_per_window` | the answer's first send toward the Pauli frame, to the frame accepting it: one hop on the `direct` route, and `strong_to_weak`, the weak chip's commit and `weak_to_frame` for a strong answer `through_weak_chip` |
 | `frame_commit` | the frame accepting a correction, to it being committed |
 | `buffer0_ready_to_frame` | the window complete in the syndrome buffer its first decode reads (the weak one, or the strong one in a run with no weak decoder), to the frame |
@@ -200,7 +204,8 @@ happened after; a level keeps the level it holds and restarts its
 area and span; a value the machine is built with, such as a pool's
 units, is kept. It cuts `stats.csv` and `stat_values.csv`, the queue
 peaks, the busy fractions and the offered loads, which are then over
-the rounds read out since, and the backlog peak; the latency points
+the rounds read out since, the backlog peak, and every column of
+`shot_pools.csv`, so a pool's row adds up; the latency points
 keep the interval above. The default, 0, measures the whole run, and a
 run that ends inside its warm-up is refused.
 
@@ -237,9 +242,11 @@ to one decode.
   decode ended.
 - `selection_wait` is a strong answer that finished first waiting for
   the verdict's selection to reach it.
+- `input_check_wait` is a kept answer, decoded on a boundary that was not
+  final yet, waiting for that boundary to be final and the same.
 - `frame_commit` closes it.
 
-On a serial path those twelve add
+On a serial path those thirteen add
 up to `buffer0_ready_to_frame` to the tick, on every window of every
 config this repository ships.
 
@@ -301,6 +308,32 @@ shots, `seed` the piece's first seed and a `shot_count` column beside
 it. A link's mean per shot is then a column's sum over the task's rows
 over the sum of their `shot_count`. A fold refuses pieces of the two
 shapes, whose columns differ.
+
+### `shot_pools.csv`
+
+One row per shot per decoder pool, in the machine's layout order: the
+entry pools first, then each pool an edge reaches.
+
+| Column | What it is |
+| --- | --- |
+| `task_id`, the swept paths, `algorithm`, `seed` | the shot |
+| `pool` | the pool's part name |
+| `queue_max`, `busy_fraction`, `offered_load` | as the tier columns of `shots.csv`, over this pool alone |
+| `committed_windows` | the windows the frame committed off this pool's decode |
+| `escalated_windows` | the windows this pool sent up its edge; zero for a pool that escalates nowhere |
+
+The pool set is data, not schema, as the link set is: a machine with a
+pool per patch adds rows. A window is committed off one pool's decode,
+so `committed_windows` adds up to `decoded_windows` over a shot's rows.
+With `observation.warmup_rounds` every column counts from the reset on,
+as the statistics do.
+
+### `pool_summary.csv`
+
+One row per task and pool, derived when the fold runs from the task's
+`shot_pools.csv` rows, so it is never in a piece: `shots`, the mean
+`busy_fraction` and `offered_load` over the shots, the largest
+`queue_max`, and `committed_windows` and `escalated_windows` added up.
 
 ### `shot_stats.csv`
 
@@ -433,7 +466,7 @@ success, and sweep.csv's `unscored_shots` counts it.
 | --- | --- |
 | `task_id`, the swept paths, `algorithm`, `seed` | the shot |
 | `signal` | the confidence the verdict read, the `name` of the run's `switching.confidence` record (the signals are under `decsim/confidence` in [parts.md](parts.md)) |
-| `operation_id`, `window_index` | the window: its operation and its index within it |
+| `stream_id`, `window_index` | the window: its decode stream and its index within it |
 | `gap_nats` | the window's gap, ln of the likelihood ratio; empty when the signal gave none, a window the escalation then escalates |
 | `escalated` | whether the verdict sent the window to the strong tier |
 | `strong_revised` | for an escalated window, whether the strong decode predicted other observables than the weak one; empty for a kept window |
@@ -456,7 +489,7 @@ text of Stim's 01 format, as in `predictions`.
 | Column | What it is |
 | --- | --- |
 | `task_id`, the swept paths, `algorithm`, `seed` | the shot |
-| `operation_id`, `window_index` | the window that owns the rows: its operation and its index |
+| `stream_id`, `window_index` | the window that owns the rows: its decode stream and its index |
 | `ownership_kind` | `ordinary_window`, or `strong_window` for a double window's extent |
 | `commit_lo`, `commit_hi` | the rounds it owns |
 | `tier`, `decode_status` | the tier and the status of its final decode; an empty status is a decode that succeeded |
@@ -464,6 +497,7 @@ text of Stim's 01 format, as in `predictions`.
 | `answer`, `label`, `is_right` | its committed prediction, its true label, and whether they are equal |
 | `gap_nats`, `is_escalated` | on a switching run, the gap the verdict read and whether it escalated |
 | `weak_answer`, `weak_label` | on a switching run, the weak decode's prediction of the window's own commit rounds; for an escalated window, also the label of those rounds |
+| `strong_evidence` | on an escalated window, the strong decode's own named numbers as a json object; belief matching writes `{"matched": 1.0}` when its BP did not converge and the matching ran, `{"matched": 0.0}` when BP's own correction was kept |
 
 ### `confidence_histogram.csv`
 

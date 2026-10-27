@@ -48,6 +48,7 @@ class Plan:
     decode_operations: tuple
     dynamic_streams: tuple
     protected_regions: tuple
+    patch_lives: tuple
     all_operations: tuple
     planned_operations: tuple
     run_plan: planner.RunPlan
@@ -106,6 +107,10 @@ def build_plan(
         validate_blockers=True,
         external_blocker_ids=external_blocker_ids,
     )
+    _check_blockers_decode(
+        operations, dynamic_streams, workload.patch_lives, external_blocker_ids
+    )
+    _check_returns_decode(operations, workload.patch_lives)
     scheme = _scheme(windows)
     boundary_policy = _boundary_policy(windows)
     # the refusals print the strong window's row name, and only a window
@@ -136,19 +141,25 @@ def build_plan(
         has_static_decode_plan=has_static_decode_plan,
         batches_each_member=batches_each_member,
     )
-    leaves_the_entry_pool = True
     for part in switching_parts:
         edge_settings = part.edge.settings
+        leaves_an_entry_pool = part.leaves_an_entry_pool
         edge_shape = _edge_run_shape(
-            run_shape, edge_settings, leaves_the_entry_pool
+            run_shape, edge_settings, leaves_an_entry_pool
         )
         part.policy.check_plan(edge_shape)
-        leaves_the_entry_pool = False
+    _check_region_scheme(scheme, workload.patch_lives, dynamic_streams)
+    release_rule = window_settings.release_rule_for(
+        windows, workload.patch_lives
+    )
+    _check_release_rule(release_rule, workload.patch_lives)
+    has_patch_lives = bool(workload.patch_lives)
     planned_operations = _decode_plan_operations(
         operations,
         decode_operations,
         dynamic_streams,
         static_decode_selected=has_static_decode_plan,
+        has_patch_lives=has_patch_lives,
     )
     planned_ids = []
     for operation in planned_operations:
@@ -157,6 +168,7 @@ def build_plan(
     physical_tables = _physical_formation_tables(physical_circuits)
     circuit_arguments = _circuit_arguments(physical_circuits, physical_tables)
     device = qpu.source.build(code, circuit_arguments)
+    _check_patch_streams(workload.patch_lives, device)
     formation_tables = _formation_tables(
         device, planned_operations, physical_tables, rounds_policy, code
     )
@@ -206,6 +218,7 @@ def build_plan(
         decode_operations=decode_operations,
         dynamic_streams=dynamic_streams,
         protected_regions=tuple(workload.protected_regions),
+        patch_lives=workload.patch_lives,
         all_operations=all_operations,
         planned_operations=planned_operations,
         run_plan=run_plan,
@@ -283,6 +296,91 @@ def _with_boundary_mode(
     return dataclasses.replace(operation, feedback_boundary_mode=mode)
 
 
+def _check_blockers_decode(
+    operations, dynamic_streams, lives: tuple, external_blocker_ids
+) -> None:
+    """A feedback stream may bind a blocker that emits nothing; else refuse.
+
+    A patch stream binds only an operation that emits rounds
+    (controller/patch_streams.py bind_at_start), so on a lattice-surgery
+    run a blocker that emits none would never release its waiter.
+    """
+    if dynamic_streams and not lives:
+        return
+    planner.check_blockers_decode(list(operations), external_blocker_ids)
+
+
+def _check_returns_decode(operations, lives: tuple) -> None:
+    """Refuse a result returned from a patch-stream operation with no rounds.
+
+    No patch stream binds it (controller/patch_streams.py bind_at_start),
+    so its result would never come.
+    """
+    if not lives:
+        return
+    for operation in operations:
+        returns = operation.requires_result_return_to_qpu
+        if returns and not operation.emits_detector_data:
+            raise ValueError(
+                f"{operation.name} returns its result to the QPU but emits "
+                "no rounds, so no patch stream binds it"
+            )
+
+
+def _check_patch_streams(lives: tuple, device) -> None:
+    """Patch streams are decoded timing only.
+
+    An operation on several patch streams has no one stream's
+    observables (windows/operation_results.py). A strong window over
+    patch streams is not built either: switching refuses a region
+    scheme, whose last window reads nothing past its commit.
+    """
+    if not lives:
+        return
+    if device.emits_bit_values:
+        raise ValueError(
+            "patch streams run timing only; the syndrome source emits values"
+        )
+
+
+def _check_region_scheme(scheme, lives: tuple, dynamic_streams) -> None:
+    """Patch streams are laid in regions, and only they are.
+
+    A merge's windows read across its patches (windows/region_layout.py),
+    which a scheme that lays no regions cannot do; a region scheme cuts a
+    stream at its joint measurements only, so a feedback stream, whose
+    every segment must start a window, is laid by stride and cut.
+    """
+    if lives and not scheme.reads_across_couplings:
+        raise ValueError(
+            "a lattice-surgery run decodes in regions across its patches; "
+            "set windows.scheme to a region scheme, such as "
+            "windows/schemes/region_sliding.py RegionSlidingScheme.Settings()"
+        )
+    if lives or not scheme.reads_across_couplings:
+        return
+    if dynamic_streams:
+        raise ValueError(
+            "a region scheme lays the windows of patch streams only; a "
+            "feedback stream takes a scheme that lays no regions"
+        )
+
+
+def _check_release_rule(rule, lives: tuple) -> None:
+    """A rule that waits for ancestors runs on patch streams only.
+
+    It reads each ancestor's stream segments, which patch streams bind
+    for every operation; a static operation has none, so a blocker after
+    one would wait for ever.
+    """
+    if rule.awaits_ancestors and not lives:
+        raise ValueError(
+            f"release rule {rule.name} waits for earlier operations' "
+            "decodes, which only a lattice-surgery run's patch streams "
+            "track; use windows/release_rules.py OwnStreams.Settings()"
+        )
+
+
 def _unique_operations(operations) -> tuple:
     unique = {}
     for operation in operations:
@@ -292,11 +390,27 @@ def _unique_operations(operations) -> tuple:
 
 
 def _decode_plan_operations(
-    operations, decode_operations, dynamic_streams, *, static_decode_selected
+    operations,
+    decode_operations,
+    dynamic_streams,
+    *,
+    static_decode_selected,
+    has_patch_lives,
 ) -> tuple:
-    """The operations whose windows the plan decodes."""
+    """The operations whose windows the plan decodes.
+
+    Not one when the streams decode them: a segment's rounds fold into
+    its stream, and an operation on patch streams into each of them.
+    """
     if static_decode_selected:
         return decode_operations
+    if has_patch_lives:
+        return ()
+    return _standalone_emitters(operations, dynamic_streams)
+
+
+def _standalone_emitters(operations, dynamic_streams) -> tuple:
+    """The operations that emit detector data into no dynamic stream."""
     dynamic_ids = set()
     for stream in dynamic_streams:
         dynamic_ids.add(stream.id)
@@ -322,7 +436,7 @@ def _strong_window_settings(
 def _edge_run_shape(
     run_shape: decoding_records.RunShape,
     edge_settings: escalation_settings.SwitchingSettings,
-    leaves_the_entry_pool: bool,
+    leaves_an_entry_pool: bool,
 ) -> decoding_records.RunShape:
     """The run as one edge checks it: with its own strong window row."""
     strong_window = edge_settings.strong_window
@@ -330,7 +444,7 @@ def _edge_run_shape(
         run_shape,
         strong_window=strong_window.name,
         is_absorbing_strong_window=strong_window.absorbs_weak_windows,
-        leaves_the_entry_pool=leaves_the_entry_pool,
+        leaves_an_entry_pool=leaves_an_entry_pool,
     )
 
 
@@ -398,10 +512,9 @@ def _physical_formation_tables(physical_circuits: tuple) -> dict:
 def _physical_formation_table(
     physical: workload_records.FiniteCircuit,
 ) -> formation_records.FormationTable:
-    """The recipes, formed off the declared measurement schedule."""
+    """The recipes, formed off its measurement schedule or its detectors."""
     schedule = dict(physical.measurement_rounds)
-    rounds = schedule.values()
-    round_count = max(rounds)
+    round_count = physical.round_count()
     return detector_formation.build_formation_table(
         physical.circuit, round_count, measurement_rounds=schedule
     )

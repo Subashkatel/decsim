@@ -16,8 +16,7 @@ def _routes() -> route_records.Routes:
     answer = route_records.AnswerRoute(None, "weak_to_frame", 0)
     boundary = route_records.BoundaryRoute("weak_to_weak", 0)
     return route_records.Routes(
-        window_pool=WEAK,
-        answer_by_pool={WEAK: answer},
+        answer_by_asker={(WEAK, None): answer},
         boundary_by_pair={(WEAK, WEAK): boundary},
         name_bits_by_answer_hop={"weak_to_frame": 0},
     )

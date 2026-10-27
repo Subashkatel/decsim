@@ -1,14 +1,18 @@
 """The belief-matching adapter: the strong tier's decoder on one window.
 
-Belief propagation on the physical hyperedges, then matching on the
-graphlike edges with posterior weights: Higgott et al., beliefmatching's
+Belief propagation on the physical hyperedges; when it converges, its
+own correction, else matching on the graphlike edges with posterior
+weights: Higgott et al. 2203.04948 Algorithm 1, beliefmatching's
 BeliefMatching.decode (.pydeps/beliefmatching/belief_matching.py:344-358).
 ldpc's BpDecoder gives the hyperedge posteriors, one per distinct
 detector set as beliefmatching's matrices hold them (lines 104-136), the
 window's projection maps them onto matching edges, PyMatching matches
 with -log(posterior) weights. The posterior clamp is 1e-15 here and
-1e-14 there. Toshio et al. 2510.25222 run belief matching as the
-accurate decoder invoked on demand.
+1e-14 there. A converged correction is mapped onto the edges of each
+hyperedge's decomposition, which flip the same detectors and
+observables. Toshio et al. 2510.25222 run belief matching, the
+BeliefMatching library (App. B), as the accurate decoder invoked on
+demand.
 
 The row is timed on the host's clock, or by a stated time per BP
 iteration and a time for the matching (IterationTime), the decode's own
@@ -35,6 +39,9 @@ import decsim.records.fault_model_contracts as fault_models
 
 POSTERIOR_FLOOR = 1e-15
 POSTERIOR_CEILING = 1.0 - POSTERIOR_FLOOR
+# the evidence key a decode reports: 1.0 when BP did not converge and
+# the matching ran, 0.0 when BP's own correction was returned
+MATCHED = "matched"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -43,9 +50,10 @@ class IterationTime:
 
     A decode holds its unit for iteration_microseconds times the
     iterations BP ran, which ldpc's BpDecoder stops at the first one
-    that converges (BpDecoder.iter), plus matching_microseconds, as the
-    matching runs on every decode. Both numbers are the run's own,
-    stated for a device; no host time enters.
+    that converges (BpDecoder.iter), plus matching_microseconds when BP
+    did not converge, as only then does the matching run (Higgott et
+    al. 2203.04948 Algorithm 1, steps 3-7). Both numbers are the run's
+    own, stated for a device; no host time enters.
     """
 
     iteration_microseconds: float
@@ -57,10 +65,11 @@ class IterationTime:
         )
         _check_microseconds(self.matching_microseconds, "matching_microseconds")
 
-    def decode_ticks(self, iterations: int) -> int:
+    def decode_ticks(self, iterations: int, matched: bool) -> int:
         """The ticks of a decode whose BP ran this many iterations."""
-        belief_propagation = self.iteration_microseconds * iterations
-        microseconds = belief_propagation + self.matching_microseconds
+        microseconds = self.iteration_microseconds * iterations
+        if matched:
+            microseconds += self.matching_microseconds
         return config.microseconds_to_ticks(microseconds)
 
 
@@ -135,9 +144,11 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             return decoder_module.WindowDecoderBase.ticks_after_decode(
                 self, result, elapsed_nanoseconds, now
             )
-        # a window with no model runs no BP
+        # a window with no model runs no BP and no matching
         iterations = result.iterations or 0
-        return self.timing.decode_ticks(iterations)
+        evidence = result.evidence or {}
+        matched = evidence.get(MATCHED, 0.0) == 1.0
+        return self.timing.decode_ticks(iterations, matched)
 
     def compile(
         self,
@@ -180,7 +191,7 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         faults: fault_models.PlacedFaultModel,
         syndrome: numpy.ndarray,
     ) -> decoding_records.WindowDecode:
-        """BP on the hyperedges, then a matching with posterior weights.
+        """BP on the hyperedges; its correction, or a posterior matching.
 
         PyMatching raises on odd parity in a boundaryless component (see
         the PyMatching adapter); that case is an empty correction marked
@@ -188,8 +199,15 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         """
         del model
         belief_propagation, edge_from_hyperedge = backend
-        belief_propagation.decode(syndrome)
+        hyperedges = belief_propagation.decode(syndrome)
         iterations = int(belief_propagation.iter)
+        if belief_propagation.converge:
+            correction = _converged_correction(
+                hyperedges, edge_from_hyperedge, faults, syndrome
+            )
+            return decoding_records.WindowDecode(
+                correction, iterations=iterations, evidence=_NOT_MATCHED
+            )
         edge_posteriors = _edge_posteriors(
             belief_propagation, edge_from_hyperedge
         )
@@ -209,9 +227,44 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
                 decoding_records.BackendFailureReason.NO_PERFECT_MATCHING,
                 fault_count,
             )
-            return dataclasses.replace(no_correction, iterations=iterations)
+            return dataclasses.replace(
+                no_correction, iterations=iterations, evidence=_MATCHED
+            )
         correction = numpy.asarray(selected, dtype=numpy.uint8)
-        return decoding_records.WindowDecode(correction, iterations=iterations)
+        return decoding_records.WindowDecode(
+            correction, iterations=iterations, evidence=_MATCHED
+        )
+
+
+_MATCHED = {MATCHED: 1.0}
+_NOT_MATCHED = {MATCHED: 0.0}
+
+
+def _converged_correction(
+    hyperedges: numpy.ndarray,
+    edge_from_hyperedge,
+    faults: fault_models.PlacedFaultModel,
+    syndrome: numpy.ndarray,
+) -> numpy.ndarray:
+    """BP's hyperedge correction as the edges of their decompositions.
+
+    BP converged, so its correction flips exactly the syndrome (Higgott
+    et al. 2203.04948 Algorithm 1, step 2); the edges must flip it too,
+    or the projection lost a hyperedge's detectors.
+    """
+    hyperedge_counts = numpy.asarray(hyperedges, dtype=numpy.int64)
+    edge_counts = edge_from_hyperedge @ hyperedge_counts
+    rounded_counts = numpy.rint(edge_counts)
+    edge_parities = rounded_counts.astype(numpy.int64) % 2
+    correction = edge_parities.astype(numpy.uint8)
+    flipped = faults.check @ correction
+    flipped_parities = numpy.asarray(flipped) % 2
+    if not numpy.array_equal(flipped_parities, syndrome):
+        raise RuntimeError(
+            "belief propagation converged, but its correction mapped onto "
+            "the matching edges does not flip the syndrome"
+        )
+    return correction
 
 
 def _distinct_hyperedges(physical) -> tuple:

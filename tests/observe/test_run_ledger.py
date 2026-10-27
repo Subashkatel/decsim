@@ -196,10 +196,10 @@ def test_a_release_is_caused_by_the_blocking_operations_commit():
 
     Operation 2 waits on operation 1, whose last correction commits at
     33 us; the frame's decision reaches the controller 2 us later, so
-    the decision is available and the release and the pulse command are
-    issued at 35, and the command link puts the command at the qpu at
-    37. The cause of the decision is the blocking operation's commit,
-    not the blocked operation's own work
+    the decision is available and issued at 35, and the command link
+    puts the release at the QPU at 37, where the queued command arrives
+    and starts. The cause of the decision is the blocking operation's
+    commit, not the blocked operation's own work
     (run_ledger.py's _output_row and _releases).
     """
     first = declared_run.memory_operation(1)
@@ -211,8 +211,9 @@ def test_a_release_is_caused_by_the_blocking_operations_commit():
     ledger.check()
 
     decision = one_event(ledger, "DECISION_AVAILABLE", 2)
+    issued = one_event(ledger, "CONTROL_DECISION_ISSUED", 2)
     released = one_event(ledger, "DECODE_RELEASED", 2)
-    issued = one_event(ledger, "CONTROL_PULSE_COMMAND_ISSUED", 2)
+    queued = one_event(ledger, "PRELOADED_COMMAND", 2)
     arrived = one_event(ledger, "QPU_COMMAND_ARRIVED", 2)
     started = one_event(ledger, "QPU_COMMAND_STARTED", 2)
     by_id = events_by_id(ledger)
@@ -221,11 +222,12 @@ def test_a_release_is_caused_by_the_blocking_operations_commit():
     assert cause.op == 1
     assert cause.tick == config_module.microseconds_to_ticks(33.0)
     assert decision.tick == config_module.microseconds_to_ticks(35.0)
-    assert released.tick == config_module.microseconds_to_ticks(35.0)
     assert issued.tick == config_module.microseconds_to_ticks(35.0)
+    assert released.tick == config_module.microseconds_to_ticks(37.0)
+    assert queued.tick == config_module.microseconds_to_ticks(37.0)
     assert arrived.tick == config_module.microseconds_to_ticks(37.0)
     assert started.tick == config_module.microseconds_to_ticks(37.0)
-    chain = [decision, released, issued, arrived, started]
+    chain = [decision, issued, released, queued, arrived, started]
     causes = chained_ids(chain)
     leading = leading_ids(chain)
     assert causes == leading
@@ -374,12 +376,12 @@ def unaccounted_rounds_of_window(window, accounted, highest):
     actual rounds, exactly as the retention reads it
     (decsim/windows/round_retention.py, read_keys_for_bounds).
     """
-    emitted_high = highest[window.operation_id]
+    emitted_high = highest[window.stream_id]
     input_high = min(window.buffer_hi, emitted_high)
     stop_round = input_high + 1
     missing = []
     for round_index in range(window.start_round, stop_round):
-        key = (window.operation_id, round_index)
+        key = (window.stream_id, round_index)
         if key not in accounted:
             missing.append(key)
     return missing

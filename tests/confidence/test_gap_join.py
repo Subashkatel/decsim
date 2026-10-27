@@ -263,14 +263,14 @@ def test_a_windows_two_requests_are_one_attempt():
 def test_a_window_whose_other_solve_never_arrives_refuses_the_run():
     """A solve nobody joins is unsettled state, refused at the run's end."""
     machine = _switching_machine(1)
-    join = machine.windows.window_manager.requester.gap_join
+    join = machine.windows.join_of(window_records.WEAK_POOL_ID)
     joined_solves = join.accept_result
 
     def hold_the_first_solve_alone(job, result):
         joined_solves(job, result)
         join.accept_result = joined_solves
         solve = gap_join_module.HeldSolve(job, result)
-        join.held_by_window[(job.operation_id, UNJOINED_WINDOW_ID)] = [solve]
+        join.held_by_window[(job.stream_id, UNJOINED_WINDOW_ID)] = [solve]
 
     join.accept_result = hold_the_first_solve_alone
     with pytest.raises(RuntimeError, match="unjoined solve"):
@@ -342,7 +342,7 @@ def _join_with(signal_ticks: int):
 def _forced_solve(label: str, forced_class: int, weight: float):
     """One forced-class solve of window 0, with its answer's weight."""
     job = decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=3, label=label
+        stream_id=1, window_id=0, round_count=3, label=label
     )
     job.forced_logical_class = forced_class
     result = decoding_records.DecodeResult(1, 0)

@@ -13,6 +13,7 @@ import json
 import math
 import pathlib
 import statistics
+from collections.abc import Mapping
 from typing import Any, Optional, Union
 
 import decsim.build.decoders as decoders_part
@@ -61,7 +62,9 @@ POINTS = (
     # included, before the input hop
     "store_read",
     # the dependency wait: in the queue, from the job's entry to its
-    # predecessor's boundary arriving, and around the committing decode's
+    # predecessor's boundary arriving, or to its final boundary that sent
+    # a window decoded on a guess to be decoded again, the dropped decode
+    # included (windows/input_checks.py), and around the committing decode's
     # own hop, from where its path started, the dispatch or the verdict
     # that escalated the window, to the first tick it may compute, less
     # the input hop and the store's read. It is the wait for the
@@ -111,6 +114,11 @@ POINTS = (
     # wait a strong decode started with the weak one under
     # run_both_at_once has; zero for every other window
     "selection_wait",
+    # the verdict, or the committing decode's end when later -> the
+    # boundaries that decode read on a guess final and the same, so the
+    # kept answer could leave for the frame (windows/input_checks.py);
+    # zero for a window whose decode read final boundaries
+    "input_check_wait",
     # a unit took the window's first decode -> the verdict that
     # escalated it: the weak attempt whose result did not commit, zero
     # for a window the first decode committed
@@ -186,10 +194,12 @@ class WindowOutcomeRow:
     the label of the escalated window's own commit rounds, the extent its
     weak answer predicted. Answers and labels are json text of Stim's 01
     format, as predictions is, and is_right says whether the answer
-    equals the label.
+    equals the label. strong_evidence is the escalated window's strong
+    decode's own named numbers as json text, belief matching's
+    {"matched": 1.0} when its BP did not converge and the matching ran.
     """
 
-    operation_id: Any  # an opaque identity
+    stream_id: Any  # an opaque identity
     window_index: int
     ownership_kind: str
     commit_lo: int
@@ -204,6 +214,28 @@ class WindowOutcomeRow:
     is_escalated: Optional[bool]
     weak_answer: Optional[str]
     weak_label: Optional[str]
+    strong_evidence: Optional[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class PoolRow:
+    """One pool over one shot: its load, and the windows it decided.
+
+    The load reads as the tier columns do, over this pool alone.
+    committed_windows are the windows the frame committed off this
+    pool's decode; escalated_windows those it sent up its edge, none for
+    a pool that escalates nowhere. Every number is over the region of
+    interest, from the statistics' restart on, so a row adds up. A
+    machine of several pools on one tier, a decoder per patch, shows
+    each pool's contention here.
+    """
+
+    pool: str
+    queue_max: int
+    busy_fraction: float
+    offered_load: float
+    committed_windows: int
+    escalated_windows: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -269,6 +301,9 @@ class ShotMeasurement:
     # behind
     weak_offered_load: float
     strong_offered_load: float
+    # each pool's own load and windows, one PoolRow a pool in layout
+    # order; shot_pools.csv holds them
+    pools: tuple
     # the windows the strong tier committed, the rounds its decodes read
     # and their summed service, and r_com, the rounds a window commits.
     # The report divides the summed service by the summed windows per
@@ -437,7 +472,7 @@ def link_delay_by_window(transfers: list) -> dict:
 
     A hop's transfers for one window can overlap (the selection and its
     rounds), so the span is what the window waited and a sum would count
-    the overlap twice. A window is keyed by (operation_id, window_index),
+    the overlap twice. A window is keyed by (stream_id, window_index),
     since several streams each have a window 3, as gem5's reorder buffer
     finds an instruction by thread and sequence number
     (src/cpu/o3/rob.hh:131-134). The hop is the path, or BOUNDARY_HOP for
@@ -469,7 +504,7 @@ def answer_send_ticks(transfers: list, answer_hops: dict) -> dict:
 
 
 def input_hop_by_request(transfers: list) -> dict:
-    """(path, window id, run ordinal) -> (delay ticks, last delivery tick).
+    """(path, stream, window, run ordinal) -> (delay ticks, last delivery).
 
     A window decoded more than once has one entry per decode, so a point
     reads the hop of the decode it describes. The landing is the latest
@@ -483,20 +518,24 @@ def input_hop_by_request(transfers: list) -> dict:
 
 def controller_write_delays_us(
     transfers: list,
-    write_hop: Optional[str],
+    write_hops: tuple,
     observation_settings: observe_settings.ObservationSettings,
 ) -> list:
-    """Every recorded round's delay into the written store, in us.
+    """Every recorded round's delay into its own written store, in us.
 
-    write_hop is the controller's write into it (Layout.controller_write_hop),
-    None for a run with no written store. A packed transfer is recorded
-    by its first round.
+    write_hops are the controller's writes into the written stores
+    (Layout.controller_write_hops), none for a run with no written
+    store. A copy into another pool's store is the same round's, so it
+    is not counted again. A packed transfer is recorded by its first
+    round.
     """
     delays = []
     for row in transfers:
-        if row["path"] != write_hop:
+        if row["path"] not in write_hops:
             continue
-        first_rounds = row["attribution"]["rounds_by_operation"][0]
+        if _is_copy(row):
+            continue
+        first_rounds = row["attribution"]["rounds_by_stream"][0]
         if not observation_settings.records_round(first_rounds["round_lo"]):
             continue
         delay = config_module.ticks_to_microseconds(row["total_delay_ticks"])
@@ -515,7 +554,7 @@ def round_stall_ticks(round_events: list) -> dict:
     held_at = {}
     waits = {}
     for event in round_events:
-        key = (event.operation_id, event.round_index)
+        key = (event.stream_id, event.round_index)
         if event.kind == "STALLED":
             held_at[key] = event.tick
         if event.kind == "RELEASED":
@@ -552,7 +591,7 @@ def weak_store_round_keys(round_events: list) -> list:
     for event in round_events:
         if event.kind != "CWB_SENT":
             continue
-        key = (event.operation_id, event.round_index)
+        key = (event.stream_id, event.round_index)
         keys.append(key)
     return keys
 
@@ -560,8 +599,8 @@ def weak_store_round_keys(round_events: list) -> list:
 def strong_store_round_keys(stored_rounds: list) -> list:
     """Every round landed in the strong syndrome buffer, in landing order."""
     keys = []
-    for _tick, operation_id, round_index in stored_rounds:
-        key = (operation_id, round_index)
+    for _tick, stream_id, round_index in stored_rounds:
+        key = (stream_id, round_index)
         keys.append(key)
     return keys
 
@@ -590,7 +629,7 @@ def window_points_us(
     qpu_send: dict,
     input_path: str,
     answer_send: dict,
-    escalation_path: Optional[str],
+    escalation_paths: tuple,
 ) -> dict:
     """The per-window latency points, in us, for one decoded window.
 
@@ -615,17 +654,19 @@ def window_points_us(
     (inst_queue.cc:1009-1014); Ciw keeps the pre-service wait in named parts
     (ciw/data_record.py lines 3-21).
     """
-    operation_id, window_id = window.key
+    stream_id, window_id = window.key
     committed = frame_record.committed_ticks
-    handoff_ticks = link_delay.get((BOUNDARY_HOP, operation_id, window_id), 0)
-    escalation_ticks = link_delay.get(
-        (escalation_path, operation_id, window_id), 0
-    )
+    handoff_ticks = link_delay.get((BOUNDARY_HOP, stream_id, window_id), 0)
+    # a window climbs one entry edge, so the others carried none of it
+    escalation_ticks = 0
+    for escalation_path in escalation_paths:
+        escalation_key = (escalation_path, stream_id, window_id)
+        escalation_ticks += link_delay.get(escalation_key, 0)
     accepted = frame_record.accepted_ticks
     output_sent = answer_send.get(window.key, accepted)
     output_ticks = accepted - output_sent
     attempt_end = _attempt_end_ticks(window, decode, first_dispatch)
-    input_key = (input_path, window_id, decode.run_sequence)
+    input_key = (input_path, stream_id, window_id, decode.run_sequence)
     input_ticks, input_landed = input_hop.get(input_key, (0, attempt_end))
     input_sent = input_landed - input_ticks
     startable = _startable_ticks(decode, input_landed)
@@ -640,8 +681,9 @@ def window_points_us(
     dependency_block = config_module.ticks_to_microseconds(dependency_ticks)
     confidence_ticks = _confidence_ticks(window, decode)
     answered = max(window.t_done, decode.done_ticks)
+    input_final = _input_final_ticks(window, answered)
     last_required_send = last_required_send_ticks(decode, qpu_send)
-    first_required_send = qpu_send[(operation_id, window.start_round)]
+    first_required_send = qpu_send[(stream_id, window.start_round)]
     return {
         "buffer_fill": _span_microseconds(
             window.t_data_complete, window.t_first_round
@@ -668,7 +710,8 @@ def window_points_us(
             decode.done_ticks, decode.compute_start_ticks
         ),
         "confidence": config_module.ticks_to_microseconds(confidence_ticks),
-        "selection_wait": _span_microseconds(output_sent, answered),
+        "selection_wait": _span_microseconds(output_sent, input_final),
+        "input_check_wait": _span_microseconds(input_final, answered),
         "weak_attempt": _span_microseconds(attempt_end, first_dispatch),
         "escalation_link_per_window": config_module.ticks_to_microseconds(
             escalation_ticks
@@ -698,7 +741,7 @@ def window_points_us(
 def frame_records_by_window(
     observation: observation_module.Observation,
 ) -> dict:
-    """The frame's committed corrections, by (operation_id, window_index).
+    """The frame's committed corrections, by (stream_id, window_index).
 
     Keyed by the index alone, several streams would keep one stream's
     correction per index and measure the others against the wrong decode.
@@ -756,8 +799,8 @@ def collect_samples(
     """
     routes = layout.routes()
     input_hops = layout.input_hop_by_pool()
-    escalation_hop = layout.entry_escalation_hop()
-    write_hop = layout.controller_write_hop()
+    escalation_hops = layout.entry_escalation_hops()
+    write_hops = layout.controller_write_hops()
     transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
     answer_hops = routes.name_bits_by_answer_hop
@@ -769,7 +812,7 @@ def collect_samples(
         samples[name] = []
     window_tiers = []
     samples["cwb_per_round"] = controller_write_delays_us(
-        transfers, write_hop, observation_settings
+        transfers, write_hops, observation_settings
     )
     round_events = observation.round_events
     waits = round_stall_ticks(round_events.events)
@@ -787,7 +830,7 @@ def collect_samples(
         observation, observation_settings
     ):
         sample = window_sample(
-            window, frame_record, stages, reads, input_hops, escalation_hop
+            window, frame_record, stages, reads, input_hops, escalation_hops
         )
         for name, value in sample.values.items():
             samples[name].append(value)
@@ -829,7 +872,7 @@ def window_sample(
     stages: stage_records.StageLedger,
     reads: TransferReads,
     input_hops: dict,
-    escalation_hop: Optional[str],
+    escalation_hops: tuple,
 ) -> WindowSample:
     """One decoded window's values, as collect_samples reads every one.
 
@@ -851,7 +894,7 @@ def window_sample(
         reads.qpu_send,
         input_path,
         reads.answer_send,
-        escalation_hop,
+        escalation_hops,
     )
     return WindowSample(values, decode)
 
@@ -867,12 +910,12 @@ def committed_decode(
     window decoded more than once never mixes two decodes.
     """
     tier = window_records.PoolId(frame_record.tier)
-    operation_id, window_id = frame_record.window_key
+    stream_id, window_id = frame_record.window_key
     records = _committing_stage_records(
-        stages, operation_id, window_id, frame_record.run_sequence
+        stages, stream_id, window_id, frame_record.run_sequence
     )
     assert records, (
-        f"window ({operation_id}, {window_id}) committed the result of "
+        f"window ({stream_id}, {window_id}) committed the result of "
         f"request {frame_record.run_sequence}, which recorded no stage"
     )
     starts = []
@@ -908,17 +951,18 @@ def pool_measures(
 ) -> "_PoolMeasures":
     """Each tier's queue peak, busy fraction and load over a span.
 
-    The tiers are the layout's (Layout.tier_pools), each read where its
-    pool keeps its statistics; a tier the run lacks reads zero.
-    generation_ticks is the span the rounds were generated over
-    (_generation_span_ticks); a stream keeps its two ends as it runs.
+    The tiers are the layout's (Layout.tier_pools), each pool read where
+    it keeps its statistics and a tier's pools read as one
+    (_tier_numbers); a tier the run lacks reads zero. generation_ticks
+    is the span the rounds were generated over (_generation_span_ticks);
+    a stream keeps its two ends as it runs.
     """
-    weak_pool, strong_pool = layout.tier_pools()
+    weak_pools, strong_pools = layout.tier_pools()
     pool_paths = layout.statistics_path_by_pool()
-    weak_path = pool_paths.get(weak_pool)
-    strong_path = pool_paths.get(strong_pool)
-    weak = _pool_numbers(run_statistics, weak_path, generation_ticks)
-    strong = _pool_numbers(run_statistics, strong_path, generation_ticks)
+    weak_usages = _usages_of(run_statistics, pool_paths, weak_pools)
+    strong_usages = _usages_of(run_statistics, pool_paths, strong_pools)
+    weak = _tier_numbers(weak_usages, generation_ticks)
+    strong = _tier_numbers(strong_usages, generation_ticks)
     return _PoolMeasures(
         weak_queue_max=weak.queue_max,
         strong_queue_max=strong.queue_max,
@@ -927,6 +971,36 @@ def pool_measures(
         weak_offered_load=weak.offered_load,
         strong_offered_load=strong.offered_load,
     )
+
+
+def pool_rows(
+    run_statistics: statistics_registry.Registry,
+    layout: layout_module.Layout,
+    committed: collections.Counter,
+    generation_ticks: int,
+) -> tuple:
+    """Every pool's PoolRow over the run, in layout order.
+
+    committed counts the windows the frame committed off each pool's
+    decode, by its word: a shot's frame ledger, or a stream's fold of it.
+    """
+    pool_paths = layout.statistics_path_by_pool()
+    rows = []
+    for plan in layout.pools:
+        one_pool = (plan.pool,)
+        usages = _usages_of(run_statistics, pool_paths, one_pool)
+        numbers = _tier_numbers(usages, generation_ticks)
+        escalated = _escalated_windows(run_statistics, layout, plan.pool)
+        row = PoolRow(
+            pool=plan.pool.word,
+            queue_max=numbers.queue_max,
+            busy_fraction=numbers.busy_fraction,
+            offered_load=numbers.offered_load,
+            committed_windows=committed[plan.pool.word],
+            escalated_windows=escalated,
+        )
+        rows.append(row)
+    return tuple(rows)
 
 
 def last_required_send_ticks(decode: "_CommittedDecode", qpu_send: dict) -> int:
@@ -938,8 +1012,8 @@ def last_required_send_ticks(decode: "_CommittedDecode", qpu_send: dict) -> int:
     that operation's rounds.
     """
     sends = []
-    for operation_id, round_index in decode.last_rounds_read:
-        sends.append(qpu_send[(operation_id, round_index)])
+    for stream_id, round_index in decode.last_rounds_read:
+        sends.append(qpu_send[(stream_id, round_index)])
     return max(sends)
 
 
@@ -1008,9 +1082,7 @@ def conditional_reaction_us(
     return reactions
 
 
-def reaction_growth_rate(
-    recorded: list, tier: Optional[window_records.PoolId]
-) -> Optional[float]:
+def reaction_growth_rate(recorded: list, tier_pools: tuple) -> Optional[float]:
     """How fast a tier's reaction time grows along the shot, in us per us.
 
     The least-squares slope of each window's buffer0_ready_to_frame
@@ -1025,7 +1097,8 @@ def reaction_growth_rate(
     estimate of it, not equal to it. Against the commit tick the
     slope would tend to 1 - 1 / load, under 1 however far the tier is
     overloaded. None when the tier's recorded windows completed at fewer
-    than two distinct ticks, which leave no slope to fit.
+    than two distinct ticks, which leave no slope to fit. A tier of
+    several pools is fit over every window its pools committed.
 
     The law holds for an unbounded FIFO queue fed without a pause by
     stationary arrivals and service. A bounded store holds the backlog
@@ -1036,7 +1109,7 @@ def reaction_growth_rate(
     arrivals_us = []
     reactions_us = []
     for window, frame_record in recorded:
-        if window_records.PoolId(frame_record.tier) != tier:
+        if window_records.PoolId(frame_record.tier) not in tier_pools:
             continue
         arrival_us = _arrival_microseconds(window)
         reaction_us = _reaction_microseconds(window, frame_record)
@@ -1100,11 +1173,20 @@ def chain_load(samples: dict, window_period_us: float) -> float:
 def active_decoder_kind(
     layout: layout_module.Layout,
 ) -> Optional[Union[str, float]]:
-    """The kind of the entry pool, which decodes the plan's windows."""
-    pool_settings = layout.entry_pool.settings
-    if pool_settings is None:
-        return None
-    return pool_settings.algorithm.name
+    """The kind of the entry pools, which decode the plan's windows.
+
+    Entry pools of several kinds, a decoder row per region, are named
+    together, each kind once in layout order, joined by a plus.
+    """
+    kinds = []
+    for plan in layout.entry_pools:
+        kind = _decoder_kind(plan)
+        if kind not in kinds:
+            kinds.append(kind)
+    if len(kinds) == 1:
+        return kinds[0]
+    words = [str(kind) for kind in kinds]
+    return "+".join(words)
 
 
 def trace_path_for_shot(path: Union[str, pathlib.Path], label: str) -> str:
@@ -1187,9 +1269,9 @@ def _measurement(
     decoded = decoded_windows(observation)
     decoded_window_count = len(decoded)
     recorded = recorded_windows(observation, graph.observation)
-    weak_pool, strong_pool = layout.tier_pools()
-    weak_growth = reaction_growth_rate(recorded, weak_pool)
-    strong_growth = reaction_growth_rate(recorded, strong_pool)
+    weak_pools, strong_pools = layout.tier_pools()
+    weak_growth = reaction_growth_rate(recorded, weak_pools)
+    strong_growth = reaction_growth_rate(recorded, strong_pools)
     missed_windows, first_miss_us = deadline_misses(
         recorded, graph.observation.reaction_deadline_microseconds
     )
@@ -1204,9 +1286,14 @@ def _measurement(
     round_period_ticks = config_module.microseconds_to_ticks(
         round_period_microseconds
     )
-    pools = _pool_measures(observation, round_period_ticks, layout)
-    strong = _strong_decodes(observation, strong_pool)
-    tiers = _tier_records(observation, weak_pool, strong_pool)
+    generation_ticks = _generation_span_ticks(observation, round_period_ticks)
+    pools = pool_measures(observation.statistics, layout, generation_ticks)
+    committed = _committed_by_pool(observation)
+    pool_table = pool_rows(
+        observation.statistics, layout, committed, generation_ticks
+    )
+    strong = _strong_decodes(observation, strong_pools)
+    tiers = _tier_records(observation, weak_pools, strong_pools)
     backlog_peak = _backlog_peak_rounds(observation)
     processes = parallel_processes_needed(
         samples, code, round_period_microseconds
@@ -1248,6 +1335,7 @@ def _measurement(
         strong_busy_fraction=pools.strong_busy_fraction,
         weak_offered_load=pools.weak_offered_load,
         strong_offered_load=pools.strong_offered_load,
+        pools=pool_table,
         escalated_windows=strong.windows,
         strong_decoded_rounds=strong.rounds,
         strong_service_sum_us=strong.service_sum_microseconds,
@@ -1367,7 +1455,7 @@ def _window_outcome_row(
     outcome: window_outcomes_module.WindowOutcome,
 ) -> WindowOutcomeRow:
     """One outcome joined with its window's decode and its verdict."""
-    operation_id, window_index = outcome.owner_key
+    stream_id, window_index = outcome.owner_key
     window = observation.windows.windows[outcome.owner_key]
     request_key = window.published_request_key
     tier = None
@@ -1382,8 +1470,9 @@ def _window_outcome_row(
     label = _bit_cell(outcome.label)
     weak_answer = _bit_cell(verdict.weak_answer)
     weak_label = _bit_cell(verdict.weak_label)
+    strong_evidence = _evidence_cell(verdict.strong_evidence)
     return WindowOutcomeRow(
-        operation_id=operation_id,
+        stream_id=stream_id,
         window_index=window_index,
         ownership_kind=outcome.ownership_kind,
         commit_lo=outcome.commit_lo,
@@ -1398,6 +1487,7 @@ def _window_outcome_row(
         is_escalated=verdict.is_escalated,
         weak_answer=weak_answer,
         weak_label=weak_label,
+        strong_evidence=strong_evidence,
     )
 
 
@@ -1409,6 +1499,7 @@ class _Verdict:
     is_escalated: Optional[bool] = None
     weak_answer: Optional[tuple] = None
     weak_label: Optional[tuple] = None
+    strong_evidence: Optional[Mapping] = None
 
 
 def _verdict_of(
@@ -1430,12 +1521,15 @@ def _verdict_of(
     weak_label = None
     if is_escalated and weak_answer is not None:
         weak_label = observation.window_outcomes.label_of(
-            window.operation_id,
+            window.stream_id,
             window.commit_lo,
             window.commit_hi,
             len(weak_answer),
         )
-    return _Verdict(gap_nats, is_escalated, weak_answer, weak_label)
+    strong_evidence = ledger.strong_evidence.get(window.key)
+    return _Verdict(
+        gap_nats, is_escalated, weak_answer, weak_label, strong_evidence
+    )
 
 
 def _window_statuses(observation: observation_module.Observation) -> dict:
@@ -1549,7 +1643,7 @@ def _rounds_by_owner(
 
 def _add_the_emitted_patch_rounds(rounds_by_owner: dict, event) -> None:
     """An emitted round's patch-rounds, added to its scored owner's set."""
-    patch_rounds = rounds_by_owner.get(event.operation_id)
+    patch_rounds = rounds_by_owner.get(event.stream_id)
     if event.kind != "EMITTED" or patch_rounds is None:
         return
     for patch in event.patch_ids:
@@ -1612,6 +1706,20 @@ class _PoolNumbers:
 
 
 _NO_POOL = _PoolNumbers(queue_max=0, busy_fraction=0.0, offered_load=0.0)
+
+
+@dataclasses.dataclass(frozen=True)
+class _PoolUsage:
+    """One pool's raw load: its queue peak, busy units and units.
+
+    busy_units_mean is the busy units' time average, busy_ticks the
+    busy unit ticks (the busy level's area), so pools add.
+    """
+
+    queue_max: int
+    busy_units_mean: float
+    busy_ticks: int
+    unit_count: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1695,6 +1803,13 @@ def _bit_text(bits: Optional[tuple]) -> Optional[str]:
     return "".join(characters)
 
 
+def _evidence_cell(evidence: Optional[Mapping]) -> Optional[str]:
+    """A decoder's named numbers as a json object cell, keys in order."""
+    if evidence is None:
+        return None
+    return json.dumps(dict(evidence), sort_keys=True)
+
+
 def _bit_cell(bits: Optional[tuple]) -> Optional[str]:
     """Bits as a json string cell, so a reader that types numbers keeps 01."""
     if bits is None:
@@ -1733,7 +1848,7 @@ def _emitted_round_count(observation: observation_module.Observation) -> int:
     for event in observation.round_events.events:
         if event.kind != "EMITTED":
             continue
-        emitted.add((event.operation_id, event.round_index))
+        emitted.add((event.stream_id, event.round_index))
     return len(emitted)
 
 
@@ -1748,49 +1863,106 @@ def _referee_counts(
     )
 
 
-def _pool_measures(
-    observation: observation_module.Observation,
-    round_period_ticks: int,
-    layout: layout_module.Layout,
-) -> _PoolMeasures:
-    """Each tier's queue peak, busy fraction and load, from its statistics.
-
-    The weak row reads the layout's weak tier, the strong row its strong
-    one (a strong-only run's window pool); a tier the run lacks reads zero.
-    """
-    generation_ticks = _generation_span_ticks(observation, round_period_ticks)
-    return pool_measures(observation.statistics, layout, generation_ticks)
+def _decoder_kind(
+    plan: layout_module.PoolPlan,
+) -> Optional[Union[str, float]]:
+    """One pool's decoder kind; None for a pool that decodes nothing."""
+    if plan.settings is None:
+        return None
+    return plan.settings.algorithm.name
 
 
-def _pool_numbers(
+def _usages_of(
     run_statistics: statistics_registry.Registry,
-    path: Optional[str],
-    generation_ticks: int,
-) -> "_PoolNumbers":
-    """One pool's queue peak, busy fraction and offered load.
+    pool_paths: dict,
+    pools: tuple,
+) -> list:
+    """The raw load of each of the pools whose units keep statistics."""
+    usages = []
+    for pool in pools:
+        path = pool_paths.get(pool)
+        usage = _pool_usage(run_statistics, path)
+        if usage is not None:
+            usages.append(usage)
+    return usages
 
-    The busy fraction is the busy units' time average over the run, or
-    over its region of interest, drain included, per unit (Triage's
-    utilization, 2605.04459
-    lines 1024-1031); the offered load is the busy unit ticks over the
-    units times the generation span: rho = lambda E[S] / c, the ratio
-    chain_load forms for the serial chain.
-    """
+
+def _pool_usage(
+    run_statistics: statistics_registry.Registry, path: Optional[str]
+) -> Optional["_PoolUsage"]:
+    """One pool's queue peak, busy units and units; None with no units."""
     if path is None:
-        return _NO_POOL
+        return None
     units_group = run_statistics.groups.get(f"{path}.units")
     if units_group is None:
-        return _NO_POOL
+        return None
     queue_group = run_statistics.groups[f"{path}.queue"]
     busy = units_group.busy_units
-    unit_count = units_group.units.count
-    time_average = 0.0
+    busy_units_mean = 0.0
     if busy.span:
-        time_average = busy.area / busy.span
-    busy_fraction = time_average / unit_count
+        busy_units_mean = busy.area / busy.span
+    queue_max = queue_group.queued.peak
+    unit_count = units_group.units.count
+    return _PoolUsage(queue_max, busy_units_mean, busy.area, unit_count)
+
+
+def _tier_numbers(usages: list, generation_ticks: int) -> "_PoolNumbers":
+    """Pools read as one: their units together, their largest queue.
+
+    The busy fraction is the busy units' time average over the units,
+    over the run or its region of interest, drain included (Triage's
+    utilization, 2605.04459 lines 1024-1031); the offered load is the
+    busy unit ticks over the units times the generation span: rho =
+    lambda E[S] / c, the ratio chain_load forms for the serial chain,
+    with c every unit of the pools. The queue peak is the largest
+    pool's, since each pool queues apart and two pools' peaks need not
+    fall at one tick. No pool reads zero.
+    """
+    if not usages:
+        return _NO_POOL
+    queue_max = 0
+    busy_units_mean = 0.0
+    busy_ticks = 0
+    unit_count = 0
+    for usage in usages:
+        queue_max = max(queue_max, usage.queue_max)
+        busy_units_mean += usage.busy_units_mean
+        busy_ticks += usage.busy_ticks
+        unit_count += usage.unit_count
+    busy_fraction = busy_units_mean / unit_count
     capacity_ticks = unit_count * generation_ticks
-    offered_load = busy.area / capacity_ticks
-    return _PoolNumbers(queue_group.queued.peak, busy_fraction, offered_load)
+    offered_load = busy_ticks / capacity_ticks
+    return _PoolNumbers(queue_max, busy_fraction, offered_load)
+
+
+def _committed_by_pool(
+    observation: observation_module.Observation,
+) -> collections.Counter:
+    """The windows the frame committed off each pool's decode, by word.
+
+    Only the commits from the statistics' restart on, the region the
+    pool's load is read over.
+    """
+    reset_tick = observation.statistics.reset_tick
+    committed = collections.Counter()
+    for frame_record in observation.frame_corrections.committed:
+        if frame_record.committed_ticks < reset_tick:
+            continue
+        committed[frame_record.tier] += 1
+    return committed
+
+
+def _escalated_windows(
+    run_statistics: statistics_registry.Registry,
+    layout: layout_module.Layout,
+    pool: window_records.PoolId,
+) -> int:
+    """The windows a pool sent up its edge; none with no edge."""
+    edge = layout.edge_leaving(pool)
+    if edge is None:
+        return 0
+    edge_group = run_statistics.groups[edge.name]
+    return edge_group.escalated.count
 
 
 def _generation_span_ticks(
@@ -1820,8 +1992,7 @@ def _generation_span_ticks(
 
 
 def _strong_decodes(
-    observation: observation_module.Observation,
-    strong_pool: Optional[window_records.PoolId],
+    observation: observation_module.Observation, strong_pools: tuple
 ) -> _StrongDecodes:
     """The windows the strong tier committed, their rounds, their service.
 
@@ -1834,7 +2005,7 @@ def _strong_decodes(
     service_ticks = 0
     for frame_record in observation.frame_corrections.committed:
         tier = window_records.PoolId(frame_record.tier)
-        if tier != strong_pool:
+        if tier not in strong_pools:
             continue
         decode = committed_decode(stages, frame_record)
         windows += 1
@@ -1848,8 +2019,8 @@ def _strong_decodes(
 
 def _tier_records(
     observation: observation_module.Observation,
-    weak_pool: Optional[window_records.PoolId],
-    strong_pool: Optional[window_records.PoolId],
+    weak_pools: tuple,
+    strong_pools: tuple,
 ) -> _TierRecords:
     """Each tier's inputs, computes and waits off the switching records.
 
@@ -1863,9 +2034,9 @@ def _tier_records(
         return _TierRecords()
     lives = _decode_lives(observation.stages)
     requests = records.requests
-    weak_requests = _requests_of_pool(requests, lives, weak_pool)
-    strong_requests = _requests_of_pool(requests, lives, strong_pool)
-    weights = _weak_syndrome_weights(requests, weak_pool)
+    weak_requests = _requests_of_pools(requests, lives, weak_pools)
+    strong_requests = _requests_of_pools(requests, lives, strong_pools)
+    weights = _weak_syndrome_weights(requests, weak_pools)
     weak_computes = _weak_compute_microseconds(weak_requests, lives)
     strong_waits = _strong_wait_microseconds(strong_requests, lives)
     held_peak = _strong_held_in_units_peak(strong_requests, lives)
@@ -1912,13 +2083,11 @@ def _decode_life(records: list) -> _DecodeLife:
     return _DecodeLife(dispatch, ready, compute_start, max(ends))
 
 
-def _weak_syndrome_weights(
-    requests: list, weak_pool: Optional[window_records.PoolId]
-) -> list:
+def _weak_syndrome_weights(requests: list, weak_pools: tuple) -> list:
     """The set bits of every weak request's landed input that has bits."""
     weights = []
     for request in requests:
-        is_weak = request.request_key.pool == weak_pool
+        is_weak = request.request_key.pool in weak_pools
         if is_weak and request.syndrome_weight is not None:
             weights.append(request.syndrome_weight)
     return weights
@@ -1972,14 +2141,12 @@ def _strong_held_in_units_peak(strong_requests: list, lives: dict) -> int:
     return peak
 
 
-def _requests_of_pool(
-    requests: list, lives: dict, pool: Optional[window_records.PoolId]
-) -> list:
-    """The pool's requests whose decode ran at least one stage."""
+def _requests_of_pools(requests: list, lives: dict, pools: tuple) -> list:
+    """The pools' requests whose decode ran at least one stage."""
     chosen = []
     for request in requests:
         key = request.request_key
-        if key.pool == pool and key.run_sequence in lives:
+        if key.pool in pools and key.run_sequence in lives:
             chosen.append(request)
     return chosen
 
@@ -2028,9 +2195,9 @@ def _last_rounds_read(records: list) -> tuple:
     """The decode's last round of each operation, as its stages carry it."""
     last_rounds = {}
     for record in records:
-        for operation_id, round_index in record.last_rounds_read:
-            latest = last_rounds.get(operation_id, 0)
-            last_rounds[operation_id] = max(latest, round_index)
+        for stream_id, round_index in record.last_rounds_read:
+            latest = last_rounds.get(stream_id, 0)
+            last_rounds[stream_id] = max(latest, round_index)
     pairs = last_rounds.items()
     return tuple(pairs)
 
@@ -2097,16 +2264,21 @@ def _first_dispatch_ticks(stages, window, frame_record) -> int:
 
     The ready-queue wait ends there and an escalated window's weak attempt
     starts there (Toshio et al. 2510.25222 Sec. III A steps 2 to 4). A
-    cancelled decode is not on the window's path, so it is left out.
+    cancelled decode is not on the window's path, so it is left out, nor
+    is one a unit took before the window's release: that decode read a
+    boundary that changed, and its result was dropped (decode_again).
     """
-    operation_id, window_id = frame_record.window_key
-    records = stages.records_for(operation_id, window_id)
+    stream_id, window_id = frame_record.window_key
+    records = stages.records_for(stream_id, window_id)
     cancelled = _cancelled_run_sequences(records)
+    released = _released_ticks(window)
     ticks = []
     for record in records:
         if cancelled.intersection(record.run_sequences):
             continue
         if record.dispatch_ticks is None:
+            continue
+        if record.dispatch_ticks < released:
             continue
         ticks.append(record.dispatch_ticks)
     if not ticks:
@@ -2125,11 +2297,11 @@ def _cancelled_run_sequences(records) -> set:
 
 
 def _committing_stage_records(
-    stages, operation_id, window_id, run_sequence: int
+    stages, stream_id, window_id, run_sequence: int
 ) -> list:
     """One window's stage records that belong to one request ordinal."""
     records = []
-    for record in stages.records_for(operation_id, window_id):
+    for record in stages.records_for(stream_id, window_id):
         if run_sequence in record.run_sequences:
             records.append(record)
     return records
@@ -2158,6 +2330,17 @@ def _released_ticks(window) -> int:
     if window.t_released is None:
         return window.t_queued
     return max(window.t_queued, window.t_released)
+
+
+def _input_final_ticks(window, answered: int) -> int:
+    """Where the wait for a guessed input ends: never before the answer.
+
+    A window whose decode read final boundaries waits for none, and an
+    escalated one settled its guess before its strong answer.
+    """
+    if window.t_input_final is None:
+        return answered
+    return max(window.t_input_final, answered)
 
 
 def _startable_ticks(decode: _CommittedDecode, input_landed: int) -> int:
@@ -2194,9 +2377,9 @@ def _stage_microseconds(stages, frame_record) -> dict:
     Every decode of a window records under its key, so the stages are the
     committing request's, as for every other point.
     """
-    operation_id, window_id = frame_record.window_key
+    stream_id, window_id = frame_record.window_key
     records = _committing_stage_records(
-        stages, operation_id, window_id, frame_record.run_sequence
+        stages, stream_id, window_id, frame_record.run_sequence
     )
     stage_us = {}
     for record in records:
@@ -2264,3 +2447,9 @@ def _write_trace(shot, run_dir, label: str, only_traced_shot: bool) -> None:
     if observation.trace_path is not None and not only_traced_shot:
         path = trace_path_for_shot(path, label)
     writer.write(str(path))
+
+
+def _is_copy(row: dict) -> bool:
+    """Whether a transfer row is a round's copy (RoundCopyRelation)."""
+    relation = row["attribution"]["relation"]
+    return relation is not None and "copy_into" in relation

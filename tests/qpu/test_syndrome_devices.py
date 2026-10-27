@@ -129,8 +129,8 @@ def test_one_payload_per_patch_when_asked():
     assert len(payloads) == 2
     assert payloads[0].patch_ids == (5,)
     assert payloads[1].patch_ids == (6,)
-    assert payloads[0].operation_id == 1
-    assert payloads[1].operation_id == 1
+    assert payloads[0].stream_id == 1
+    assert payloads[1].stream_id == 1
 
 
 def last_syndrome_fragment() -> program_records.Operation:

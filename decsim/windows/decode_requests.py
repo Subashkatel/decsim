@@ -24,6 +24,7 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.trace_source as trace_source
 import decsim.windows.escalate_edges as escalate_edges
+import decsim.windows.input_checks as input_checks_module
 import decsim.windows.round_retention as round_retention_module
 import decsim.windows.round_tracker as round_tracker_module
 import decsim.windows.routers as routers
@@ -44,20 +45,15 @@ class WindowInputGate:
     interaction = ports.Port(window_interactions.WindowInteraction)
     # the decoder side's input, which installs what this hands it
     input_fold = ports.Port(ports.DecoderInputFold)
+    # what each decode reads, kept while a boundary it read is not final
+    input_checks = ports.Port(input_checks_module.InputChecks)
 
-    def __init__(
-        self,
-        copies_the_window_fold: bool = True,
-        copies_the_strong_fold: bool = True,
-    ):
-        # each tier's copies_boundary_fold: a copy duplicates the landed
+    def __init__(self, copies_fold_by_pool: dict):
+        # each pool's copies_boundary_fold: a copy duplicates the landed
         # input, in place XORs the mask into the unit's own memory. A
-        # window job is decoded by the tier that decodes the plan's
-        # windows, a strong re-decode by the strong tier.
-        self.copies_the_window_fold = copies_the_window_fold
-        self.copies_the_strong_fold = copies_the_strong_fold
-        # the fold of each entry pool past the first a router feeds
-        self.copies_fold_by_entry_pool: dict = {}
+        # job is folded as the pool that decodes it folds, an entry
+        # pool's window or any target's re-decode alike
+        self.copies_fold_by_pool = copies_fold_by_pool
 
     def mask_input(self, job: decoding_records.DecodeJob) -> None:
         """XOR the window's boundary mask into the input the decode reads.
@@ -73,6 +69,7 @@ class WindowInputGate:
         window = job.window
         if window is None:
             return
+        self.input_checks.note_read(job)
         state = window.boundary_in
         if job.decoder_input is None:
             return
@@ -94,13 +91,9 @@ class WindowInputGate:
     # ---- private
 
     def _copies_the_fold(self, job: decoding_records.DecodeJob) -> bool:
-        """The fold of the tier that decodes this job."""
-        if job.kind is not decoding_records.DecodeJobKind.WINDOW:
-            return self.copies_the_strong_fold
+        """The fold of the pool that decodes this job."""
         pool = job.request_key.pool
-        return self.copies_fold_by_entry_pool.get(
-            pool, self.copies_the_window_fold
-        )
+        return self.copies_fold_by_pool[pool]
 
     def _masked_round(self, state, window_info, round_input):
         fragments = []
@@ -133,13 +126,13 @@ class DecodeRequestBuilder:
 
     def new_request_key(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
         window_id: int,
         tier: window_records.PoolId,
     ) -> window_records.DecoderRequestKey:
         """The next request identity, run-wide ordinal included."""
         request_key = window_records.DecoderRequestKey(
-            operation_id, window_id, tier, self.next_request_sequence
+            stream_id, window_id, tier, self.next_request_sequence
         )
         self.next_request_sequence += 1
         return request_key
@@ -150,7 +143,7 @@ class DecodeRequestBuilder:
         """Retain arrival provenance for latency accounting."""
         if window.t_first_round is not None:
             return
-        first_round_key = (window.operation_id, window.start_round)
+        first_round_key = (window.stream_id, window.start_round)
         window.t_first_round = store.publication_tick(first_round_key)
 
     def note_data_complete(
@@ -191,26 +184,22 @@ class DecodeRequestBuilder:
         None for the window's own unconstrained decode.
         """
         request_key = self.new_request_key(
-            window.operation_id, window.window_index, tier
+            window.stream_id, window.window_index, tier
         )
         payloads = self.assemble_payloads(window, store)
         payload_round_count = decoding_records.distinct_round_count(payloads)
         round_count = (
             payload_round_count + window.batched_preceding_idle_round_count
         )
-        spatial_nodes = self.planner.spatial_node_count_of(operation.id)
-        geometry = self.planner.code_geometry_of(operation.id)
         model = self.planner.models.model_by_window.get(window.key)
         label = self._job_label(window, operation)
         return decoding_records.DecodeJob(
-            operation_id=window.operation_id,
+            stream_id=window.stream_id,
             window_id=window.window_index,
             round_count=round_count,
             ready_time=self.engine.now,
-            spatial_nodes=spatial_nodes,
             payloads=payloads,
             detector_error_model=model,
-            code=geometry.code_name,
             window=window,
             label=label,
             request_key=request_key,
@@ -231,19 +220,17 @@ class DecodeRequestBuilder:
         receiving them again.
         """
         request_key = self.new_request_key(
-            job.operation_id, job.window_id, job.request_key.pool
+            job.stream_id, job.window_id, job.request_key.pool
         )
         label = f"{job.label} class {forced_logical_class}"
         payloads = list(job.payloads)
         return decoding_records.DecodeJob(
-            operation_id=job.operation_id,
+            stream_id=job.stream_id,
             window_id=job.window_id,
             round_count=job.round_count,
             ready_time=self.engine.now,
-            spatial_nodes=job.spatial_nodes,
             payloads=payloads,
             detector_error_model=job.detector_error_model,
-            code=job.code,
             window=job.window,
             label=label,
             request_key=request_key,
@@ -256,29 +243,34 @@ class DecodeRequestBuilder:
     def assemble_payloads(
         self, window: window_records.Window, store: ports.RetainedRounds
     ) -> list:
-        """Collect this window's raw payloads, with successor overflow rounds.
+        """Collect this window's raw payloads, with the rounds it reads besides.
+
+        Those are its successors' overflow rounds and each region it
+        reads on another stream.
 
         The boundary is never folded here: the mask is XORed into the
         landed input at the decoder when the decode starts.
         """
         operation_rounds = self.tracker.effective_round_count_for_window(
-            window.operation_id, window
+            window.stream_id, window
         )
         end_round = min(window.buffer_hi, operation_rounds)
         window_info = window_records.WindowInfo.from_window(window)
         payloads = []
         stop_round = end_round + 1
         for round_index in range(window.start_round, stop_round):
-            round_key = (window.operation_id, round_index)
+            round_key = (window.stream_id, round_index)
             fragments = store.retained_fragments(round_key)
             self._append_round_payloads(
                 payloads, fragments, window_info, round_index
             )
+        for span in window.spatial_reads:
+            self._append_span_payloads(payloads, store, span, window_info)
         overflow = window.buffer_hi - operation_rounds
         if overflow <= 0:
             return payloads
-        successor_ids = self.planner.successors_by_operation.get(
-            window.operation_id, []
+        successor_ids = self.planner.successors_by_stream.get(
+            window.stream_id, []
         )
         for successor_id in successor_ids:
             self._append_overflow_payloads(
@@ -298,7 +290,7 @@ class DecodeRequestBuilder:
         window: window_records.Window,
         operation: program_records.Operation,
     ) -> str:
-        if self.planner.is_windowed(window.operation_id):
+        if self.planner.is_windowed(window.stream_id):
             return (
                 f"{operation.name} W{window.window_index} "
                 f"[commit {window.commit_lo}-{window.commit_hi}]"
@@ -331,6 +323,16 @@ class DecodeRequestBuilder:
                 payloads, fragments, window_info, shifted_round_index
             )
 
+    def _append_span_payloads(self, payloads, store, span, window_info) -> None:
+        """Every round of a region of another stream, at its own index."""
+        stop_round = span.last_round + 1
+        for round_index in range(span.first_round, stop_round):
+            round_key = (span.stream_id, round_index)
+            fragments = store.retained_fragments(round_key)
+            self._append_round_payloads(
+                payloads, fragments, window_info, round_index
+            )
+
     def _append_round_payloads(
         self, payloads, fragments, window_info, round_index
     ) -> None:
@@ -349,30 +351,24 @@ class DecodeRequestBuilder:
 class DecodeRequester:
     """Requests a decode for every complete window, once.
 
-    gap_join is the confidence join of a run whose gap is two
-    forced-class solves; it is both jobs' on_decoded and None when the
-    run's weak decoder reports its own soft output from one decode.
-    decode_queue, store_output and gap_join are the primary tier's; a
-    router names each window's entry pool and holds every other entry
-    pool's (windows/routers.py).
+    The router names each window's entry pool and holds its side: its
+    manager, the store end that sends to it, and its confidence join,
+    which is both forced-class solves' on_decoded and None when the
+    pool reports its own soft output from one decode
+    (windows/routers.py).
     """
 
     tracker = ports.Port(round_tracker_module.RoundTracker)
     retention = ports.Port(round_retention_module.RoundRetention)
     builder = ports.Port(DecodeRequestBuilder)
-    decode_queue = ports.Port(ports.DecodeQueue)
     # the run's escalate edges: the edge leaving the primary tier builds
     # the speculative decode a window submits beside its weak job, and
     # each edge's target manager serves its own; a run with no
     # switching has none, and decodes its windows on the primary alone
     edges = ports.Port(escalate_edges.EscalateEdges)
     verdict = ports.Port(window_commits.WindowVerdict)
-    # the primary store's outgoing port; it executes the input send
-    store_output = ports.Port(ports.SyndromeBufferOutput)
-    # a run whose weak decoder reports its own soft output has no join
-    gap_join = ports.Port(ports.WindowGapJoin, optional=True)
-    # the router of a machine of several entry pools; None for one
-    router = ports.Port(routers.Router, optional=True)
+    # which entry pool decodes each window, and that pool's side
+    router = ports.Port(routers.Router)
 
     def __init__(
         self,
@@ -399,13 +395,13 @@ class DecodeRequester:
         if window.t_first_round is None and self.tracker.has_first_round(
             window
         ):
-            store = self.retention.store_for(None)
+            store = self.retention.store_of_stream(window.stream_id)
             self.builder.stamp_first_round(window, store)
-        if not self.tracker.is_data_complete(window):
+        if not self._has_its_rounds(window):
             return
-        operation = self.tracker.operation_by_id[window.operation_id]
+        operation = self.tracker.operation_by_id[window.stream_id]
         read_keys = self.retention.read_keys_for_bounds(
-            window.operation_id, window.start_round, window.buffer_hi, window
+            window.stream_id, window.start_round, window.buffer_hi, window
         )
         self.builder.note_data_complete(window, operation, read_keys)
         # a window still owed a boundary is queued now and takes a unit
@@ -429,7 +425,7 @@ class DecodeRequester:
         when the decision ends. The store is read at dispatch
         (syndrome_buffer/round_output.py).
         """
-        store = self.retention.primary_store
+        store = self.retention.store_of_stream(window.stream_id)
         self.builder.stamp_first_round(window, store)
         entry_pool = self._pool_for(window)
         forced_classes = self._forced_logical_classes(entry_pool)
@@ -453,6 +449,16 @@ class DecodeRequester:
         decide = functools.partial(self._decide, window.key)
         engine.schedule(delay, decide, label="window decision")
 
+    def _has_its_rounds(self, window: window_records.Window) -> bool:
+        """Whether every round the window reads is in its pool's store.
+
+        A round of another pool's stream is there once its copy landed
+        (controller/round_destinations.py).
+        """
+        if not self.tracker.is_data_complete(window):
+            return False
+        return self.retention.copied_reads_landed(window)
+
     def _decide(self, window_key: tuple) -> None:
         """The window's decision ended: issue its requests, unless withdrawn."""
         deciding = self.deciding_by_window.pop(window_key, None)
@@ -475,11 +481,6 @@ class DecodeRequester:
         for submission in submissions:
             self._admit(submission)
 
-    def _primary_edge(self) -> Optional[ports.EscalateEdge]:
-        """The edge the primary tier's results meet; None with no switching."""
-        primary_tier = self.retention.primary_tier
-        return self.edges.leaving(primary_tier)
-
     def _primary_submissions(
         self, primary_jobs: list, is_input_held: bool
     ) -> list:
@@ -500,50 +501,27 @@ class DecodeRequester:
     # ---- private: the entry pool a window is decoded on
 
     def _pool_for(self, window: window_records.Window) -> window_records.PoolId:
-        """The entry pool that decodes the window: the router's, or the one."""
-        if self.router is None:
-            return self.retention.primary_tier
+        """The entry pool that decodes the window."""
         return self.router.pool_for(window)
-
-    def _routed_side(
-        self, pool: window_records.PoolId
-    ) -> Optional[routers.EntrySide]:
-        """The side of an entry pool past the first; None for the first."""
-        if self.router is None:
-            return None
-        return self.router.side_of(pool)
 
     def _queue_of(self, pool: window_records.PoolId) -> ports.DecodeQueue:
         """The manager of an entry pool."""
-        side = self._routed_side(pool)
-        if side is None:
-            return self.decode_queue
+        side = self.router.side(pool)
         return side.decode_queue
 
     def _join_of(
         self, pool: window_records.PoolId
     ) -> Optional[ports.WindowGapJoin]:
         """The join of an entry pool's solves; None when it has none."""
-        side = self._routed_side(pool)
-        if side is None:
-            return self.gap_join
+        side = self.router.side(pool)
         return side.gap_join
 
     def _store_output_of(
         self, pool: window_records.PoolId
     ) -> ports.SyndromeBufferOutput:
-        """The entry store's end that sends to an entry pool."""
-        side = self._routed_side(pool)
-        if side is None:
-            return self.store_output
+        """The end of the store an entry pool reads that sends to it."""
+        side = self.router.side(pool)
         return side.store_output
-
-    def _routed_queues(self) -> list:
-        """Every entry pool's manager past the first, in build order."""
-        if self.router is None:
-            return []
-        sides = self.router.sides()
-        return [side.decode_queue for side in sides]
 
     def _primary_jobs(
         self, job: decoding_records.DecodeJob, forced_classes: tuple
@@ -583,7 +561,7 @@ class DecodeRequester:
         first = primary_jobs[0]
         if first.submitted or self.retention.holds_input(first):
             return True
-        store = self.retention.primary_store
+        store = self.retention.store_of_stream(first.request_key.stream_id)
         self.retention.bind_input_hold(first, window_reads, store)
         reader_count = len(primary_jobs)
         if reader_count == 1:
@@ -597,15 +575,24 @@ class DecodeRequester:
 
     def check_settled(self) -> None:
         """At the end of a run no window may still hold an unjoined solve."""
-        if self.gap_join is None:
-            return
-        unresolved = self.gap_join.unresolved_windows()
-        if not unresolved:
-            return
-        raise RuntimeError(
-            f"the run ended with windows holding an unjoined solve: "
-            f"{unresolved}"
-        )
+        for side in self.router.sides():
+            _check_joined(side)
+
+    def decode_again(self, window: window_records.Window) -> None:
+        """Decode the window again, on the boundary it holds now.
+
+        A decode of it read a boundary that changed (input_checks.py).
+        Its rounds are still stored: a window's potential strong hold
+        keeps them until the window is final
+        (round_retention.register_window), and the fresh request takes
+        its own hold on them. The window keeps its first queue entry,
+        and the final boundary releases it now, so the dropped decode
+        is part of its wait for that boundary (experiments/measure.py
+        dep_block).
+        """
+        window.t_released = self.builder.engine.now
+        operation = self.tracker.operation_by_id[window.stream_id]
+        self.request(window, operation)
 
     def withdraw(self, window: window_records.Window) -> None:
         """Withdraw one window's unstarted decode.
@@ -629,35 +616,39 @@ class DecodeRequester:
     def release_window(self, window_key: tuple) -> None:
         """The window's last boundary arrived: its waiting decodes may start.
 
-        The window's weak decode waits in the chip's manager's queue; a
+        The window's first decode waits in its entry pool's manager; a
         speculative strong decode or a re-decode of the same window waits
         in its edge's target manager. A speculative strong decode the
-        primary edge waited to plan until this boundary is submitted
-        first; then every manager releases the window, the primary's
-        first, each other entry pool's, then each edge's target in graph
+        edge out of the entry pool waited to plan until this boundary is
+        submitted first; then every manager releases the window, each
+        entry pool's in build order, then each edge's target in graph
         order.
         """
-        edge = self._primary_edge()
+        stream_id, _window_index = window_key
+        entry = self.router.pool_of_stream(stream_id)
+        edge = self.edges.leaving(entry)
         if edge is not None:
             speculative = edge.released_submission(window_key)
             started = _speculative_submissions(speculative)
             for submission in started:
                 self._admit(submission)
-        self.decode_queue.release_window(window_key)
-        for decode_queue in self._routed_queues():
+        for side in self.router.sides():
+            side.decode_queue.release_window(window_key)
+        for decode_queue in self.edges.target_queues():
             decode_queue.release_window(window_key)
-        for edge in self.edges.edges:
-            edge.decode_queue.release_window(window_key)
 
     def _admit(self, submission: decoding_records.Submission) -> None:
         job = submission.job
         if job.strong_decode_for is not None:
             # the speculative strong decode started with the weak job (Toshio
             # 2510.25222 lines 598-601) is its edge's target's to serve
-            edge = self.edges.entering(job.request_key.pool)
+            entry = self._pool_for(job.window)
+            edge = self.edges.entering(job.request_key.pool, entry)
             edge.enqueue_target(job, None)
             return
-        job.window.t_queued = self.builder.engine.now
+        # a window decoded again keeps its first entry (decode_again)
+        if job.window.t_queued is None:
+            job.window.t_queued = self.builder.engine.now
         entry_pool = job.request_key.pool
         on_decoded = self.verdict.accept_revision
         gap_join = self._join_of(entry_pool)
@@ -706,3 +697,16 @@ class _TraceSources:
     """Every event the decode request builder reports, as one member."""
 
     window_data_complete: trace_source.TraceSource = trace_source.new_source()
+
+
+def _check_joined(side: routers.EntrySide) -> None:
+    """No window of the entry pool still holds an unjoined solve."""
+    if side.gap_join is None:
+        return
+    unresolved = side.gap_join.unresolved_windows()
+    if not unresolved:
+        return
+    raise RuntimeError(
+        f"the run ended with windows of {side.pool.word} holding an "
+        f"unjoined solve: {unresolved}"
+    )

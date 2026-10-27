@@ -9,6 +9,11 @@ switching threshold is held in. It reads the growth the decode returned
 in C (union_find/cluster_gap.c), and its time is charged on the unit
 that produced the growth (Toshio et al. 2510.25222 lines 152-160).
 
+No hardware walk has a published time. Kishi et al. put its work at
+the union-find decode's own or more (2602.03336 lines 17-19), so a row
+may price the walk as its decode's cycle count on the weak unit, which
+moves with the window as the decode does.
+
 The likelihood-ratio reading holds only in the repetition-code setting
 of Meister's Theorem 10; on a surface code the gap is a confidence, not
 a calibrated failure probability. A growth with no edge across the one
@@ -23,6 +28,7 @@ from typing import Optional, Union
 
 import decsim.config as config
 import decsim.decoders.union_find.compiled_decoder as compiled_decoder
+import decsim.decoders.union_find.cycle_count as cycle_count_module
 import decsim.ports as ports
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
@@ -51,21 +57,36 @@ class ClusterGap:
         self,
         weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP,
         walk_microseconds: Optional[float] = None,
+        walk_decodes: Optional[float] = None,
+        decode_timing: Optional[cycle_count_module.Timing] = None,
     ) -> None:
         self.weight_step = evidence_records.normalized_weight_step(weight_step)
         # what the walk costs on the weak tier's clock: a card's declared
-        # number, or None to measure the call as a measured decoder is
+        # number; walk_decodes times its decode's cycle count on
+        # decode_timing; or neither, to measure the call as a measured
+        # decoder is
         self.walk_microseconds = walk_microseconds
+        self.walk_decodes = walk_decodes
+        self.decode_timing = decode_timing
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """Its settings: walk_microseconds prices the walk, None measures it."""
+        """Its settings: what the walk costs, or None for both to measure it.
+
+        walk_microseconds declares the walk's time. walk_decodes prices
+        it as that many of its own decode's cycle counts on the weak
+        unit; 1 is one more decode.
+        """
 
         walk_microseconds: Optional[float] = None
+        walk_decodes: Optional[float] = None
         # the word the reports name this row by
         name = "cluster_gap"
 
         def __post_init__(self) -> None:
+            _refuse_two_walk_prices(self.walk_microseconds, self.walk_decodes)
+            if self.walk_decodes is not None:
+                _check_walk_decodes(self.walk_decodes)
             if self.walk_microseconds is None:
                 return
             config.check_microseconds(
@@ -80,15 +101,25 @@ class ClusterGap:
             """The row at the weak decoder's weight step, or the default one.
 
             A weak row with no weight step grows no clusters, and the
-            build refuses that pairing.
+            build refuses that pairing. walk_decodes reads the weak row's
+            timing, as the extra-cluster gap does.
             """
             del threshold_nats
             walk_microseconds = self.walk_microseconds
+            walk_decodes = self.walk_decodes
             weight_step = getattr(weak_algorithm, "weight_step", None)
             if weight_step is None:
-                return ClusterGap(walk_microseconds=walk_microseconds)
+                host_time = cycle_count_module.HostMeasuredTime()
+                return ClusterGap(
+                    walk_microseconds=walk_microseconds,
+                    walk_decodes=walk_decodes,
+                    decode_timing=host_time,
+                )
             return ClusterGap(
-                weight_step=weight_step, walk_microseconds=walk_microseconds
+                weight_step=weight_step,
+                walk_microseconds=walk_microseconds,
+                walk_decodes=walk_decodes,
+                decode_timing=weak_algorithm.timing,
             )
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
@@ -107,7 +138,7 @@ class ClusterGap:
         return decoding_records.SoftOutputComputation(soft_output, ticks)
 
     def _walk(self, evidence) -> tuple:
-        """The gap and the ticks the walk cost, declared or measured."""
+        """The gap and the ticks the walk cost: declared, decodes, measured."""
         if self.walk_microseconds is not None:
             gap = _cluster_gap(evidence, self.weight_step)
             ticks = config.microseconds_to_ticks(self.walk_microseconds)
@@ -116,9 +147,25 @@ class ClusterGap:
         gap = _cluster_gap(evidence, self.weight_step)
         finished_ns = time.perf_counter_ns()
         elapsed_ns = finished_ns - started_ns
+        if self.walk_decodes is not None:
+            ticks = self._decodes_ticks(evidence, elapsed_ns)
+            return gap, ticks
         elapsed_microseconds = elapsed_ns / 1000.0
         ticks = config.microseconds_to_ticks(elapsed_microseconds)
         return gap, ticks
+
+    def _decodes_ticks(self, evidence, elapsed_nanoseconds: int) -> int:
+        """walk_decodes times the decode's own time on the weak unit.
+
+        A cycle-counted unit's decode is its cycles from a clock edge,
+        where the decode ended; a host-timed unit's stands in with the
+        walk's own measured time, as the extra-cluster gap charges.
+        """
+        decode_ticks = self.decode_timing.decode_ticks(
+            evidence, elapsed_nanoseconds, 0
+        )
+        walk_ticks = self.walk_decodes * decode_ticks
+        return math.ceil(walk_ticks)
 
 
 def require_one_logical_row(graph: evidence_records.UnionFindGraph) -> None:
@@ -157,3 +204,22 @@ def _cluster_gap(
         hard_evidence.graph, hard_evidence.edge_intervals
     )
     return gap_half_ticks_to_natural_log_weight(gap_half_ticks, weight_step)
+
+
+def _refuse_two_walk_prices(
+    walk_microseconds: Optional[float], walk_decodes: Optional[float]
+) -> None:
+    if walk_microseconds is None or walk_decodes is None:
+        return
+    raise ValueError(
+        "the cluster gap's walk has one price: give walk_microseconds or "
+        "walk_decodes, not both"
+    )
+
+
+def _check_walk_decodes(walk_decodes: float) -> None:
+    if math.isfinite(walk_decodes) and walk_decodes >= 0:
+        return
+    raise ValueError(
+        f"walk_decodes must be finite and not negative, got {walk_decodes}"
+    )

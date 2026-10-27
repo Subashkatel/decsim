@@ -187,7 +187,7 @@ class FakeWeakDecoder(decoder_module.DecoderBase):
     def decode(
         self, job: decoding_records.DecodeJob
     ) -> decoding_records.DecodeResult:
-        return decoding_records.DecodeResult(job.operation_id, job.window_id)
+        return decoding_records.DecodeResult(job.stream_id, job.window_id)
 
 
 def test_readouts_reach_the_receiver_in_cycle_order_cycle_ticks_apart():
@@ -462,11 +462,11 @@ def test_a_machine_built_part_by_part_runs_as_the_one_call_does():
     whole_machine = machine_module.Machine.build(machine_graph, 0)
     whole = whole_machine.run()
 
-    requester = windows.window_manager.requester
+    entry_side = windows.router.side(layout.entry_pool.pool)
     assert arrivals.windows is windows.window_manager
-    assert requester.decode_queue is decoders.decoder_manager
+    assert entry_side.decode_queue is decoders.decoder_manager
     assert result.terminal_status == "complete"
-    assert result.fully_done_ticks == 289_904_000
+    assert result.fully_done_ticks == 279_904_000
     assert result.operation_results[0].logical_failure is False
     assert result == whole
 
@@ -1805,6 +1805,7 @@ def test_a_lowered_workload_fixes_the_distance_and_its_lowered_fields():
         "workload.protected_regions",
         "workload.physical_circuits",
         "workload.rounds_policy",
+        "workload.patch_lives",
         "workload.workload_record",
     )
 
@@ -1990,6 +1991,7 @@ class RecordingBoundaryPolicy:
     """A boundary policy written outside decsim: one method, plain names."""
 
     ships_provisional_boundaries = False
+    rechecks_provisional_boundaries = False
 
     def on_commit(self, window, final: bool) -> bool:
         del window
@@ -2056,6 +2058,7 @@ class SeedRecordingPolicy:
     """A boundary policy that records the seed the root derived for it."""
 
     ships_provisional_boundaries = False
+    rechecks_provisional_boundaries = False
 
     def __init__(self):
         self.reserved_seeds = []
@@ -2147,9 +2150,6 @@ class OutsideCodeCard:
     def buffer_rounds(self):
         return 0
 
-    def spatial_nodes(self, patch_count):
-        return 4 * patch_count
-
     def syndrome_bits_per_round(self, patch_count):
         return 3 * patch_count
 
@@ -2186,7 +2186,7 @@ def test_a_code_card_written_outside_decsim_runs_with_no_registration():
     result = machine.run()
     geometry = _resolved_geometry(machine)
     assert result.terminal_status == "complete"
-    assert geometry.code_name == "outside code card"
+    assert geometry.commit_round_count == 2
 
 
 def test_the_default_code_card_resolves_the_distance_three_surface():
@@ -2195,7 +2195,6 @@ def test_the_default_code_card_resolves_the_distance_three_surface():
     machine = machine_module.Machine.build(settings)
     machine.run()
     geometry = _resolved_geometry(machine)
-    assert geometry.code_name == "rotated surface code (d=3)"
     assert geometry.distance == 3
 
 
@@ -2519,7 +2518,7 @@ def test_every_program_operation_is_registered_even_with_no_detector_data():
     stamps = machine.observation.runtime_stamps
 
     assert set(tracker.operation_by_id) == {1, 2}
-    assert 1 in tracker.arrivals_by_operation
+    assert 1 in tracker.arrivals_by_stream
     assert set(stamps.body_done) == {1, 2}
 
 
@@ -2773,9 +2772,9 @@ def test_a_landing_after_its_operations_close_costs_the_result_nothing():
 ARRANGEMENT_DISTANCE = 3
 ARRANGEMENT_ROUND_COUNT = 30  # the machine's rounds_per_shot, 10d at d 3
 ARRANGEMENT_SHOT_COUNT = 8
-# seeds 9 to 16: the eight shots include windows the switching
+# seeds 53 to 60: the eight shots include windows the switching
 # arrangements escalate, which the kept-window rule needs beside it
-ARRANGEMENT_FIRST_SEED = 9
+ARRANGEMENT_FIRST_SEED = 53
 ARRANGEMENT_SEED_END = ARRANGEMENT_FIRST_SEED + ARRANGEMENT_SHOT_COUNT
 ARRANGEMENT_SEEDS = range(ARRANGEMENT_FIRST_SEED, ARRANGEMENT_SEED_END)
 ARRANGEMENT_WINDOW_COUNT = 10  # 30 rounds committed 3 at a time
@@ -2906,7 +2905,7 @@ def test_a_switching_arrangements_kept_windows_match_the_weak_model(
     tier (Toshio et al. 2510.25222 Sec. III A), so only the windows the
     weak verdict kept are the weak model's to answer; the escalated ones
     are counted and left to the strong tier. Eight shots at p = 0.001
-    and d = 3 escalate one of their eighty windows, and every
+    and d = 3 escalate two or three of their eighty windows, and every
     window the verdict kept carries the correction the untimed weak row
     decodes from the same window error model and the same syndrome
     (IBM arXiv 2510.21600 lines 488-495).
@@ -3293,9 +3292,10 @@ def test_a_double_window_books_the_observable_its_crossing_commit_flips():
     the observable, so the test above cannot see the weak decode's
     crossing commit join the strong result. Here every detector of
     Stim's layer 8, round 9, also enters observable 0, so a fault across
-    rounds 9 and 10, the seam before window 3, flips it. Seed 26
-    escalates window 3, whose weak decode commits such a fault; the
-    machine books its flip with the strong result, as the referee does.
+    rounds 9 and 10, the seam before window 3, flips it. Seed 54
+    escalates windows 0 and 3, and window 3's weak decode commits such
+    a fault; the machine books its flip with the strong result, as the
+    referee does.
     """
     generated = switching_circuit()
     circuit = with_layer_in_observable(generated, 8)
@@ -3308,7 +3308,7 @@ def test_a_double_window_books_the_observable_its_crossing_commit_flips():
     )
     models = built_window_models.BuiltWindowModels()
 
-    events, machine_shot = switching_shot(settings, 26, models)
+    events, machine_shot = switching_shot(settings, 54, models)
 
     escalated = machine_shot.escalated_windows
     commits = referee.commits(events, escalated)
@@ -3390,7 +3390,7 @@ def test_a_released_pulse_on_a_protected_patch_waits_for_one_boundary():
     machine.run()
 
     decided = outputs[("DECISION_AVAILABLE", 3)]
-    issued = outputs[("CONTROL_PULSE_COMMAND_ISSUED", 3)]
+    issued = outputs[("CONTROL_DECISION_ISSUED", 3)]
     arrived = commands[("ARRIVED", 3)]
     started = commands[("STARTED", 3)]
     assert issued == decided
@@ -3816,7 +3816,7 @@ def _split_by_operation(records: list, operation_ids: set) -> tuple:
     inside = []
     outside = []
     for record in records:
-        if record.operation_id in operation_ids:
+        if record.stream_id in operation_ids:
             inside.append(record)
             continue
         outside.append(record)
@@ -4041,7 +4041,7 @@ def _assert_memory_slot_lifetimes(
         (operation, index): tick for tick, operation, index in stored
     }
     for event in arrivals:
-        key = (event.operation_id, event.round_index)
+        key = (event.stream_id, event.round_index)
         assert event.tick == release_ticks_by_round[key]
         expected_delivery = stored_ticks_by_round[key] + 350_000
         assert event.tick == expected_delivery
@@ -4052,7 +4052,7 @@ def _assert_idle_algorithm_charge(run: _Run, load_job_count: int) -> None:
     algorithm = [
         row for row in stages if row.stage == staged_decoder.ALGORITHM_STAGE
     ]
-    memory = [row for row in algorithm if row.operation_id not in (1, 2)]
+    memory = [row for row in algorithm if row.stream_id not in (1, 2)]
     assert len(memory) == load_job_count
     durations = [row.end_ticks - row.start_ticks for row in memory]
     assert durations == [200_000] * load_job_count
@@ -4213,7 +4213,7 @@ def _operations_on_group(operations: tuple, patches: tuple) -> tuple:
 def _assert_joint_acquisitions(run: _Run) -> None:
     source = run.machine.qpu.syndrome_source
     identities = [
-        (packet.operation_id, packet.round_index) for packet in run.packets
+        (packet.stream_id, packet.round_index) for packet in run.packets
     ]
     assert len(identities) == len(set(identities))
     footprints = {packet.patch_ids for packet in run.packets}

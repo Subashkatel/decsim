@@ -36,12 +36,10 @@ def test_a_distance_five_patch_has_24_stabilizers_and_25_data_qubits():
     card = code_geometry.SurfaceCodeModel(distance=5)
     assert stim_counts(5) == (24, 25)
     assert card.syndrome_bits_per_round(1) == 24
-    assert card.spatial_nodes(1) == 25
 
 
-def test_two_patches_add_a_seam_of_d_nodes_and_double_the_syndrome():
+def test_two_patches_double_the_syndrome():
     card = code_geometry.SurfaceCodeModel(distance=3)
-    assert card.spatial_nodes(2) == 21
     assert card.syndrome_bits_per_round(2) == 16
 
 
@@ -55,11 +53,6 @@ def test_the_bicycle_card_is_the_gross_code_by_default():
 def test_the_gross_code_card_reads_out_all_144_checks_per_round():
     card = code_geometry.BivariateBicycleCodeModel()
     assert card.syndrome_bits_per_round(1) == 144
-
-
-def test_the_gross_code_card_has_144_decoding_graph_nodes_per_round():
-    card = code_geometry.BivariateBicycleCodeModel()
-    assert card.spatial_nodes(1) == 144
 
 
 def test_the_bicycle_card_commits_d_rounds_and_refuses_an_unwritten_buffer():

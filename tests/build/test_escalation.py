@@ -16,6 +16,7 @@ import decsim.confidence.consensus as consensus
 import decsim.confidence.no_signal as no_signal
 import decsim.decoders.settings as decoder_settings
 import decsim.engine as engine_module
+import decsim.escalation.deadlines as deadlines
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.threshold_sources as threshold_sources
@@ -26,6 +27,8 @@ import decsim.presets.machines as machines
 import decsim.windows.routers as routers
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as declared_fabric
+import tests.escalation.test_strong_window_shapes as shape_tests
+import tests.regression.test_shot_results as regression_machines
 import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -131,6 +134,58 @@ def test_an_absorbing_window_beside_a_router_is_refused():
         escalation_build.build_switching(layout, engine)
 
 
+_DISAGREEING_ENTRY_EDGE = (
+    "escalate edge 'fpga_b_switching' leaves an entry pool with a "
+    "strong_window or confidence other than the first entry edge's; the "
+    "planner lays one plan for every entry pool, so edges out of entry "
+    "pools must agree on both"
+)
+
+
+def _two_entry_edges(
+    fpga_b_switching: escalation_settings.SwitchingSettings,
+):
+    """The weak and fpga_b pools on weak's store, both into strong.
+
+    weak's edge keeps a complementary gap on the redo window.
+    """
+    chain = layout_tests.chain_machine(entry_window=declared_run.REDO_WINDOW)
+    weak = chain.part(machines.WEAK_POOL)
+    rule = routers.ByPatch.Settings(pool_by_patch=((0, machines.WEAK_POOL),))
+    routed = machines.with_router(chain, rule, (("fpga_b", weak.settings),))
+    return machines.with_escalation_to(
+        routed, "fpga_b", machines.STRONG_POOL, fpga_b_switching
+    )
+
+
+def test_an_entry_edge_on_another_strong_window_than_the_first_is_refused():
+    """The planner lays fpga_b's windows on weak's edge's redo window."""
+    double = shape_tests.switching_slot(_DOUBLE_WINDOW)
+    graph = _two_entry_edges(double)
+    layout = layout_tests.laid_out(graph)
+    engine = engine_module.Engine()
+
+    with pytest.raises(ValueError) as refusal:
+        escalation_build.build_switching(layout, engine)
+
+    assert str(refusal.value) == _DISAGREEING_ENTRY_EDGE
+
+
+def test_an_entry_edge_on_another_confidence_than_the_first_is_refused():
+    """A shot records one signal, by weak's edge's confidence name."""
+    redo = shape_tests.switching_slot(declared_run.REDO_WINDOW)
+    no_gap = no_signal.NoSignal.Settings()
+    unsignalled = dataclasses.replace(redo, confidence=no_gap)
+    graph = _two_entry_edges(unsignalled)
+    layout = layout_tests.laid_out(graph)
+    engine = engine_module.Engine()
+
+    with pytest.raises(ValueError) as refusal:
+        escalation_build.build_switching(layout, engine)
+
+    assert str(refusal.value) == _DISAGREEING_ENTRY_EDGE
+
+
 def test_an_agreement_verdict_needs_the_consensus_row():
     agreement = verdicts.Agreement.Settings()
     switching = declared_run.declared_switching(verdict=agreement)
@@ -140,6 +195,43 @@ def test_an_agreement_verdict_needs_the_consensus_row():
 
     with pytest.raises(ValueError, match="name confidence consensus"):
         machine_module.Machine.build(switching_graph, 0)
+
+
+def test_the_extra_cluster_gap_refuses_a_threshold_that_moves():
+    """A rate threshold builds on the cluster gap and not on the extra one.
+
+    The extra cluster gap grows only to the threshold it was built at.
+    """
+    rate = threshold_sources.RateThreshold.Settings(20.0, 0.1)
+    extra = regression_machines.extra_cluster_gap_switching()
+    plain = regression_machines.cluster_gap_switching()
+    extra = extra.with_settings(machines.SWITCHING, threshold=rate)
+    plain = plain.with_settings(machines.SWITCHING, threshold=rate)
+    extra_task = collect.Task("extra", extra, {})
+    plain_task = collect.Task("plain", plain, {})
+
+    with pytest.raises(ValueError, match="extra_cluster_gap grows only"):
+        collect.run_shot(extra_task, 0)
+    shot = collect.run_shot(plain_task, 0)
+    assert (
+        shot.machine.switching.policy.threshold is plain_task.online_threshold
+    )
+
+
+def test_a_deadline_refuses_a_threshold_that_learns():
+    """Windows a deadline escalates never reach the threshold's count."""
+    rate = threshold_sources.RateThreshold.Settings(20.0, 0.1)
+    deadline = deadlines.Deadline.Settings(slack_microseconds=18.0)
+    switching = declared_run.declared_switching(
+        threshold=rate, deadline=deadline
+    )
+    graph = declared_fabric.switching_graph(
+        rounds=9, escalated_windows=set(), switching=switching
+    )
+    task = collect.Task("deadline", graph, {})
+
+    with pytest.raises(ValueError, match="switching.deadline escalates"):
+        collect.run_shot(task, 0)
 
 
 def test_the_consensus_row_needs_the_agreement_verdict():
@@ -183,6 +275,23 @@ def test_an_edge_past_the_entry_builds_on_one_solve():
 
     edges = [part.edge.name for part in parts]
     assert edges == ["switching", layout_tests.DEEP_SWITCHING]
+
+
+def test_a_learned_threshold_over_a_chain_is_its_entry_edges_alone():
+    """One entry edge, so the task's calibrator is not refused.
+
+    The edge past the entry decides on its own fixed threshold.
+    """
+    chain = layout_tests.chain_machine()
+    layout = layout_tests.laid_out(chain)
+    engine = engine_module.Engine()
+    # the build reads only that the task learns a threshold
+    calibrator = object()
+
+    entry, deep = escalation_build.build_switching(layout, engine, calibrator)
+
+    assert entry.policy.threshold is calibrator
+    assert deep.policy.threshold is not calibrator
 
 
 def test_an_edge_past_a_double_window_may_start_beside_its_source():

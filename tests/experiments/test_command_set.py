@@ -616,6 +616,27 @@ def test_a_module_whose_wheel_lists_no_top_level_is_found_by_its_files(
     assert versions["example_wheel"] == "1.2.3"
 
 
+def test_the_installed_distributions_are_read_once_per_search_path(
+    monkeypatch,
+):
+    """A process running many units reads the installed files once."""
+    reads = []
+    read_distributions = importlib.metadata.distributions
+
+    def counted(**context):
+        reads.append(context)
+        return read_distributions(**context)
+
+    monkeypatch.setattr(importlib.metadata, "distributions", counted)
+    collect._distributions_by_module.cache_clear()
+
+    first = collect.imported_module_versions()
+    second = collect.imported_module_versions()
+
+    assert first == second
+    assert len(reads) == 1
+
+
 def test_the_standard_library_and_submodules_are_left_out():
     versions = collect.imported_module_versions()
 
@@ -1156,6 +1177,34 @@ def test_a_task_whose_shot_runs_no_round_is_refused_before_its_record(
     assert not (out_dir / "tasks").exists()
 
 
+def test_a_threshold_stepped_by_the_backlog_is_refused_on_shots(tmp_path):
+    """Each shot starts with no backlog, so the outer loop reads none."""
+    run_file = tmp_path / "loop.py"
+    run_file.write_text(
+        "import decsim\n"
+        "import decsim.escalation.target_steps as target_steps\n"
+        "import tests.experiments.run_files as run_files\n"
+        "\n"
+        "steps = target_steps.TargetSteps.Settings(start=0.1)\n"
+        "rate = {'target_escalation_rate': 0.1, 'steps': steps}\n"
+        "machine = run_files.switching_machine(rate=rate)\n"
+        "experiment = decsim.Experiment(\n"
+        '    "loop",\n'
+        '    [decsim.Task("loop", machine)],\n'
+        "    decsim.CollectionSettings(max_shots=1),\n"
+        ")\n"
+    )
+    out_dir = tmp_path / "out"
+
+    with pytest.raises(refusal.RefusalError) as refused:
+        collect_command.run_experiment(run_file, out_dir)
+
+    assert str(refused.value) == (
+        "the task loop's threshold steps its target by the backlog, and "
+        "each shot starts with none; run it as a stream (decsim stream)"
+    )
+
+
 def test_an_online_task_given_a_target_is_refused(tmp_path, capsys):
     """An online task's shots are not independent, so no target stops it."""
     collection = {"max_shots": 1, "max_failures": 5}
@@ -1319,6 +1368,38 @@ def _lose_the_piece(experiment_dir, name: str) -> None:
     """The piece gone, as a killed job leaves it missing."""
     (lost_piece,) = experiment_dir.glob(f"pieces/*/{name}")
     shutil.rmtree(lost_piece)
+
+
+def test_a_rate_tasks_summary_counts_every_window_it_escalated(tmp_path):
+    """With no audits, the tracker's counts are the machine's own.
+
+    Every weak decision is a decoded window and every escalation one
+    the tracker made, so threshold_summary.csv equals the shot sums
+    exactly, and its last trajectory row is the final threshold.
+    """
+    rate = {"target_escalation_rate": 0.2}
+    collection = {"max_shots": 4}
+    config_path = run_files.write_run_file(
+        tmp_path,
+        axes=NOISY_AXES,
+        collection=collection,
+        machine="switching",
+        machine_arguments={"rate": rate},
+    )
+    out_dir = tmp_path / "out"
+
+    command.main(["run", str(config_path), "--out", str(out_dir)])
+
+    summary_path = out_dir / "threshold_summary.csv"
+    shots_path = out_dir / "shots.csv"
+    (summary,) = _csv_rows(summary_path)
+    shots = _csv_rows(shots_path)
+    trajectory = _online_trajectory_rows(out_dir)
+    decoded = sum(int(shot["decoded_windows"]) for shot in shots)
+    escalated = sum(int(shot["escalated_windows"]) for shot in shots)
+    assert int(summary["windows"]) == decoded
+    assert int(summary["escalated"]) == escalated
+    assert summary["threshold_db"] == trajectory[-1]["threshold_db"]
 
 
 def _online_config(tmp_path, piece_rounds: int):

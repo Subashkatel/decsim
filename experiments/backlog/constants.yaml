@@ -1,0 +1,14 @@
+# The backlog study's constants: Toshio et al. 2510.25222 App. C's
+# sliding-window switching on a memory stream, in microseconds.
+
+distance: 21                                 # d (Fig. 21 caption)
+round_period_microseconds: 1.0               # tau_gen
+weak_communication_microseconds: 1.0         # T_weak_comm = tau_gen (Sec. III C, Fig. 21 caption)
+strong_communication_microseconds: 10.0      # T_strong_comm = 10 tau_gen (same)
+strong_decode_microseconds_per_round: 10.0   # tau_strong_dec = 10 tau_gen (same)
+commit_margin: 0.95                          # r_com = max(d, tau_weak r_buf / (0.95 tau_gen - tau_weak)) (App. C)
+weak_decode_fractions: [0.0, 0.1, 0.4, 0.7, 0.9]   # tau_weak / tau_gen (Fig. 21 caption)
+switching_rates: [1.0e-4, 1.5e-4, 2.5e-4, 4.0e-4, 6.0e-4, 1.0e-3, 1.5e-3, 2.5e-3, 4.0e-3, 6.0e-3, 1.0e-2, 1.5e-2, 2.5e-2, 4.0e-2]   # gamma_switch per d rounds, Fig. 21's axis
+horizon_rounds: 200000                       # a stream of 2e5 rounds, about 1,000 of Fig. 21's 9d gate steps
+seeds: 10                                    # streams per point; Fig. 21 samples 1e3 trajectories
+weak_only_fractions: [0.40, 0.44, 0.48, 0.496, 0.50, 0.504, 0.52, 0.56, 0.60]   # around Eq. (7)'s 0.5 at r_com = r_buf = d, whole 4 ns cycles a round

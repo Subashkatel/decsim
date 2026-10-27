@@ -17,6 +17,8 @@ belief matching on a host unit. The parts share their names, so
                        pool, a chain grown one edge at a time
     with_router        a machine whose entry store feeds a router to
                        its entry pool and more, a decoder per patch
+    with_store_per_pool  a machine whose router sits before the stores,
+                       one per entry pool
     memory_workload    one memory shot of Stim's rotated surface code
 """
 
@@ -343,6 +345,29 @@ def with_escalation(
     return grown.with_wires(results, redecode)
 
 
+def with_escalation_to(
+    machine: graph.Machine,
+    source: str,
+    target: str,
+    switching: escalation_settings.SwitchingSettings,
+    switching_name: Optional[str] = None,
+) -> graph.Machine:
+    """The machine whose source pool also escalates to a pool it holds.
+
+    The target already serves other pools, as Delfosse's shared decoding
+    units serve every lazy decoder (2001.11427 Sec. V) and Toshio's one
+    strong decoder its N_window weak ones (2510.25222 Sec. III C). The
+    switching part is source_switching unless switching_name names it.
+    """
+    if switching_name is None:
+        switching_name = f"{source}_switching"
+    switching_part = graph.Part(switching_name, switching)
+    grown = machine.with_part(switching_part)
+    results = graph.Wire(f"{source}.escalate", f"{switching_name}.results")
+    redecode = graph.Wire(f"{switching_name}.redecode", f"{target}.escalated")
+    return grown.with_wires(results, redecode)
+
+
 def with_router(
     machine: graph.Machine,
     rule: Any,
@@ -350,6 +375,7 @@ def with_router(
     entry_store: str = WEAK_STORE,
     entry_pool: str = WEAK_POOL,
     site: str = fabrics.FRIDGE,
+    factory_pool: Optional[str] = None,
 ) -> graph.Machine:
     """The machine whose entry store feeds a router to several entry pools.
 
@@ -358,9 +384,12 @@ def with_router(
     of pools, each (name, DecoderPoolSettings) at site, read from the
     entry store over its own hop, entry_store_to_name, and answering the
     frame. by_patch is VQD's decoder per logical qubit (Maurya and
-    Tannu 2406.17995v2 Sec. 4.1).
+    Tannu 2406.17995v2 Sec. 4.1). The magic-state factory's decodes go
+    to factory_pool, the machine's entry pool unless named.
     """
-    router_settings = routers.Router.Settings(rule)
+    if factory_pool is None:
+        factory_pool = entry_pool
+    router_settings = routers.Router.Settings(rule, factory_pool)
     router_part = graph.Part(ROUTER, router_settings)
     rewired = machine.without_wire(
         f"{entry_store}.reads", f"{entry_pool}.rounds"
@@ -370,12 +399,71 @@ def with_router(
         graph.Wire(f"{entry_store}.reads", f"{ROUTER}.rounds"),
         graph.Wire(f"{ROUTER}.windows", f"{entry_pool}.rounds"),
     ]
+    frames = machine.parts_of("pauli_frame")
     for name, pool in pools:
         part = graph.Part(name, pool, site)
         grown = grown.with_part(part)
         windows = graph.Wire(f"{ROUTER}.windows", f"{name}.rounds")
-        corrections = graph.Wire(f"{name}.corrections", f"{FRAME}.corrections")
-        wires.extend((windows, corrections))
+        wires.append(windows)
+        # a pool corrects the frame when the machine has one, as with_pool
+        if frames:
+            corrections = f"{frames[0].name}.corrections"
+            correction_wire = graph.Wire(f"{name}.corrections", corrections)
+            wires.append(correction_wire)
+    return grown.with_wires(*wires)
+
+
+def with_store_per_pool(
+    machine: graph.Machine,
+    rule: Any,
+    pools: tuple,
+    entry_store: str = WEAK_STORE,
+    entry_pool: str = WEAK_POOL,
+    site: str = fabrics.FRIDGE,
+    factory_pool: Optional[str] = None,
+) -> graph.Machine:
+    """The machine whose router sits before the stores, one per entry pool.
+
+    The controller's rounds reach the router, named router, which feeds
+    the machine's entry store and a store of its own per added pool,
+    name_buffer, each read by its pool: DecoNet's leaf router routes
+    "measurement data to the appropriate decoder instances" (2504.11805
+    Sec. VI-B.2). Each pool, (name, DecoderPoolSettings) at site with
+    its store, answers the frame. A round a pool's window reads of
+    another pool's stream is copied into its store as it is written
+    (controller/round_destinations.py). The factory's decodes go to
+    factory_pool, the machine's entry pool unless named.
+    """
+    if factory_pool is None:
+        factory_pool = entry_pool
+    router_settings = routers.Router.Settings(rule, factory_pool)
+    router_part = graph.Part(ROUTER, router_settings)
+    controllers = machine.parts_of("controller")
+    controller = controllers[0]
+    rewired = machine.without_wire(
+        f"{controller.name}.rounds", f"{entry_store}.rounds"
+    )
+    grown = rewired.with_part(router_part)
+    wires = [
+        graph.Wire(f"{controller.name}.rounds", f"{ROUTER}.rounds"),
+        graph.Wire(f"{ROUTER}.windows", f"{entry_store}.rounds"),
+    ]
+    frames = machine.parts_of("pauli_frame")
+    for name, pool in pools:
+        store_name = f"{name}{STORE_SUFFIX}"
+        store_settings = syndrome_buffer_module.SyndromeBufferSettings()
+        store_part = graph.Part(store_name, store_settings, site)
+        pool_part = graph.Part(name, pool, site)
+        grown = grown.with_part(store_part)
+        grown = grown.with_part(pool_part)
+        windows = graph.Wire(f"{ROUTER}.windows", f"{store_name}.rounds")
+        reads = graph.Wire(f"{store_name}.reads", f"{name}.rounds")
+        wires.extend((windows, reads))
+        # a pool corrects the frame when the machine has one, as with_pool
+        if frames:
+            corrections = f"{frames[0].name}.corrections"
+            correction_wire = graph.Wire(f"{name}.corrections", corrections)
+            wires.append(correction_wire)
     return grown.with_wires(*wires)
 
 

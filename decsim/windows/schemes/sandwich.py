@@ -26,6 +26,7 @@ class TanSandwichScheme:
     # side of it, so the commits are a depth-two graph, not a chain.
     commits_in_one_serial_chain = False
     supports_dynamic_streams = False
+    reads_across_couplings = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -49,7 +50,7 @@ class TanSandwichScheme:
 
     def plan_operation(
         self,
-        operation_id: int,
+        stream_id: int,
         round_count: int,
         *,
         commit_round_count: int,
@@ -67,7 +68,7 @@ class TanSandwichScheme:
         entry_window_indices = tuple(range(0, window_count, 2))
         exit_window_indices = _seam_indices(window_count)
         return window_records.OperationWindowPlan(
-            operation_id=operation_id,
+            stream_id=stream_id,
             windows=windows,
             internal_dependencies=edges,
             entry_window_indices=entry_window_indices,

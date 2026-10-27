@@ -19,6 +19,9 @@ import decsim.build.windows as windows_part
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.engine as engine_module
 import decsim.links.settings as link_settings
+import decsim.observe.answer_checks as answer_checks_module
+import decsim.observe.checkpoints as checkpoints_module
+import decsim.observe.closing_decisions as closing_decisions
 import decsim.observe.command_events as command_events_module
 import decsim.observe.controller_counters as controller_counters_module
 import decsim.observe.data_movement as data_movement_module
@@ -40,6 +43,8 @@ import decsim.observe.trace_writer as trace_writer_module
 import decsim.observe.window_ledger as window_ledger_module
 import decsim.observe.window_outcomes as window_outcomes_module
 import decsim.ports as ports
+import decsim.refusals as refusals
+import decsim.seeding as seeding
 import decsim.statistics.registry as statistics_registry
 import decsim.syndrome_buffer.syndrome_round_receiver as receiver_module
 
@@ -90,8 +95,11 @@ def observe(
         )
     decode_records = _decode_records(observation, keeps_records)
     _connect_decode_records(decoder_managers, decode_records)
-    gap_join = windows.gap_join
-    confidence = _connect_confidence(gap_join, decoder_managers, keeps_records)
+    entry_joins = windows.entry_joins()
+    computes_confidence = bool(entry_joins)
+    confidence = _connect_confidence(
+        computes_confidence, decoder_managers, keeps_records
+    )
     store_names = _store_names(readout)
     trace_writer = _trace_writer(
         observation, engine, process_name, links_card, store_names
@@ -116,6 +124,8 @@ def observe(
             region_of_interest.round_read_out
         )
     frame_corrections = _frame_corrections(control.pauli_frame, keeps_records)
+    checkpoints = _checkpoints(observation, qpu, windows, decoders)
+    answer_checks = _answer_checks(observation, qpu, windows, decoders)
     return observation_module.Observation(
         log=log,
         windows=window_ledger,
@@ -137,6 +147,8 @@ def observe(
         round_events=round_events,
         confidence=confidence,
         region_of_interest=region_of_interest,
+        checkpoints=checkpoints,
+        answer_checks=answer_checks,
     )
 
 
@@ -394,7 +406,8 @@ def _connect_window_trace(
     sources = window_manager.window_sources()
     sources.window_planned.connect(trace_writer.window_planned)
     sources.window_data_complete.connect(trace_writer.window_ready)
-    sources.solve_held.connect(trace_writer.solve_held)
+    for solve_held in sources.solve_held_sources:
+        solve_held.connect(trace_writer.solve_held)
     sources.window_committed.connect(trace_writer.window_committed)
     sources.window_final.connect(trace_writer.window_final)
     sources.window_absorbed.connect(trace_writer.window_absorbed)
@@ -436,14 +449,14 @@ def _connect_decode_records(
 
 
 def _connect_confidence(
-    gap_join, decoder_managers: tuple, keeps_records: bool
+    computes_confidence: bool, decoder_managers: tuple, keeps_records: bool
 ) -> Optional[decode_records_module.ConfidenceLedger]:
     """The confidence ledger, only on a run that computes a confidence.
 
     It keeps every window's verdict result, which a stream that lets its
     windows go never reads (observation.folds_windows).
     """
-    if gap_join is None or not keeps_records:
+    if not computes_confidence or not keeps_records:
         return None
     confidence = decode_records_module.ConfidenceLedger()
     for manager in decoder_managers:
@@ -456,6 +469,7 @@ def _connect_runtime_stamps(
     execution_runtime, factory, stamps: runtime_stamps_module.RuntimeStamps
 ) -> None:
     """The stamps hear every tick of an operation's life and its waits."""
+    execution_runtime.trace.operation_ready.connect(stamps.operation_ready)
     execution_runtime.trace.operation_issued.connect(stamps.operation_issued)
     execution_runtime.trace.operation_started.connect(stamps.operation_started)
     execution_runtime.trace.body_finished.connect(stamps.body_finished)
@@ -559,6 +573,189 @@ def _connect_window_outcomes(
     results.trace.contributions_delivered.connect(
         window_outcomes.contributions_delivered
     )
+
+
+def _checkpoints(
+    observation: observe_settings.ObservationSettings,
+    qpu: qpu_part.Qpu,
+    windows: windows_part.Windows,
+    decoders: decoders_part.Decoders,
+) -> Optional[checkpoints_module.Checkpoints]:
+    """The streams' checkpoints, only when the section spaces them.
+
+    Each closes on the machine's own decoders, edges and threshold
+    (observe/closing_decisions.py), so a checkpoint is the machine's
+    answer had the run ended there.
+    """
+    every_rounds = observation.checkpoint_every_rounds
+    if every_rounds is None:
+        return None
+    setting = "observation.checkpoint_every_rounds"
+    closer = _closing_decisions(windows, decoders, setting)
+    checkpoints = checkpoints_module.Checkpoints(every_rounds, closer)
+    window_manager = windows.window_manager
+    managers = _decoder_managers(decoders)
+    _connect_checkpoints(checkpoints, qpu, window_manager, managers)
+    return checkpoints
+
+
+def _answer_checks(
+    observation: observe_settings.ObservationSettings,
+    qpu: qpu_part.Qpu,
+    windows: windows_part.Windows,
+    decoders: decoders_part.Decoders,
+) -> Optional[answer_checks_module.AnswerChecks]:
+    """Each window's two answers checked, when the section names chains.
+
+    The answers and the closing windows are the machine's own
+    (observe/closing_decisions.py), so a chain that keeps every weak
+    answer ends as the weak decoder alone would.
+    """
+    paths = observation.answer_check_paths
+    thresholds = observation.answer_check_thresholds
+    setting = "observation.answer_check_paths"
+    if not paths:
+        setting = "observation.answer_check_thresholds"
+    if not paths and not thresholds:
+        return None
+    closer = _closing_decisions(windows, decoders, setting)
+    _refuse_checks_without_two_answers(windows, closer, setting)
+    if thresholds:
+        _refuse_static_chains_without_a_threshold_row(windows)
+    checks = answer_checks_module.AnswerChecks(paths, thresholds, closer)
+    source = qpu.syndrome_source
+    _connect_copies(source, checks.checkpoint_reached, setting)
+    qpu.device.trace.round_emitted.connect(checks.round_emitted)
+    sources = windows.window_manager.window_sources()
+    sources.window_planned.connect(checks.window_planned)
+    sources.window_final.connect(checks.window_final)
+    return checks
+
+
+def _refuse_checks_without_two_answers(
+    windows: windows_part.Windows,
+    closer: closing_decisions.ClosingDecisions,
+    setting: str,
+) -> None:
+    """Each entry pool needs an edge to a pool that decodes."""
+    edges = windows.window_manager.edges
+    for pool in windows.router.side_by_pool:
+        edge = edges.leaving(pool)
+        if edge is not None and edge.target in closer.decoder_by_pool:
+            continue
+        raise ValueError(
+            f"{setting} checks each window's weak and "
+            "strong answers, so every entry pool needs an escalate edge to "
+            f"a pool that decodes (a switching machine); {pool.word} has "
+            "none"
+        )
+
+
+def _refuse_static_chains_without_a_threshold_row(
+    windows: windows_part.Windows,
+) -> None:
+    """A static chain decides by its edge's verdict row at its threshold."""
+    edges = windows.window_manager.edges
+    for pool in windows.router.side_by_pool:
+        edge = edges.leaving(pool)
+        policy = edge.policy
+        if policy.reads_threshold:
+            continue
+        row_type = type(policy.verdict)
+        raise ValueError(
+            "observation.answer_check_thresholds keeps a chain a threshold, "
+            "each window decided by the escalate edge's verdict row at that "
+            f"threshold, and {row_type.__name__} reads no threshold (the row "
+            f"of {pool.word}'s edge); name the gap_threshold verdict"
+        )
+
+
+def _closing_decisions(
+    windows: windows_part.Windows,
+    decoders: decoders_part.Decoders,
+    setting: str,
+) -> closing_decisions.ClosingDecisions:
+    """A fresh decoder per pool, and each edge's source signal."""
+    edges = windows.window_manager.edges
+    decoder_by_pool = {}
+    for pool in decoders.pools:
+        settings = pool.plan.settings
+        if settings is not None:
+            decoder_by_pool[pool.plan.pool] = settings.algorithm.build()
+    signal_by_pool = {}
+    for edge in edges.edges:
+        _refuse_a_closing_edge(windows.router, edge, setting)
+        join = windows.join_of(edge.source)
+        signal_by_pool[edge.source] = join.signal
+    _refuse_closing_draws(decoder_by_pool, edges, setting)
+    requirement = windows.models.requirement()
+    return closing_decisions.ClosingDecisions(
+        windows.router, edges, decoder_by_pool, signal_by_pool, requirement
+    )
+
+
+def _refuse_a_closing_edge(router, edge: ports.EscalateEdge, setting) -> None:
+    """An edge past the entry pool joins its solves where no closer reads."""
+    if router.is_entry(edge.source):
+        return
+    raise NotImplementedError(
+        f"{setting} beside an escalate edge "
+        f"past the entry pool ({edge.source.word} to {edge.target.word}) "
+        f"is not implemented yet; {refusals.REFUSALS}"
+    )
+
+
+def _refuse_closing_draws(decoder_by_pool: dict, edges, setting) -> None:
+    """A closing window drawing from the run's seed would change the run."""
+    verdicts = [edge.policy.verdict for edge in edges.edges]
+    deciders = [*decoder_by_pool.values(), *verdicts]
+    drawing = [
+        decider
+        for decider in deciders
+        if isinstance(decider, seeding.RunSeedConsumer)
+    ]
+    if not drawing:
+        return
+    first_type = type(drawing[0])
+    name = first_type.__name__
+    raise NotImplementedError(
+        f"{setting} decides each closing window "
+        f"as the machine does, and {name} draws from the run's seed, so a "
+        "checkpoint would draw again and change the run: not implemented "
+        f"yet; {refusals.REFUSALS}"
+    )
+
+
+def _connect_copies(source, listener, setting: str) -> None:
+    """The source's copy of each round, refused when it copies none."""
+    source.checkpoint_reached.connect(listener)
+    if source.checkpoint_reached.has_listeners:
+        return
+    raise ValueError(
+        f"{setting} needs a source that copies "
+        "its state each round, the flip stream "
+        "(qpu/flip_stream_device.py); this run's source copies none"
+    )
+
+
+def _connect_checkpoints(
+    checkpoints: checkpoints_module.Checkpoints,
+    qpu,
+    window_manager,
+    decoder_managers: tuple,
+) -> None:
+    """The source's copies, the rounds, the windows and every decode."""
+    source = qpu.syndrome_source
+    setting = "observation.checkpoint_every_rounds"
+    _connect_copies(source, checkpoints.checkpoint_reached, setting)
+    qpu.device.trace.round_emitted.connect(checkpoints.round_emitted)
+    sources = window_manager.window_sources()
+    sources.window_planned.connect(checkpoints.window_planned)
+    sources.window_final.connect(checkpoints.window_final)
+    for manager in decoder_managers:
+        outcomes = manager.outcomes.trace
+        outcomes.request_ended.connect(checkpoints.request_ended)
+        outcomes.verdict_given.connect(checkpoints.verdict_given)
 
 
 def _frame_corrections(

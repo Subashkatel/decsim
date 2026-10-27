@@ -44,12 +44,12 @@ class Controller:
         """Send one readout over qpu_to_controller; it then pays the delay."""
         fragment = round_records.RetainedSyndromeFragment.from_readout(readout)
         self.assembler.expect_round(fragment, readout.fragment_count, route)
-        round_key = (fragment.operation_id, fragment.round_index)
+        round_key = (fragment.stream_id, fragment.round_index)
         self.trace.copy_made.fire(
             round_key, readout.size_bits, "readout", "controller intake"
         )
         attribution = transfer_records.TransferAttribution.for_round(
-            fragment.operation_id, fragment.patch_ids, fragment.round_index
+            fragment.stream_id, fragment.patch_ids, fragment.round_index
         )
         readout_cycles = self.settings.readout_to_bits_cycles
 

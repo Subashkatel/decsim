@@ -18,7 +18,6 @@ import stim
 class ResolvedCodeGeometry:
     """Canonical planning/control geometry resolved once for one run."""
 
-    code_name: str
     distance: int
     commit_round_count: int
     buffer_round_count: int
@@ -32,7 +31,6 @@ class ResolvedOperationPlanning:
     code_geometry: ResolvedCodeGeometry
     round_count: int
     round_ticks: int
-    spatial_node_count: int
     # the code card's checks over the operation's patches, one round
     syndrome_bits_per_round: int
 
@@ -47,7 +45,6 @@ class ResolvedPatchPlanning:
     patch_identity: Any  # an opaque identity
     code_geometry: ResolvedCodeGeometry
     round_ticks: int
-    spatial_node_count: int
 
 
 @dataclass(frozen=True)
@@ -98,6 +95,10 @@ class RunOperationBody:
     source_round_count: int
     emits_detector_data: bool = True
     finalizes_stream_round: bool = False
+    # the body as one segment per patch stream it runs on, each a view of
+    # the operation on one patch; empty when the operation is its own
+    # stream or one stream's segment
+    segments: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -119,11 +120,25 @@ class ProtectedRegion:
     end_operation_id: int
 
 
+@dataclass(frozen=True)
+class PatchLife:
+    """One code block's life, decoded as one stream.
+
+    operation_ids are the operations on the patch, in program order, from
+    the first one, or the first after a discard, through the next discard.
+    """
+
+    stream_id: Any  # an opaque identity
+    patch: Any  # an opaque identity
+    operation_ids: tuple
+
+
 class OpKind(Enum):
     """Logical-op kind vocabulary for a rounds policy.
 
     It lets a RoundsPolicy tell a measurement (1 round) from a merge
-    (m·d rounds) from an injection (O(1)).
+    (m·d rounds) from an injection (O(1)). A discard ends a patch's
+    life: the patch measures no round after it.
     """
 
     IDLE = auto()
@@ -131,6 +146,7 @@ class OpKind(Enum):
     MERGE = auto()
     MEASURE = auto()
     INJECT = auto()
+    DISCARD = auto()
     GENERIC = auto()
 
 
@@ -150,6 +166,9 @@ class Operation:
         None  # override; None = infer from clifford
     )
     patches: tuple = ()  # patch ids whose syndrome streams feed the op
+    # (patch, patch) pairs of code blocks a joint measurement joins, as
+    # the program states them; a window may read across one
+    couplings: tuple = ()
     predecessors: tuple = ()  # workload op ids that must complete first
     # prior decode streams at a boundary
     decoder_boundary_predecessors: tuple = ()

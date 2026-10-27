@@ -107,7 +107,7 @@ class ExecutionRuntime:
             self._maybe_begin(operation)
 
     def on_decision(self, decision: program_records.Decision) -> None:
-        """A decision reached the controller: a release starts its operation."""
+        """A decision crossed the output path: a release lets it start."""
         operation_id = decision.target_operation_id
         operation = self.schedule.operations[operation_id]
         if not decision.releases_operation:
@@ -165,7 +165,10 @@ class ExecutionRuntime:
         self.factory.request(operation.id, on_ready)
 
     def _state_became_ready(self, operation: program_records.Operation) -> None:
+        # every gate but a feedback release is open: the operation's
+        # otherwise-ready tick, from which a release's stall is counted
         self.schedule.gates.state_ready.add(operation.id)
+        self.trace.operation_ready.fire(operation.id, self.engine.now)
         self._maybe_begin(operation)
 
     def _maybe_begin(self, operation: program_records.Operation) -> None:
@@ -330,6 +333,7 @@ def _claim_keys(claim) -> list[tuple]:
 class _TraceSources:
     """Every event the execution runtime reports, as one member."""
 
+    operation_ready: trace_source.TraceSource = trace_source.new_source()
     operation_issued: trace_source.TraceSource = trace_source.new_source()
     operation_started: trace_source.TraceSource = trace_source.new_source()
     body_finished: trace_source.TraceSource = trace_source.new_source()

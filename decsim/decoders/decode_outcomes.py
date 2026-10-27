@@ -78,6 +78,21 @@ class DecodeOutcomes:
             processing = outcomes.WEAK_AWAITED_STRONG
         self.trace.request_ended.fire(job, result, processing, self.engine.now)
 
+    def discard_weak_request(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """The decode read a boundary that changed: close its attempt.
+
+        The window side decodes the window again on the boundary it
+        holds now (windows/input_checks.py), so no verdict is given.
+        """
+        key = _destination_of(job)
+        self.manager.strong_requests.resolve_weak(key, job.request_key.pool)
+        outcome = decoding_records.RequestProcessingOutcome.WEAK_DISCARDED_STALE
+        self.trace.request_ended.fire(job, result, outcome, self.engine.now)
+
     def close_companion_request(
         self,
         job: decoding_records.DecodeJob,
@@ -105,11 +120,12 @@ class DecodeOutcomes:
         by window).
         """
         self.manager.strong_requests.finish_service(job)
-        policy = self.manager.escalation_policy
+        # a strong decode runs on a pool an edge targets, and each such
+        # pool's manager has a learner (build/escalation.py)
+        learner = self.manager.strong_result_learner
         for held in deliveries:
-            if policy is not None:
-                window_key = held.request_job.strong_decode_for
-                policy.learn_from_strong_result(window_key, held.result)
+            window_key = held.request_job.strong_decode_for
+            learner.learn_from_strong_result(window_key, held.result)
         for held in deliveries:
             self.complete_strong(held)
 
@@ -150,7 +166,7 @@ class DecodeOutcomes:
         """Leave the result in its producing unit's output slot."""
         unit = completion.unit
         request_key = completion.request_job.request_key
-        window_key = (request_key.operation_id, request_key.window_id)
+        window_key = (request_key.stream_id, request_key.window_id)
         # every finished strong result was produced by a unit, and the
         # unit is read at the decode's end, before its slot frees
         unit.hold_output(window_key, completion)
@@ -170,7 +186,7 @@ def _destination_of(job: decoding_records.DecodeJob) -> tuple:
     """The window a job decodes for: its own, or the one it re-decodes."""
     if job.strong_decode_for is not None:
         return job.strong_decode_for
-    return (job.operation_id, job.window_id)
+    return (job.stream_id, job.window_id)
 
 
 @dataclasses.dataclass(frozen=True)

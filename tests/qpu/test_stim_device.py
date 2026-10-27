@@ -13,10 +13,12 @@ source against the public qec-burst-scaling code
 (github.com/AlanPai777/qec-burst-scaling, qecburst/circuit.py
 inject_burst_profile and exponential_decay_profile, written out below)
 and against the places Stim's generator puts its four noise parameters
-(src/stim/gen/circuit_gen_params.cc).
+(src/stim/gen/circuit_gen_params.cc). The dataset source against a whole
+run on the error-model source at the same root seed.
 """
 
 import collections
+import dataclasses
 import hashlib
 import math
 
@@ -24,6 +26,10 @@ import numpy
 import pytest
 
 import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.machine as machine_module
+import decsim.presets.machines as machines
+import decsim.producers as producers
+import decsim.qpu.shot_datasets as shot_datasets
 import decsim.qpu.stim_device as stim_device
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.program as program_records
@@ -51,6 +57,9 @@ RECORDED_EVENTS = (
     0, 0, 1, 0, 0, 0, 0, 0,
     0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0,
 )  # fmt: skip
+
+# the dataset tests' memory, noisy enough that most shots fire
+DATASET_PROBABILITY = 0.01
 
 # One 33-bit shot of the 3-round distance-3 memory.
 THREE_ROUND_ROW = (
@@ -106,7 +115,7 @@ def recorded_device(row, **settings):
 
 def window(commit_lo, commit_hi, buffer_hi, **changes):
     return window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -114,6 +123,39 @@ def window(commit_lo, commit_hi, buffer_hi, **changes):
         round_count=buffer_hi,
         **changes,
     )
+
+
+def memory_machine(source):
+    """The weak baseline on a distance-3 memory, its syndromes from source."""
+    base = machines.weak_baseline(3, DATASET_PROBABILITY, 1.0)
+    memory = producers.MemorySettings(
+        DATASET_PROBABILITY, rounds=9, noiseless_time_boundaries=True
+    )
+    with_memory = base.with_held("workload", memory)
+    qpu = with_memory.held("qpu")
+    with_source = dataclasses.replace(qpu, source=source)
+    return with_memory.with_held("qpu", with_source)
+
+
+def saved_memory_dataset(folder, root_seed_count):
+    """memory_machine's circuit, saved for root seeds 0 to the count."""
+    workload = producers.memory_circuit(
+        "surface_code:rotated_memory_z", 9, 3, DATASET_PROBABILITY, None, True
+    )
+    operation = workload.operations[0]
+    shot_datasets.write_chunk(
+        folder, operation.circuit, operation.id, 0, root_seed_count
+    )
+    shot_datasets.seal(folder, operation.circuit, operation.id, {})
+
+
+def run_outcome(graph, seed):
+    """A run's detection events and its operation results."""
+    machine = machine_module.Machine.build(graph, seed)
+    result = machine.run()
+    source = machine.qpu.syndrome_source
+    events = source.sampled_detection_events(1)
+    return events, result.operation_results
 
 
 def test_a_replayed_shot_forms_the_events_and_truth_stim_forms():
@@ -229,6 +271,30 @@ def test_an_error_model_shot_is_stims_error_model_sample_formed_back():
     assert any(events[0])
 
 
+def test_runs_on_a_dataset_match_runs_on_the_error_model_source_for_every_seed(
+    tmp_path,
+):
+    """A property test: every saved root seed, against the live source."""
+    saved_memory_dataset(tmp_path, root_seed_count=8)
+    dataset_source = stim_device.DatasetStimDevice.Settings(str(tmp_path))
+    live_source = stim_device.ErrorModelStimDevice.Settings()
+    on_dataset = memory_machine(dataset_source)
+    on_live_source = memory_machine(live_source)
+    for seed in range(8):
+        dataset_outcome = run_outcome(on_dataset, seed)
+        live_outcome = run_outcome(on_live_source, seed)
+        assert dataset_outcome == live_outcome
+
+
+def test_an_unseeded_run_on_a_dataset_is_refused(tmp_path):
+    saved_memory_dataset(tmp_path, root_seed_count=1)
+    source = stim_device.DatasetStimDevice.Settings(str(tmp_path))
+    graph = memory_machine(source)
+    machine = machine_module.Machine.build(graph, None)
+    with pytest.raises(ValueError, match="give the run a seed"):
+        machine.run()
+
+
 def test_a_seed_outside_stims_64_bit_range_is_refused():
     too_large = 1 << 64
     with pytest.raises(ValueError, match="64-bit unsigned"):
@@ -257,7 +323,7 @@ def test_a_later_stream_segment_reuses_the_streams_shot():
     tail_first = round_payload(device, tail, 1)
     assert tail_first.bits == head_fourth.bits
     assert tail_first.round_index == 4
-    assert tail_first.operation_id == "s"
+    assert tail_first.stream_id == "s"
 
 
 def test_a_segments_observable_truth_is_its_streams_truth():
@@ -487,7 +553,7 @@ def test_a_closed_boundary_needs_a_dependency_edge():
     circuit = memory_circuit(3, 4)
     operation = memory_operation(circuit)
     closed = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=1,
         commit_hi=4,
@@ -511,7 +577,7 @@ def test_a_window_declared_past_the_source_reads_to_its_last_round():
     circuit = memory_circuit(3, 4)
     operation = memory_operation(circuit)
     past_the_end = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=3,
         commit_hi=4,
@@ -530,7 +596,7 @@ def test_two_shots_of_one_circuit_slice_strong_windows_from_one_slicer(
 ):
     circuit = memory_circuit(3, 5, noise=0.00123)
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=0,
         commit_lo=2,
         commit_hi=3,

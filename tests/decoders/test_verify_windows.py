@@ -110,7 +110,7 @@ class _SizeBlindDecoder(decoders.PresetLatencyDecoder):
 
     def decode(self, job):
         return decoding_records.DecodeResult(
-            job.operation_id, job.window_id, logical_observables=(0,)
+            job.stream_id, job.window_id, logical_observables=(0,)
         )
 
 

@@ -13,6 +13,7 @@ import decsim.config as config
 import decsim.decoders.decoder_manager as decoder_manager
 import decsim.decoders.decoder_pool as decoder_pool
 import decsim.decoders.decoders as decoders
+import decsim.decoders.execution_slots as execution_slots
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.strong_requests as strong_requests_module
@@ -42,7 +43,7 @@ class _Gate:
 
 def _job(index, gate=None):
     payload = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=("p",),
         round_index=index,
         bits=(0, 1),
@@ -53,7 +54,7 @@ def _job(index, gate=None):
         1, index, window_records.WEAK_POOL_ID, index
     )
     window = window_records.Window(
-        operation_id=1,
+        stream_id=1,
         window_index=index,
         commit_lo=1,
         commit_hi=1,
@@ -61,7 +62,7 @@ def _job(index, gate=None):
         round_count=1,
     )
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=index,
         round_count=1,
         payloads=[payload],
@@ -301,6 +302,38 @@ def test_a_withdrawn_job_leaves_no_landing_on_its_unit():
     manager.check_decode_work_settled()
     assert was_landing is True
     assert manager.service.input_is_on_the_unit(withdrawn, unit) is False
+
+
+def test_a_decode_withdrawn_while_it_waits_for_a_device_slot_never_starts():
+    """Two pools share one slot; the waiting decode is withdrawn, not run.
+
+    Its input landed and it waits for the slot (decoders/execution_slots.py);
+    withdrawn then, it leaves the device's line, so the slot goes to no
+    one when the running decode ends.
+    """
+    engine = engine_module.Engine()
+    slots_settings = execution_slots.ExecutionSlots.Settings(1)
+    slots = slots_settings.build(engine)
+    decoder = decoders.PresetLatencyDecoder(2.0)
+    running_manager = _manager(engine, decoder)
+    waiting_manager = _manager(engine, decoder)
+    running_manager.place_on(slots)
+    waiting_manager.place_on(slots)
+    running = _job(0)
+    waiting = _job(1)
+    on_running_decoded = _resolving(running_manager)
+    on_waiting_decoded = _resolving(waiting_manager)
+    running_manager.enqueue(running, None, on_running_decoded)
+    waiting_manager.enqueue(waiting, None, on_waiting_decoded)
+    was_waiting = len(slots.waiting)
+
+    waiting_manager.withdraw_window((1, 1))
+    engine.run()
+
+    slots.check_settled()
+    assert was_waiting == 1
+    assert running.service_started is True
+    assert waiting.service_started is False
 
 
 def test_a_withdrawn_sender_and_its_joined_reader_leave_no_landing():

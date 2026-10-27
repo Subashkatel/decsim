@@ -408,7 +408,7 @@ def _round_keys(decoder_input) -> tuple:
     """The (operation, round) identities one input reads."""
     keys = []
     for round_input in decoder_input.rounds:
-        keys.append((round_input.operation_id, round_input.round_index))
+        keys.append((round_input.stream_id, round_input.round_index))
     return tuple(keys)
 
 

@@ -20,6 +20,7 @@ class NaiveOnlineScheme:
     has_trailing_tail_context = False
     commits_in_one_serial_chain = False
     supports_dynamic_streams = False
+    reads_across_couplings = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -43,17 +44,17 @@ class NaiveOnlineScheme:
 
     def plan_operation(
         self,
-        operation_id: int,
+        stream_id: int,
         round_count: int,
         *,
         commit_round_count: int,
         buffer_round_count: int,
     ) -> window_records.OperationWindowPlan:
-        """One window over the whole operation."""
+        """One window over the whole stream."""
         del commit_round_count, buffer_round_count
         whole = window_records.WindowGeometry(1, 1, round_count, round_count)
         return window_records.OperationWindowPlan(
-            operation_id=operation_id,
+            stream_id=stream_id,
             windows=(whole,),
             internal_dependencies=(),
             entry_window_indices=(0,),

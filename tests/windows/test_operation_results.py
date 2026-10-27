@@ -2,8 +2,9 @@
 
 The result is the ledger's XOR over [1, rounds], delivered once after
 every window committed and no strong wait; a segment releases when the
-committed prefix covers it (Skoric et al. 2209.08552: the logical
-correction of a stream is the sum over its committed windows).
+committed prefix covers it, its value the stream's from round 1 (Skoric
+et al. 2209.08552: the logical correction of a stream is the sum over
+its committed windows).
 """
 
 import types
@@ -13,6 +14,7 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.windows.committed_rounds as committed_rounds
 import decsim.windows.operation_results as operation_results
+import decsim.windows.release_rules as release_rules
 
 
 class _Release:
@@ -27,20 +29,17 @@ class _Store:
     def __init__(self) -> None:
         self.closed = []
 
-    def has_live_operation_reference(self, _operation_id) -> bool:
-        return False
-
-    def has_operation(self, _operation_id) -> bool:
+    def has_stream(self, _stream_id) -> bool:
         return True
 
-    def close_operation(self, operation_id) -> None:
-        self.closed.append(operation_id)
+    def close_stream(self, stream_id) -> None:
+        self.closed.append(stream_id)
 
 
-def _window(operation_id, index, commit_lo, commit_hi) -> window_records.Window:
+def _window(stream_id, index, commit_lo, commit_hi) -> window_records.Window:
     round_count = commit_hi - commit_lo + 1
     return window_records.Window(
-        operation_id=operation_id,
+        stream_id=stream_id,
         window_index=index,
         commit_lo=commit_lo,
         commit_hi=commit_hi,
@@ -73,24 +72,25 @@ class _Fixture:
         }
         plan = types.SimpleNamespace(
             windows_by_key=self.windows,
-            window_count_of=lambda _operation_id: 2,
+            window_count_of=lambda _stream_id: 2,
             window_indices_of=self._window_indices_of,
             window_at=self.windows.__getitem__,
-            windowed_operation_ids=self._windowed_operation_ids,
+            windowed_stream_ids=self._windowed_stream_ids,
             windows_of=self._windows_of,
             commit_extent_of=self._commit_extent_of,
             total_windows=2,
-            round_count_of=lambda _operation_id: 6,
+            round_count_of=lambda _stream_id: 6,
         )
         tracker = types.SimpleNamespace(
             operation_by_id={1: self.operation},
-            is_sealed=lambda _operation_id: True,
+            is_sealed=lambda _stream_id: True,
             has_unsealed_streams=lambda: False,
             blocking_operation_ids=set(),
         )
         self.store = _Store()
+        stores = (self.store,)
         retention = types.SimpleNamespace(
-            weak_store=self.store,
+            entry_stores=lambda: stores,
             release_hold_if_live=lambda _owner, _store: None,
             release_potential_strong=lambda _key: None,
             landing_stores=tuple,
@@ -106,19 +106,20 @@ class _Fixture:
         self.results.ledger = self.ledger
         self.results.conditional_release = self.release
         self.results.factory = self.factory
+        self.results.release_rule = release_rules.OwnStreams()
         self.delivered = result_ledger.ResultLedger()
         self.results.trace.operation_result_delivered.connect(
             self.delivered.operation_result_delivered
         )
 
-    def _windows_of(self, _operation_id) -> list:
+    def _windows_of(self, _stream_id) -> list:
         windows = self.windows.values()
         return list(windows)
 
-    def _window_indices_of(self, _operation_id) -> list:
+    def _window_indices_of(self, _stream_id) -> list:
         return [0, 1]
 
-    def _commit_extent_of(self, _operation_id) -> tuple:
+    def _commit_extent_of(self, _stream_id) -> tuple:
         windows = self.windows.values()
         commit_los = [window.commit_lo for window in windows]
         commit_his = [window.commit_hi for window in windows]
@@ -126,7 +127,7 @@ class _Fixture:
         commit_hi = max(commit_his)
         return commit_lo, commit_hi
 
-    def _windowed_operation_ids(self) -> list:
+    def _windowed_stream_ids(self) -> list:
         return [1]
 
     def commit(
@@ -198,6 +199,21 @@ def test_a_segment_releases_when_the_committed_prefix_covers_it():
     assert fixture.release.released[0] == 2
     assert fixture.delivered.result_by_operation[2] == (1, 1)
     assert fixture.results.committed_prefix_round_count(1) == 3
+
+
+def test_a_later_segment_carries_every_correction_before_it():
+    """Rounds 1-3 flip the observable and rounds 4-6 do not: still (1,)."""
+    fixture = _Fixture()
+    segment = program_records.Operation(
+        2, "segment", (0,), blocked_by=1, stream_id=1
+    )
+    fixture.results.tracker.operation_by_id[2] = segment
+    fixture.results.tracker.blocking_operation_ids.add(2)
+    fixture.results.bind_stream_segment(2, 1, 3)
+    fixture.results.bind_required_stream_end(2, 6)
+    fixture.commit((1, 0), (1,))
+    fixture.commit((1, 1), (0,))
+    assert fixture.delivered.result_by_operation[2] == (1,)
 
 
 def test_the_workload_is_not_final_until_every_stream_is_sealed():

@@ -14,12 +14,12 @@ from typing import Any
 class HoldRecord:
     """The rounds one holder keeps.
 
-    referenced_operation_ids are the operations the hold keeps open: its
+    referenced_stream_ids are the streams the hold keeps open: its
     rounds' own and any its token names.
     """
 
     round_keys: tuple
-    referenced_operation_ids: frozenset
+    referenced_stream_ids: frozenset
 
 
 class RoundHolds:
@@ -68,7 +68,7 @@ class RoundHolds:
             holders = self.holders_by_round[round_key]
             holders.discard(old_holder)
             holders.add(new_holder)
-        self.released_holders[old_holder] = record.referenced_operation_ids
+        self.released_holders[old_holder] = record.referenced_stream_ids
 
     def release(self, holder: Any) -> list:  # an opaque identity
         """Drop a hold; the rounds that lost their last holder."""
@@ -77,7 +77,7 @@ class RoundHolds:
         )
         record = self.record_by_holder.pop(holder)
         orphaned = self._detach_all(record.round_keys, holder)
-        self.released_holders[holder] = record.referenced_operation_ids
+        self.released_holders[holder] = record.referenced_stream_ids
         return orphaned
 
     def is_live(self, holder: Any) -> bool:  # an opaque identity
@@ -97,18 +97,18 @@ class RoundHolds:
         """Every round some live hold names."""
         return list(self.holders_by_round)
 
-    def references(self, operation_id: Any) -> bool:  # an opaque identity
-        """True while any live hold names the operation."""
+    def references(self, stream_id: Any) -> bool:  # an opaque identity
+        """True while any live hold names the stream."""
         for record in self.record_by_holder.values():
-            if operation_id in record.referenced_operation_ids:
+            if stream_id in record.referenced_stream_ids:
                 return True
         return False
 
-    def forget_released_outside(self, open_operation_ids: set) -> None:
+    def forget_released_outside(self, open_stream_ids: set) -> None:
         """Forget released tokens whose every operation has closed."""
         stale = []
         for holder, referenced in self.released_holders.items():
-            if referenced.isdisjoint(open_operation_ids):
+            if referenced.isdisjoint(open_stream_ids):
                 stale.append(holder)
         for holder in stale:
             del self.released_holders[holder]

@@ -178,13 +178,12 @@ def _batch_job(jobs: list, window_keys: list) -> decoding_records.DecodeJob:
         first_window_key = window_keys[0]
     batch_size = len(jobs)
     return decoding_records.DecodeJob(
-        operation_id=-1,
+        stream_id=-1,
         window_id=0,
         round_count=total_rounds,
         ready_time=earliest_ready_time,
         label=f"strong-batch x{batch_size} ({total_rounds}r)",
         kind=decoding_records.DecodeJobKind.STRONG_BATCH,
-        spatial_nodes=jobs[0].spatial_nodes,
         strong_decode_for=first_window_key,
         batch_members=tuple(jobs),
     )

@@ -293,6 +293,54 @@ def test_a_full_history_task_reproduces_the_retired_direct_columns(
     assert sum(mismatches) == 2
 
 
+def test_a_first_seed_runs_the_same_shots_as_those_seeds_of_a_run_from_0(
+    tmp_path, capsys
+):
+    """Seeds 2 to 5 from first_seed 2 are seeds 2 to 5 of a run from 0.
+
+    The fold reads the four as its prefix, which starts at seed 2, and
+    the stop line counts no shot past the stop.
+    """
+    late_folder = tmp_path / "late"
+    full_folder = tmp_path / "full"
+    late_folder.mkdir()
+    full_folder.mkdir()
+    late_file = run_files.write_run_file(
+        late_folder, collection={"max_shots": 4, "first_seed": 2}
+    )
+    full_file = run_files.write_run_file(
+        full_folder, collection={"max_shots": 6}
+    )
+
+    late_out = tmp_path / "late_out"
+    full_out = tmp_path / "full_out"
+    late_dir, late_rows = run.run_experiment(late_file, late_out)
+    late_printed = capsys.readouterr()
+    full_dir, _rows = run.run_experiment(full_file, full_out)
+
+    late_path = late_dir / "shots.csv"
+    full_path = full_dir / "shots.csv"
+    late_shots = _csv_rows(late_path)
+    full_shots = _csv_rows(full_path)
+    late = _digests_by_seed(late_shots)
+    full = _digests_by_seed(full_shots)
+    assert sorted(late) == [2, 3, 4, 5]
+    (late_row,) = late_rows
+    assert late_row["prefix_shots"] == 4
+    assert late_row["state"] == "cap"
+    assert "4 shots done (cap)\n" in late_printed.err
+    for seed, digest in late.items():
+        assert digest == full[seed]
+
+
+def _digests_by_seed(shots: list) -> dict:
+    digests = {}
+    for row in shots:
+        seed = int(row["seed"])
+        digests[seed] = row["sample_digest"]
+    return digests
+
+
 def test_every_shot_of_a_task_decides_on_its_calibrator():
     """An online threshold: one calibrator per task, on the task."""
     task = run_files.first_task(

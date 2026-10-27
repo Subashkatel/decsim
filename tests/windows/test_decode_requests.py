@@ -29,6 +29,7 @@ import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.decode_requests as decode_requests
 import decsim.windows.escalate_edges as escalate_edges
+import decsim.windows.input_checks as input_checks
 import decsim.windows.round_retention as round_retention
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
@@ -36,6 +37,7 @@ import tests.declared_run as declared_run
 import tests.decoders.test_decoder_tiers as decoder_tiers
 import tests.escalation.declared_fabric as declared_fabric
 import tests.escalation.test_strong_window_shapes as shape_tests
+import tests.one_entry as one_entry
 
 
 class _RecordingQueue:
@@ -71,7 +73,7 @@ def _ignore_result(_job, _result) -> None:
 
 def _fragment(round_index, bits=None) -> round_records.RetainedSyndromeFragment:
     return round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=bits,
@@ -108,7 +110,7 @@ class _Fixture:
             1, "memory", (0,), patches=(0,)
         )
         self.window = window_records.Window(
-            operation_id=1,
+            stream_id=1,
             window_index=0,
             commit_lo=1,
             commit_hi=3,
@@ -120,22 +122,19 @@ class _Fixture:
             settings, self.engine
         )
         self.arrived = 0
-        geometry = types.SimpleNamespace(code_name="surface")
         no_models = types.SimpleNamespace(model_by_window={})
         self.planner = types.SimpleNamespace(
             windows_by_key={(1, 0): self.window},
-            successors_by_operation={1: []},
+            successors_by_stream={1: []},
             models=no_models,
-            spatial_node_count_of=lambda _operation_id: 17,
-            code_geometry_of=lambda _operation_id: geometry,
-            is_windowed=lambda _operation_id: True,
+            is_windowed=lambda _stream_id: True,
         )
         self.tracker = types.SimpleNamespace(
             operation_by_id={1: self.operation},
-            effective_round_count_for_window=lambda _operation_id, _window: 6,
-            round_count_for_window=lambda _operation_id, _window=None: 6,
-            rounds_arrived=lambda _operation_id: self.arrived,
-            strong_rounds_arrived=lambda _operation_id, _store: 0,
+            effective_round_count_for_window=lambda _stream_id, _window: 6,
+            round_count_for_window=lambda _stream_id, _window=None: 6,
+            rounds_arrived=lambda _stream_id: self.arrived,
+            strong_rounds_arrived=lambda _stream_id, _store: 0,
             has_first_round=self._has_first_round,
             is_data_complete=self._is_data_complete,
             is_buffer_filled_by_memory=lambda _window: False,
@@ -144,7 +143,6 @@ class _Fixture:
             is_strong_context_retained=False,
             primary_tier=window_records.WEAK_POOL_ID,
         )
-        self.retention.weak_store = self.store
         self.retention.planner = self.planner
         self.retention.tracker = self.tracker
         link = _Link()
@@ -164,9 +162,12 @@ class _Fixture:
         input_fold = decoder_memory_transfer.DecoderInputStaging(
             None, self.engine
         )
-        gate = decode_requests.WindowInputGate()
+        gate = decode_requests.WindowInputGate(
+            {window_records.WEAK_POOL_ID: True}
+        )
         gate.interaction = interaction
         gate.input_fold = input_fold
+        gate.input_checks = input_checks.InputChecks()
         self.gate = gate
         self.builder = decode_requests.DecodeRequestBuilder(self.engine)
         self.builder.planner = self.planner
@@ -180,12 +181,15 @@ class _Fixture:
             clock=clock,
         )
         self.requester.tracker = self.tracker
+        router = one_entry.router(
+            decode_queue=self.queue, store_output=store_output, store=self.store
+        )
+        self.requester.router = router
+        self.retention.router = router
         self.requester.retention = self.retention
         self.requester.builder = self.builder
-        self.requester.decode_queue = self.queue
         self.requester.verdict = verdict
         self.requester.edges = escalate_edges.EscalateEdges()
-        self.requester.store_output = store_output
         self.retention.register_window((1, 0), self.window)
         self.interaction = interaction
 
@@ -203,7 +207,7 @@ class _Fixture:
             delivery_revision=0,
             latest_source_revision=1,
             latest_delivery_revision=0,
-            source_operation_round_count=6,
+            source_stream_round_count=6,
             dependency_released=True,
             payload=defects,
         )
@@ -343,7 +347,7 @@ def _landed_job(fixture, folds_in_place: bool):
     job.decoder_input = memory.deposit(job)
     job.memory = memory
     if folds_in_place:
-        fixture.gate.copies_the_window_fold = False
+        fixture.gate.copies_fold_by_pool[window_records.WEAK_POOL_ID] = False
     return job, memory
 
 
@@ -396,7 +400,7 @@ def test_a_shared_input_is_written_once_and_the_other_solve_reads_it():
 def _companion_solve(job, memory):
     """The window's other forced-class solve, reading the same input."""
     companion = decoding_records.DecodeJob(
-        operation_id=job.operation_id,
+        stream_id=job.stream_id,
         window_id=job.window_id,
         round_count=job.round_count,
         request_key=job.request_key,
@@ -586,7 +590,7 @@ def _speculative_request_after_decision(machine, requests) -> dict:
     jobs = _speculative_jobs(requests)
     windows = machine.windows.window_manager.planner.windows_by_key
     after = {}
-    for (_operation_id, window_id), window in windows.items():
+    for (_stream_id, window_id), window in windows.items():
         job = jobs[window_id]
         after[window_id] = job.request_created_ticks - window.t_queued
     return after

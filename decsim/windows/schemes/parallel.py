@@ -23,6 +23,7 @@ class ParallelWindowScheme:
     # reconcile them, so the commits are a depth-two graph, not a chain.
     commits_in_one_serial_chain = False
     supports_dynamic_streams = False
+    reads_across_couplings = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -46,7 +47,7 @@ class ParallelWindowScheme:
 
     def plan_operation(
         self,
-        operation_id: int,
+        stream_id: int,
         round_count: int,
         *,
         commit_round_count: int,
@@ -69,7 +70,7 @@ class ParallelWindowScheme:
             )
         layout = _BlockLayout(round_count, commit_round_count)
         layout.extend_to_the_end()
-        return layout.plan(operation_id)
+        return layout.plan(stream_id)
 
     def data_complete(
         self,
@@ -166,7 +167,7 @@ class _BlockLayout:
         self.edges.append((next_a_index, b_index))
         self.current_a = next_a_index
 
-    def plan(self, operation_id: int) -> window_records.OperationWindowPlan:
+    def plan(self, stream_id: int) -> window_records.OperationWindowPlan:
         """The plan: entries have no incoming edge, exits no outgoing one."""
         edge_tuple = tuple(self.edges)
         destinations = set()
@@ -183,7 +184,7 @@ class _BlockLayout:
             if index not in sources:
                 exit_window_indices.append(index)
         return window_records.OperationWindowPlan(
-            operation_id=operation_id,
+            stream_id=stream_id,
             windows=tuple(self.windows),
             internal_dependencies=edge_tuple,
             entry_window_indices=tuple(entry_window_indices),

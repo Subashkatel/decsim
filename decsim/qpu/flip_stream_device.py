@@ -20,6 +20,13 @@ reading a round's flips copies the record kept since the last rollover
 (probe p8: 30.6 us a round at d=11 every 10 rounds, 43.5 every 100,
 118.4 every round).
 
+A drift multiplies every noise probability of the rounds after
+drift_round by drift_factor: the noise moves while the decoders keep
+the window models of the program as written, as a device whose error
+rates drift away from its last calibration does (Toshio et al.
+2510.25222 Sec. III B calibrates once). Under a noise row linear in p,
+such as SD6, a factor k is the memory at k p.
+
 A round's raw bits are its flips XOR the noiseless reference record,
 read once off a short circuit of the program, as the flips are against
 it (FlipSimulator: "measurement flips ... relative to the noiseless
@@ -27,9 +34,20 @@ reference"). The formation table is the template's, moved in time
 (detector_error_model/periodic_formation.py). The truth is the
 observables' flips, kept across rollovers. A window's model is a short
 circuit's, moved in time likewise (moved_stream_models.py).
+
+While someone listens to checkpoint_reached, each round also closes a
+copy of the frame and the records the readout reads with the readout
+fragment, noiseless, as Tan et al.'s copies end a run early
+(2209.09219 lines 1003-1037): the stream as if it ended there
+(records/checkpoints.py). Probe: the copy's readout detectors and
+observables equal Stim's own circuit of that many rounds, with a
+noiseless readout, bit for bit (studies a_virtual_readout_probe.py,
+200 of 200 seeds).
 """
 
 import dataclasses
+import functools
+import math
 from collections.abc import Mapping
 from typing import Any, Optional
 
@@ -43,6 +61,7 @@ import decsim.ports as ports
 import decsim.qpu.moved_stream_models as moved_stream_models
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.records.checkpoints as checkpoint_records
 import decsim.records.circuits as circuit_records
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.formation as formation_records
@@ -67,7 +86,8 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
 
     Programs are keyed by stream, as the live source's are. It keeps no
     whole shot, so shot_sampled is silent and a reference decode of the
-    whole shot has nothing to read.
+    whole shot has nothing to read. checkpoint_reached(snapshot) fires
+    after each round while someone listens.
     """
 
     @dataclasses.dataclass(frozen=True)
@@ -81,6 +101,8 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
 
         rollover_rounds: int = DEFAULT_ROLLOVER_ROUNDS
         stabilizer_randomization: bool = True
+        drift_round: Optional[int] = None
+        drift_factor: float = 1.0
         # the word the reports name this row by
         name = "flip_stream"
 
@@ -93,6 +115,16 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
                 "flip_stream.stabilizer_randomization",
                 self.stabilizer_randomization,
             )
+            if self.drift_round is not None:
+                config.check_whole_count(
+                    "flip_stream.drift_round", self.drift_round, "rounds"
+                )
+            factor = self.drift_factor
+            if not config.is_number(factor) or not 0 <= factor < math.inf:
+                raise ValueError(
+                    "flip_stream.drift_factor must be a finite number of at "
+                    f"least 0, got {factor!r}"
+                )
 
         def build(
             self, code: ports.CodeModel, circuit_arguments: Mapping
@@ -125,6 +157,7 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
         self._programs = dict(programs)
         self._streams_by_id: dict = {}
         self._models_by_stream_id: dict = {}
+        self.checkpoint_reached = trace_source.TraceSource()
 
     def declare_stream(
         self,
@@ -138,7 +171,11 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
         seed = None
         if self._seed is not None:
             seed = seeding.substream_seed(self._seed, (stream_id,))
-        plan = RoundPlan(program, self.settings.rollover_rounds)
+        settings = self.settings
+        drift = None
+        if settings.drift_round is not None:
+            drift = (settings.drift_round, settings.drift_factor)
+        plan = RoundPlan(program, settings.rollover_rounds, drift)
         is_randomized = self.settings.stabilizer_randomization
         history = FlipHistory(plan, seed, is_randomized)
         self._streams_by_id[stream_id] = _Stream(stream_operation, history)
@@ -205,10 +242,10 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
 
     def formation_table(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> formation_records.TableReads:
         """The recipes of the rounds run so far, moved off the template."""
-        stream = self._stream_for(operation_id)
+        stream = self._stream_for(stream_id)
         return stream.history.table()
 
     def logical_observable_truth(
@@ -319,6 +356,10 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
             raise RuntimeError("a flip stream runs its rounds in order")
         self._mark_stochastic_use()
         bits = history.run_round(is_final)
+        # a copy costs a FlipSimulator and a readout, so only for a listener
+        if self.checkpoint_reached.has_listeners:
+            snapshot = history.snapshot(stream_id)
+            self.checkpoint_reached.fire(snapshot)
         payload = round_records.QPUReadout(
             stream_id,
             stream.owner.patches,
@@ -354,7 +395,7 @@ class FlipHistory:
         """Run the next round; its raw bits, flips against the reference."""
         self.round_count += 1
         name = _fragment_name(self.round_count, is_final)
-        fragment = self.plan.fragments[name]
+        fragment = self.plan.fragment(name, self.round_count)
         self.simulator.do(fragment)
         self.is_final = is_final
         width = fragment.num_measurements
@@ -382,6 +423,61 @@ class FlipHistory:
         flips_over_the_stream = _xor_lists(self.observable_flips, current)
         return tuple(flips_over_the_stream)
 
+    def snapshot(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> checkpoint_records.CheckpointSnapshot:
+        """The stream as if its readout came after the round just run.
+
+        After the real readout it is that readout's. Before, a copy runs
+        the noiseless readout and the stream runs on untouched.
+        """
+        if self.is_final:
+            readout_count = self.plan.readout.num_detectors
+            events = _last_detector_flips(self.simulator, readout_count)
+            truth = self.truth()
+        else:
+            events, truth = self._closed_copy()
+        return checkpoint_records.CheckpointSnapshot(
+            stream_id,
+            self.round_count,
+            events,
+            truth,
+            self.is_final,
+            self.plan.template.program,
+        )
+
+    def _closed_copy(self) -> tuple:
+        """The readout's events and the truth, off a copy read out.
+
+        The copy holds the frame and the records the readout reads, the
+        rollover's own steps, with no random frame of its own; the
+        readout is noiseless, so the copy draws nothing.
+        """
+        simulator = self.simulator
+        frame_x, frame_z = _frame_of(simulator)
+        flips = simulator.get_measurement_flips()
+        reach = self.plan.readout_reach
+        read = flips[flips.shape[0] - reach :]
+        copy = stim.FlipSimulator(
+            batch_size=1,
+            num_qubits=simulator.num_qubits,
+            disable_stabilizer_randomization=True,
+            seed=0,
+        )
+        copy.broadcast_pauli_errors(pauli="X", mask=frame_x)
+        copy.broadcast_pauli_errors(pauli="Z", mask=frame_z)
+        copy.append_measurement_flips(read)
+        copy.do(self.plan.readout)
+        detectors = copy.get_detector_flips()
+        observables = copy.get_observable_flips()
+        events = tuple(int(bit) for bit in detectors[:, 0])
+        read_out = [int(flip) for flip in observables[:, 0]]
+        stream_truth = self.truth()
+        stream_flips = list(stream_truth)
+        truth = _xor_lists(stream_flips, read_out)
+        return events, tuple(truth)
+
     def _roll_over(self) -> None:
         """Let go of the past, keeping the frame and the records reached."""
         simulator = self.simulator
@@ -405,17 +501,18 @@ class RoundPlan:
     """What every round of one program reads: fragments, references, table.
 
     live_reach is the live source's: how many rounds back a round after
-    the first reads (streaming_stim_device._program_reach).
+    the first reads (streaming_stim_device._program_reach). drift is
+    (round, factor): every round after round runs its fragment with each
+    noise probability times factor; None runs the program as written.
     """
 
     def __init__(
         self,
         program: circuit_records.RepeatedStimCircuit,
         rollover_rounds: int,
+        drift: Optional[tuple] = None,
     ) -> None:
-        self.fragments = {
-            name: getattr(program, name) for name in FRAGMENT_NAMES
-        }
+        self.fragment_eras = _fragment_eras(program, drift)
         self.template = periodic_formation.StreamTemplate(program)
         self.references = _references(program, self.template)
         self.rollover_rounds = rollover_rounds
@@ -428,9 +525,58 @@ class RoundPlan:
         self.kept_measurements = max(repeated_back, final_back)
         self.live_reach = _program_reach(program)
 
+    def fragment(self, name: str, round_index: int) -> stim.Circuit:
+        """The named fragment as round round_index runs it."""
+        for last_round, fragments in self.fragment_eras:
+            if last_round is None or round_index <= last_round:
+                return fragments[name]
+        raise AssertionError("the last era runs every later round")
+
     def rolls_over_after(self, round_index: int) -> bool:
         """Whether the simulator lets go of its past after this round."""
         return round_index % self.rollover_rounds == 0
+
+    @functools.cached_property
+    def readout(self) -> stim.Circuit:
+        """The final round's readout, noiseless: what follows its round.
+
+        Made when a checkpoint first asks, so a program whose final
+        round is not its repeated round and a readout runs unasked.
+        """
+        return _noiseless_readout(self.template.program)
+
+    @functools.cached_property
+    def readout_reach(self) -> int:
+        """The measurements before the readout that it reads."""
+        return detector_formation.measurements_read_back(self.readout)
+
+
+def scaled_noise(circuit: stim.Circuit, factor: float) -> stim.Circuit:
+    """The circuit with every noise probability times factor.
+
+    A noisy gate's arguments are its probabilities (stim gate_data
+    is_noisy_gate), a measurement's its flip probability among them;
+    Stim refuses a product past a channel's range.
+    """
+    scaled = stim.Circuit()
+    for instruction in circuit:
+        if isinstance(instruction, stim.CircuitRepeatBlock):
+            body = instruction.body_copy()
+            scaled_body = scaled_noise(body, factor)
+            block = stim.CircuitRepeatBlock(
+                instruction.repeat_count, scaled_body
+            )
+            scaled.append(block)
+            continue
+        gate = stim.gate_data(instruction.name)
+        if not gate.is_noisy_gate:
+            scaled.append(instruction)
+            continue
+        arguments = instruction.gate_args_copy()
+        scaled_arguments = [argument * factor for argument in arguments]
+        targets = instruction.targets_copy()
+        scaled.append(instruction.name, targets, scaled_arguments)
+    return scaled
 
 
 @dataclasses.dataclass(frozen=True)
@@ -439,6 +585,18 @@ class _Stream:
 
     owner: program_records.Operation
     history: "FlipHistory"
+
+
+def _fragment_eras(program, drift: Optional[tuple]) -> tuple:
+    """(last round or None, fragments) in order: as written, then drifted."""
+    fragments = {name: getattr(program, name) for name in FRAGMENT_NAMES}
+    if drift is None:
+        return ((None, fragments),)
+    drift_round, factor = drift
+    drifted = {}
+    for name, fragment in fragments.items():
+        drifted[name] = scaled_noise(fragment, factor)
+    return ((drift_round, fragments), (None, drifted))
 
 
 def _references(program, template) -> dict:
@@ -508,6 +666,31 @@ def _reference_by_round(program, round_count: int, is_final: bool) -> tuple:
     ):
         by_round[round_index] = sample[start:end]
     return by_round, list(by_round)
+
+
+def _noiseless_readout(
+    program: circuit_records.RepeatedStimCircuit,
+) -> stim.Circuit:
+    """The instructions the final round adds to the repeated round."""
+    repeated = program.repeated_round
+    final = program.final_round
+    length = len(repeated)
+    head = final[:length]
+    if head != repeated:
+        raise ValueError(
+            "not implemented yet: a checkpoint closes a copy with the "
+            "readout the final round adds to the repeated round, and this "
+            "program's final round does not begin with its repeated round"
+        )
+    readout = final[length:]
+    return readout.without_noise()
+
+
+def _last_detector_flips(simulator: stim.FlipSimulator, count: int) -> tuple:
+    """The flips of the last count detectors the simulator ran."""
+    detectors = simulator.get_detector_flips()
+    last = detectors[detectors.shape[0] - count :, 0]
+    return tuple(int(bit) for bit in last)
 
 
 def _frame_of(simulator: stim.FlipSimulator) -> tuple:

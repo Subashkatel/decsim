@@ -23,6 +23,7 @@ import math
 from typing import Optional
 
 import decsim.records.windows as window_records
+import decsim.windows.schemes.sliding_streams as sliding_streams
 import decsim.windows.schemes.window_data as window_data
 
 
@@ -37,6 +38,7 @@ class SlidingWindowScheme:
 
     commits_in_one_serial_chain = True
     supports_dynamic_streams = True
+    reads_across_couplings = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -63,7 +65,7 @@ class SlidingWindowScheme:
 
     def plan_operation(
         self,
-        operation_id: int,
+        stream_id: int,
         round_count: int,
         *,
         commit_round_count: int,
@@ -86,7 +88,7 @@ class SlidingWindowScheme:
         last_index = window_count - 1
         internal_dependencies = _chain_dependencies(window_count)
         return window_records.OperationWindowPlan(
-            operation_id=operation_id,
+            stream_id=stream_id,
             windows=windows,
             internal_dependencies=internal_dependencies,
             entry_window_indices=(0,),
@@ -94,6 +96,10 @@ class SlidingWindowScheme:
             windowed=True,
             batch_preceding_idle_rounds=False,
         )
+
+    def stream_layouts(self) -> sliding_streams.SlidingStreamLayouts:
+        """Open streams by the region law, finite ones by plan_operation."""
+        return sliding_streams.SlidingStreamLayouts(self)
 
     def _window_geometries(
         self,

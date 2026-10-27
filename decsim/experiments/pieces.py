@@ -164,24 +164,26 @@ def contiguous_ranges(saved: dict, first_seed: int) -> list:
     return ranges
 
 
-def unsaved_ranges(saved: dict, shot_count: int) -> list:
-    """The (first seed, count) gaps of [0, shot_count) no saved piece holds.
+def unsaved_ranges(saved: dict, start: int, shot_count: int) -> list:
+    """The (first seed, count) gaps no saved piece holds of shot_count seeds.
 
-    saved maps each saved piece's first seed to its count, as
-    saved_counts gives it, so a job of --seeds run again cuts new pieces
-    only between the saved ones and runs no seed twice.
+    The seeds run from start (CollectionSettings.first_seed). saved maps
+    each saved piece's first seed to its count, as saved_counts gives
+    it, so a job of --seeds run again cuts new pieces only between the
+    saved ones and runs no seed twice.
     """
     ranges = []
-    next_seed = 0
+    next_seed = start
+    end = start + shot_count
     for first_seed in sorted(saved):
-        gap_end = min(first_seed, shot_count)
+        gap_end = min(first_seed, end)
         if gap_end > next_seed:
             gap_count = gap_end - next_seed
             ranges.append((next_seed, gap_count))
         piece_end = first_seed + saved[first_seed]
         next_seed = max(next_seed, piece_end)
-    if shot_count > next_seed:
-        last_count = shot_count - next_seed
+    if end > next_seed:
+        last_count = end - next_seed
         ranges.append((next_seed, last_count))
     return ranges
 

@@ -47,6 +47,7 @@ RECORD_TYPES = frozenset(
     {
         "evidence_records.Closed",
         "transfer_records.BoundaryTransferRelation",
+        "transfer_records.RoundCopyRelation",
         "window_records.DependencyResidual",
         "workload_records.FiniteCircuit",
     }
@@ -62,6 +63,7 @@ PORTS = frozenset(
         "RunSeedComposite",
         "RunSeedConsumer",
         "seeding.RunSeedComposite",
+        "seeding.RunSeedConsumer",
     }
 )
 

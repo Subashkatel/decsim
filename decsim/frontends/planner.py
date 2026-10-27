@@ -48,7 +48,6 @@ def plan_execution(
     round_ticks = _resolve_round_ticks(code, fallback_round_microseconds)
     _check_geometry_counts(code)
     patch_count_by_id = _patch_count_by_operation_id(operations)
-    base_nodes = _base_nodes_by_patch_count(code, patch_count_by_id)
     geometry = _resolve_geometry(code)
     resolved = []
     patches_by_key = {}
@@ -62,12 +61,11 @@ def plan_execution(
             geometry,
             round_ticks,
             patch_count,
-            base_nodes,
         )
         resolved.append(planning)
         _note_patches(operation, patches_by_key)
     patches = _resolve_patches(
-        patches_by_key, code, layout, geometry, round_ticks, base_nodes[1]
+        patches_by_key, code, layout, geometry, round_ticks
     )
     planned_views, planned_resolved = _planned(
         operations, resolved, planned_operation_ids
@@ -101,7 +99,8 @@ def check_operation_graph(
     Operation ids are the graph's stable keys: no id twice, no edge
     twice, no cycle (an edge to itself is one); an edge to an unknown id
     stops at its lookup; a blocker, when checked, names a known
-    operation.
+    operation, and its wait is an edge of the cycle check, since an
+    operation released by one that waits on it never starts.
     """
     by_id = _index_by_id(operations)
     external_ids = set(external_blocker_ids)
@@ -117,7 +116,31 @@ def check_operation_graph(
         indegree[operation.id] = len(predecessor_ids)
         if validate_blockers:
             _check_blocker(operation, valid_blocker_ids)
+            _add_blocking_edge(operation, successors, indegree)
     _check_acyclic(by_id, successors, indegree)
+
+
+def check_blockers_decode(
+    operations: list, external_blocker_ids: Iterable[int]
+) -> None:
+    """Refuse a blocker with no windows: its result is never final.
+
+    With no stream a protected wait could bind it to (the caller asks
+    only of a workload with no dynamic stream), an operation that emits
+    no detector data is planned no windows (build/plan.py
+    _decode_plan_operations), so what it blocks waits forever while the
+    idle patches keep the run going.
+    """
+    streamed = [operation.stream_id is not None for operation in operations]
+    if any(streamed):
+        return
+    by_id = _index_by_id(operations)
+    external_ids = set(external_blocker_ids)
+    for operation in operations:
+        blocker = by_id.get(operation.blocked_by)
+        if blocker is None or blocker.id in external_ids:
+            continue
+        _check_blocker_decodes(operation, blocker)
 
 
 def check_workload_identity(
@@ -187,20 +210,10 @@ def _patch_count_by_operation_id(operations) -> dict:
     return counts
 
 
-def _base_nodes_by_patch_count(code, patch_count_by_id: dict) -> dict:
-    """The code's spatial node count for one patch and for every used count."""
-    counts = {1, *patch_count_by_id.values()}
-    base_nodes = {}
-    for count in counts:
-        base_nodes[count] = code.spatial_nodes(count)
-    return base_nodes
-
-
 def _resolve_geometry(code):
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     return program_records.ResolvedCodeGeometry(
-        code_name=code.name,
         distance=code.distance,
         commit_round_count=commit_round_count,
         buffer_round_count=buffer_round_count,
@@ -215,7 +228,6 @@ def _resolve_operation(
     geometry,
     round_ticks,
     patch_count,
-    base_nodes,
 ) -> program_records.ResolvedOperationPlanning:
     operation_code = layout.code_for_operation(operation)
     if operation_code is not code:
@@ -224,16 +236,12 @@ def _resolve_operation(
             "from the resolved run code"
         )
     round_count = rounds_policy.rounds_for(operation, code)
-    spatial_node_count = layout.spatial_nodes_for(
-        operation, base_spatial_node_count=base_nodes[patch_count]
-    )
     syndrome_bits_per_round = code.syndrome_bits_per_round(patch_count)
     return program_records.ResolvedOperationPlanning(
         operation_id=operation.id,
         code_geometry=geometry,
         round_count=round_count,
         round_ticks=round_ticks,
-        spatial_node_count=spatial_node_count,
         syndrome_bits_per_round=syndrome_bits_per_round,
     )
 
@@ -249,7 +257,7 @@ def _note_patches(operation, patches_by_key: dict) -> None:
 
 
 def _resolve_patches(
-    patches_by_key, code, layout, geometry, round_ticks, base_nodes
+    patches_by_key, code, layout, geometry, round_ticks
 ) -> list[program_records.ResolvedPatchPlanning]:
     patches = []
     for patch_id in patches_by_key.values():
@@ -259,14 +267,10 @@ def _resolve_patches(
                 f"layout patch {patch_id!r} selected a code different from "
                 "the resolved run code"
             )
-        spatial_node_count = layout.patch_spatial_nodes_for(
-            patch_id, base_spatial_node_count=base_nodes
-        )
         planning = program_records.ResolvedPatchPlanning(
             patch_identity=patch_id,
             code_geometry=geometry,
             round_ticks=round_ticks,
-            spatial_node_count=spatial_node_count,
         )
         patches.append(planning)
     return patches
@@ -334,12 +338,12 @@ def _plan_syndrome_buffering(
     """
     weak = _HoldSet()
     strong = _HoldSet()
-    for operation_id, indices in execution.op_windows.items():
+    for stream_id, indices in execution.windows_by_stream.items():
         for index in indices:
-            window = execution.windows[(operation_id, index)]
+            window = execution.windows[(stream_id, index)]
             _hold_window(
                 execution,
-                operation_id,
+                stream_id,
                 window,
                 weak,
                 absorbs_weak_windows,
@@ -347,7 +351,7 @@ def _plan_syndrome_buffering(
             )
             _hold_strong_context(
                 execution,
-                operation_id,
+                stream_id,
                 window,
                 strong,
                 retain_strong_context,
@@ -361,7 +365,7 @@ def _plan_syndrome_buffering(
 
 def _hold_window(
     execution,
-    operation_id,
+    stream_id,
     window,
     weak: "_HoldSet",
     absorbs_weak_windows: bool,
@@ -371,15 +375,15 @@ def _hold_window(
 
     The weak decode reads the window from its start to its buffer.
     """
-    key = (operation_id, window.window_index)
+    key = (stream_id, window.window_index)
     round_keys = _read_keys(
-        execution, operation_id, window.start_round, window.buffer_hi
+        execution, stream_id, window.start_round, window.buffer_hi
     )
     reads = decoding_records.WindowReads(key)
     weak.add(reads, round_keys)
     _hold_restart_reads(
         execution,
-        operation_id,
+        stream_id,
         window,
         weak,
         absorbs_weak_windows,
@@ -389,7 +393,7 @@ def _hold_window(
 
 def _hold_restart_reads(
     execution,
-    operation_id,
+    stream_id,
     window,
     weak: "_HoldSet",
     absorbs_weak_windows: bool,
@@ -407,7 +411,7 @@ def _hold_restart_reads(
     """
     if not absorbs_weak_windows:
         return
-    if not _has_same_operation_dependency(window, operation_id):
+    if not _has_same_stream_dependency(window, stream_id):
         return
     look_ahead = window.buffer_hi - window.commit_hi
     buffer_rounds = max(0, look_ahead)
@@ -416,24 +420,22 @@ def _hold_restart_reads(
     )
     lower_start = window.commit_lo - reread_rounds
     lower = max(1, lower_start)
-    round_keys = _read_keys(execution, operation_id, lower, window.buffer_hi)
-    owner = decoding_records.PotentialRestart(
-        (operation_id, window.window_index)
-    )
+    round_keys = _read_keys(execution, stream_id, lower, window.buffer_hi)
+    owner = decoding_records.PotentialRestart((stream_id, window.window_index))
     weak.add(owner, round_keys)
 
 
-def _has_same_operation_dependency(window, operation_id) -> bool:
-    """Whether an earlier window of the same operation bounds this one."""
+def _has_same_stream_dependency(window, stream_id) -> bool:
+    """Whether an earlier window of the same stream bounds this one."""
     for dependency in window.deps:
-        if dependency[0] == operation_id:
+        if dependency[0] == stream_id:
             return True
     return False
 
 
 def _hold_strong_context(
     execution,
-    operation_id,
+    stream_id,
     window,
     strong: "_HoldSet",
     retain_strong_context: bool,
@@ -445,7 +447,7 @@ def _hold_strong_context(
     No row decodes behind the commit (records/windows.py,
     strong_context_bounds). The redo window reads one buffer past the
     commit; the double-window region reads its own rounds, commit plus two
-    buffers clamped at the operation's end, and no round past them
+    buffers clamped at the stream's end, and no round past them
     (escalation/strong_regions.py, double_window_region). A strong side
     that forms the events also reads the raw rounds before the commit
     that the region's rounds' recipes read.
@@ -455,13 +457,11 @@ def _hold_strong_context(
     bounds = window_records.strong_context_bounds(window)
     context_lo, _commit_lo, _commit_hi, upper = bounds
     if absorbs_weak_windows:
-        round_count = execution.rounds_by_operation[operation_id]
+        round_count = execution.rounds_by_stream[stream_id]
         upper = _double_window_region_end(window, round_count)
-    lower = formation_reads.strong_read_start(operation_id, context_lo, upper)
-    potential = _read_keys(execution, operation_id, lower, upper)
-    owner = decoding_records.PotentialStrong(
-        (operation_id, window.window_index)
-    )
+    lower = formation_reads.strong_read_start(stream_id, context_lo, upper)
+    potential = _read_keys(execution, stream_id, lower, upper)
+    owner = decoding_records.PotentialStrong((stream_id, window.window_index))
     strong.add(owner, potential)
 
 
@@ -477,17 +477,17 @@ def _double_window_region_end(window, round_count: int) -> int:
     return min(round_count, extended)
 
 
-def _read_keys(execution, operation_id, lower: int, upper: int) -> tuple:
+def _read_keys(execution, stream_id, lower: int, upper: int) -> tuple:
     """The round identities from lower to upper, spilling into successors."""
-    round_count = execution.rounds_by_operation[operation_id]
+    round_count = execution.rounds_by_stream[stream_id]
     last = min(upper, round_count)
     keys = []
     stop = last + 1
     for index in range(lower, stop):
-        keys.append((operation_id, index))
+        keys.append((stream_id, index))
     spill = upper - round_count
-    for successor_id in execution.successors.get(operation_id, ()):
-        successor_rounds = execution.rounds_by_operation[successor_id]
+    for successor_id in execution.successors_by_stream.get(stream_id, ()):
+        successor_rounds = execution.rounds_by_stream[successor_id]
         overflow = min(spill, successor_rounds)
         overflow_stop = overflow + 1
         for index in range(1, overflow_stop):
@@ -526,20 +526,20 @@ def _materialize_execution_plan(
         windows, operations, plan_by_operation_id
     )
     _count_window_dependencies(windows)
-    tables = _operation_tables(rows)
+    tables = _stream_tables(rows)
     return window_records.WindowPlan(
         windows=windows,
-        successors=successors,
+        successors_by_stream=successors,
         total_windows=len(windows),
         **tables,
     )
 
 
-def _add_operation_windows(windows: dict, operation_id, operation_plan) -> None:
+def _add_operation_windows(windows: dict, stream_id, operation_plan) -> None:
     """One Window per geometry, with the plan's internal dependencies."""
     for window_index, geometry in enumerate(operation_plan.windows):
-        windows[(operation_id, window_index)] = window_records.Window(
-            operation_id=operation_id,
+        windows[(stream_id, window_index)] = window_records.Window(
+            stream_id=stream_id,
             window_index=window_index,
             commit_lo=geometry.commit_lo,
             commit_hi=geometry.commit_hi,
@@ -549,8 +549,8 @@ def _add_operation_windows(windows: dict, operation_id, operation_plan) -> None:
             closed_temporal_boundaries=geometry.closed_temporal_boundaries,
         )
     for source_index, destination_index in operation_plan.internal_dependencies:
-        destination = windows[(operation_id, destination_index)]
-        destination.deps.append((operation_id, source_index))
+        destination = windows[(stream_id, destination_index)]
+        destination.deps.append((stream_id, source_index))
 
 
 def _link_boundary_windows(
@@ -576,11 +576,11 @@ def _link_boundary_windows(
 
 
 def _link_exits_to_entries(
-    windows, predecessor_id, predecessor_plan, operation_id, destination_plan
+    windows, predecessor_id, predecessor_plan, stream_id, destination_plan
 ) -> None:
     for source_index in predecessor_plan.exit_window_indices:
         for destination_index in destination_plan.entry_window_indices:
-            destination = windows[(operation_id, destination_index)]
+            destination = windows[(stream_id, destination_index)]
             destination.deps.append((predecessor_id, source_index))
 
 
@@ -591,17 +591,15 @@ def _count_window_dependencies(windows: dict) -> None:
             windows[dependency].dependents.append(window_key)
 
 
-def _operation_tables(rows: list) -> dict:
-    """The per-operation tables of a WindowPlan, keyed by operation id."""
+def _stream_tables(rows: list) -> dict:
+    """The per-stream tables of a WindowPlan, keyed by stream id."""
     tables = {
-        "window_count": _table(rows, _window_count_of),
-        "op_windows": _table(rows, _window_indices_of),
-        "rounds_by_operation": _table(rows, _round_count_of),
-        "windowed_by_operation": _table(rows, _windowed_of),
-        "batch_preceding_idle_rounds_by_operation": _table(
-            rows, _batch_idle_of
-        ),
-        "protocol_by_operation": _table(rows, _protocol_of),
+        "window_count_by_stream": _table(rows, _window_count_of),
+        "windows_by_stream": _table(rows, _window_indices_of),
+        "rounds_by_stream": _table(rows, _round_count_of),
+        "windowed_by_stream": _table(rows, _windowed_of),
+        "batch_preceding_idle_rounds_by_stream": _table(rows, _batch_idle_of),
+        "protocol_by_stream": _table(rows, _protocol_of),
     }
     return tables
 
@@ -679,6 +677,24 @@ def _check_blocker(operation, valid_blocker_ids: set) -> None:
         raise ValueError(
             f"operation {operation.id} has unknown blocking operation {blocker}"
         )
+
+
+def _check_blocker_decodes(operation, blocker) -> None:
+    if blocker.emits_detector_data:
+        return
+    raise ValueError(
+        f"operation {operation.id} is blocked by operation {blocker.id}, "
+        "which emits no detector data, so no decode ever releases it"
+    )
+
+
+def _add_blocking_edge(operation, successors: dict, indegree: dict) -> None:
+    """The blocker before the operation it releases; external ones aside."""
+    blocker = operation.blocked_by
+    if blocker not in successors:
+        return
+    successors[blocker].append(operation.id)
+    indegree[operation.id] += 1
 
 
 def _check_acyclic(by_id: dict, successors: dict, indegree: dict) -> None:

@@ -169,7 +169,7 @@ class BatchDecoder:
             member_ticks.append(ticks)
         ticks = self.law.priced(member_ticks)
         answer = decoding_records.DecodeResult(
-            job.operation_id, job.window_id, member_results=results
+            job.stream_id, job.window_id, member_results=results
         )
         engine.schedule(
             ticks,

@@ -15,7 +15,7 @@ part any reader can follow.
 ## The words this code means precisely
 
 - **round**: one cycle of syndrome measurement on an operation's patch group.
-  The round key is `(operation_id, round_index)`, and rounds are numbered from 1.
+  The round key is `(stream_id, round_index)`, and rounds are numbered from 1.
 - **syndrome**: the classical bits one round measures. They are parity
   checks on the encoded qubits, not the qubits' state.
 - **detection event**: a check whose value changed from the round
@@ -26,8 +26,18 @@ part any reader can follow.
   the machine is an integer number of them.
 - **operation**: one logical operation of the workload. It is the unit a
   workload is written in and the unit the QPU runs.
+- **decode stream**: the run of rounds the decoder reads as one, keyed by
+  its `stream_id` (`decode_identity` in `decsim/records/program.py`). A
+  standalone operation is its own stream; the segments of a feedback
+  stream share one, and in a lattice-surgery run each patch life is one.
+- **region**: a `RoundSpan` of one stream, at most its code's commit
+  rounds long. A growing stream's window commits one region and reads
+  past it, and under a row that reads across couplings it also reads
+  coupled streams' regions (`decsim/windows/region_layout.py`). SWIPER
+  calls it a `SpacetimeRegion` (arXiv:2412.05115,
+  swiper/window_builder.py).
 - **window key, request, service**: the window is
-  `(operation_id, window_index)`; the decode asked for it is a
+  `(stream_id, window_index)`; the decode asked for it is a
   `DecoderRequestKey`, which carries the tier; the run of that decode on
   a unit is a `DecoderServiceKey`.
 - **move, copy, reference**: whether a transfer leaves the bits behind,

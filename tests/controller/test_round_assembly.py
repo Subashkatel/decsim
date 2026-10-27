@@ -36,7 +36,7 @@ PACKING_CLOCK = config.Clock(PACKING_TICKS)
 
 def fragment(round_index, fragment_index=0, bits=(1, 0)):
     return round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=bits,
@@ -101,7 +101,7 @@ def test_waiting_for_another_channel_does_not_block_an_independent_stream() -> (
     assembler = assembler_with(engine, packed, None)
     first = fragment(1)
     second = fragment(2)
-    independent = dataclasses.replace(first, operation_id="independent")
+    independent = dataclasses.replace(first, stream_id="independent")
     assembler.expect_round(first, 1, round_records.WINDOW_INPUT_ROUTE)
     assembler.expect_round(second, 1, round_records.WINDOW_INPUT_ROUTE)
     assembler.expect_round(independent, 1, round_records.WINDOW_INPUT_ROUTE)
@@ -109,7 +109,7 @@ def test_waiting_for_another_channel_does_not_block_an_independent_stream() -> (
     assembler.add(second, round_records.WINDOW_INPUT_ROUTE)
     assembler.add(independent, round_records.WINDOW_INPUT_ROUTE)
 
-    operation_ids = [round.packet.operation_id for round in packed]
+    operation_ids = [round.packet.stream_id for round in packed]
     assert operation_ids == ["independent"]
     assembler.add(first, round_records.WINDOW_INPUT_ROUTE)
     round_indices = [round.packet.round_index for round in packed]
@@ -282,7 +282,7 @@ def test_a_round_joined_from_two_fragments_states_both_event_widths() -> None:
     packed = []
     assembler = assembler_with(engine, packed, None)
     checks = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=1,
         bits=None,
@@ -456,7 +456,7 @@ class _Former:
         by_fragment_index = operator.attrgetter("fragment_index")
         for fragment in sorted(fragments, key=by_fragment_index):
             bits.extend(fragment.bits)
-        self.asked.append((first.operation_id, first.round_index, tuple(bits)))
+        self.asked.append((first.stream_id, first.round_index, tuple(bits)))
         size_bits = len(self.events)
         formed = dataclasses.replace(
             first, bits=self.events, size_bits=size_bits

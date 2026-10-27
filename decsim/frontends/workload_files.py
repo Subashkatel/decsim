@@ -2,8 +2,9 @@
 
 read_workload and write_workload hold the operation list as a
 decsim.ops/1 json, and the physical circuit as a finite .stim with its
-measurement-to-round json or a folder of the four live fragments with
-physical.json. The lowering of what they read is circuit_frontend.py.
+measurement-to-round json, or without one when its detectors carry their
+rounds, or a folder of the four live fragments with physical.json. The
+lowering of what they read is circuit_frontend.py.
 """
 
 import dataclasses
@@ -63,9 +64,9 @@ def read_workload(
 ) -> workload_records.Workload:
     """A maker's two outputs read from disk: the operations and the circuit.
 
-    The physical circuit is a finite .stim with its measurement-to-round
-    json, a folder of the four fragments, or neither; with both, one
-    would go unread.
+    The physical circuit is a finite .stim, with its measurement-to-round
+    json unless its DETECTOR time coordinates give the rounds, a folder of
+    the four fragments, or neither; with both, one would go unread.
     """
     if circuit_path is not None and fragments_path is not None:
         raise ValueError(
@@ -167,10 +168,12 @@ def _operation_from_entry(entry, path: pathlib.Path) -> tuple:
 
 
 def _read_finite_circuit(
-    circuit_path: pathlib.Path, measurement_rounds_path: pathlib.Path
+    circuit_path: pathlib.Path, measurement_rounds_path: Optional[pathlib.Path]
 ) -> workload_records.FiniteCircuit:
-    """The circuit, and its json of each measurement index's round."""
+    """The circuit, and its json of each measurement index's round if any."""
     circuit = stim.Circuit.from_file(circuit_path)
+    if measurement_rounds_path is None:
+        return workload_records.FiniteCircuit(circuit)
     document = _read_json(measurement_rounds_path)
     measurement_rounds = {}
     for index_text, round_index in document.items():
@@ -234,6 +237,8 @@ def _write_finite_circuit(
 ) -> dict:
     circuit_path = folder / "circuit.stim"
     physical.circuit.to_file(str(circuit_path))
+    if not physical.measurement_rounds:
+        return {"circuit": "circuit.stim"}
     schedule = {}
     for index, round_index in physical.measurement_rounds:
         schedule[str(index)] = round_index

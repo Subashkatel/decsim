@@ -41,7 +41,7 @@ def job_for(model, shot, window_id: int = 0) -> decoding_records.DecodeJob:
     syndrome = row_syndrome(model, shot)
     bits = bit_tuple(syndrome)
     payload = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=1,
         bits=bits,
@@ -49,7 +49,7 @@ def job_for(model, shot, window_id: int = 0) -> decoding_records.DecodeJob:
         fragment_index=0,
     )
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=window_id,
         round_count=1,
         detector_error_model=model,

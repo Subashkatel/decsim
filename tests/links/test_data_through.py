@@ -214,7 +214,7 @@ def layer_detectors(round_index: int, total_rounds: int, distance: int) -> int:
 
 def own_range(attribution: dict) -> tuple:
     """A transfer's first and last round in the one operation a run has."""
-    (rounds,) = attribution["rounds_by_operation"]
+    (rounds,) = attribution["rounds_by_stream"]
     return rounds["round_lo"], rounds["round_hi"]
 
 

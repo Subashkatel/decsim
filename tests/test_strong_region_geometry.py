@@ -33,7 +33,7 @@ GEOMETRY = dict(
 def _escalated_window() -> window_records.WindowInfo:
     """One weak window of five commit rounds and five buffer rounds."""
     return window_records.WindowInfo(
-        operation_id=1,
+        stream_id=1,
         window_index=3,
         commit_lo=11,
         commit_hi=15,

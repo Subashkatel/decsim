@@ -171,6 +171,7 @@ def switching_machine(
     cells: Optional[Mapping] = None,
     *,
     online: Optional[Mapping] = None,
+    rate: Optional[Mapping] = None,
     rounds_per_shot: int = ROUNDS_PER_SHOT,
 ) -> graph.Machine:
     """The minimal machine switching from PyMatching to PyMatching.
@@ -178,7 +179,8 @@ def switching_machine(
     A window whose complementary gap is below the threshold is redone on
     the strong tier, on the room clock. online, when given, makes the
     threshold learn from 15 dB with these OnlineThreshold settings over
-    its defaults; else it is a fixed 20 dB.
+    its defaults, and rate with these RateThreshold settings; else it is
+    a fixed 20 dB.
     """
     base = minimal_machine(
         cells, weak_decoder="pymatching", rounds_per_shot=rounds_per_shot
@@ -189,6 +191,10 @@ def switching_machine(
     if online is not None:
         threshold = threshold_sources.OnlineThreshold.Settings(
             threshold_decibels=ONLINE_THRESHOLD_DECIBELS, **online
+        )
+    if rate is not None:
+        threshold = threshold_sources.RateThreshold.Settings(
+            threshold_decibels=ONLINE_THRESHOLD_DECIBELS, **rate
         )
     confidence = complementary.ComplementaryGap.Settings()
     strong_window = strong_window_shapes.RedoWindow.Settings()

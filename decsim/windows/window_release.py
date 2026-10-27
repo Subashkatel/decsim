@@ -7,7 +7,10 @@ courier its boundary, the frame its correction, the stores their spent
 holds, a strong edge its delivered selections. Once a window is final
 only its neighbours read it again: a strong redo pins its face on the
 window before it (escalation/strong_regions.py redo_pin_source), and a
-window hands its boundary on to the next. So in a stream that folds its
+window hands its boundary on to the next. A window that reads across a
+coupling hands it to a window of another stream, which may lag by any
+number of windows, so the courier keeps a boundary until its last
+delivery lands (window_boundaries.py). So in a stream that folds its
 windows (observation.folds_windows) the release lets every window more
 than KEPT_FINAL_WINDOWS behind the stream's final prefix go, and a read
 of one let go raises (WindowPlanner.window_at). A window is never let
@@ -57,7 +60,7 @@ class WindowRelease:
 
     def window_final(self, window: window_records.Window) -> None:
         """A window is final: let its stream's old windows go, if enough."""
-        stream_id = window.operation_id
+        stream_id = window.stream_id
         if not self.planner.has_stream(stream_id):
             return
         final_count = self.results.final_window_count(stream_id)

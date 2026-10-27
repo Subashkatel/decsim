@@ -185,7 +185,7 @@ def weak_decode_stages(machine) -> list:
     """Every decode stage the run timed: window, stage, unit and ticks."""
     stages = []
     for record in machine.observation.stages.records:
-        window_key = (record.operation_id, record.window_id)
+        window_key = (record.stream_id, record.window_id)
         stages.append(
             (
                 window_key,
@@ -236,6 +236,70 @@ def test_unreachable_threshold_escalates_every_window():
     assert transfers.get("weak_to_frame", 0) == 0
 
 
+@pytest.mark.parametrize("seed", [0, 1, 2, 3])
+def test_a_run_that_escalates_every_window_is_the_strong_tier_alone(seed):
+    """Above every gap every window is redone, and the run is strong-only.
+
+    The redo window re-decodes a window's own extent from its
+    predecessor's final boundary (escalation/strong_regions.py), the
+    input the strong tier alone decodes that window from, so the run
+    predicts what its strong-only twin predicts, shot for shot. The twin
+    is the same machine, its windows included, with the strong pool
+    reading every window.
+    """
+    switching = switching_graph(1e6)
+    strong_part = switching.part(machines.STRONG_POOL)
+    without_switching = switching.without_part(machines.SWITCHING)
+    without_strong = without_switching.without_part(machines.STRONG_POOL)
+    weak_only = without_strong.without_part(machines.STRONG_STORE)
+    strong_only = machines.strong_alone(weak_only, strong_part.settings)
+
+    _machine, result = run_shot(switching, seed)
+    _twin, twin_result = run_shot(strong_only, seed)
+
+    assert predictions(result) == predictions(twin_result)
+    assert failures(result) == failures(twin_result)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 3])
+def test_a_slower_strong_tier_changes_when_windows_commit_not_what(seed):
+    """Timing moves a commit's tick, never its answer or its tier.
+
+    The verdict reads the gap and a fixed threshold, and the redo window
+    reads its neighbour's final boundary whenever it starts, so a strong
+    tier a hundred thousand cycles slower per decode escalates the same
+    windows and predicts the same shot. That is why a run's error rates
+    hold while its timing table is still placeholder numbers.
+    """
+    gate = switching_graph(20.0)
+    strong_part = gate.part(machines.STRONG_POOL)
+    engine = strong_part.settings.engine
+    slow_release = engine.release_cycles_per_job + 100_000
+    slow_engine = dataclasses.replace(
+        engine, release_cycles_per_job=slow_release
+    )
+    slow_pool = dataclasses.replace(strong_part.settings, engine=slow_engine)
+    slow = gate.with_record(machines.STRONG_POOL, slow_pool)
+
+    machine, result = run_shot(gate, seed)
+    slow_machine, slow_result = run_shot(slow, seed)
+    tiers = committed_tiers(machine)
+
+    assert predictions(result) == predictions(slow_result)
+    assert tiers == committed_tiers(slow_machine)
+    assert window_records.STRONG_POOL_ID in tiers.values()
+    assert slow_result.fully_done_ticks > result.fully_done_ticks
+
+
+def committed_tiers(machine) -> dict:
+    """The tier whose result each window committed, by window."""
+    windows = machine.observation.windows.windows
+    return {
+        key: window.published_request_key.pool
+        for key, window in windows.items()
+    }
+
+
 def gaps_by_window(requests, weak_tier) -> dict:
     """Every window's gap, keyed by the window it decoded.
 
@@ -250,7 +314,7 @@ def gaps_by_window(requests, weak_tier) -> dict:
         if record.soft_output is None:
             continue
         window_key = (
-            record.request_key.operation_id,
+            record.request_key.stream_id,
             record.request_key.window_id,
         )
         gaps[window_key] = record.soft_output.gap
@@ -401,7 +465,7 @@ def test_the_speculative_decode_waits_for_the_context_it_reads():
         log_lines, "strong(mem1 W0): strong start deferred"
     )
     last_context_round = declared_run.log_tick(
-        log_lines, "strong_buffer: received round 6 of op 1"
+        log_lines, "strong_buffer: received round 6 of stream 1"
     )
     submitted = declared_run.log_tick(
         log_lines,
@@ -456,7 +520,7 @@ def test_a_deferred_strong_job_is_traced_from_its_hold_to_its_release(
 
     assert lanes[slice_row["tid"]] == "Strong tier"
     assert args["request"] == "1:0:strong:1"
-    assert args["waits_for"] == "stored rounds of operation 1"
+    assert args["waits_for"] == "stored rounds of stream 1"
     assert args["outcome"] == "strong context stored in strong syndrome buffer"
     assert args["round_count"] == 6
     assert args["tick"] == expected_held
@@ -658,7 +722,7 @@ def test_a_redone_windows_rounds_leave_the_strong_buffer_when_its_input_lands():
     probe = declared_run.OccupancyProbe(machine.windows.window_manager)
     machine.engine.action_done.connect(probe.observe)
     machine.run()
-    timeline = probe.strong_timeline
+    timeline = probe.landing_timeline
     snapshot = machine.control.pauli_frame.snapshot()
     strong_record = snapshot.records[0]
     expected_committed = decsim_config.microseconds_to_ticks(74.0)

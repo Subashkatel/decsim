@@ -87,9 +87,8 @@ def planning_view(operation):
     return program_records.OperationPlanningView.from_operation(operation)
 
 
-def resolved_geometry(name="surface"):
+def resolved_geometry():
     return program_records.ResolvedCodeGeometry(
-        code_name=name,
         distance=3,
         commit_round_count=2,
         buffer_round_count=1,
@@ -103,7 +102,6 @@ def resolved_operation(operation_id):
         code_geometry=geometry,
         round_count=4,
         round_ticks=config.TICKS_PER_MICROSECOND,
-        spatial_node_count=10,
         syndrome_bits_per_round=8,
     )
 
@@ -123,7 +121,7 @@ def operation_window_plan(operation_id, geometries, dependencies=()):
         if index not in sources:
             exits.append(index)
     return window_records.OperationWindowPlan(
-        operation_id=operation_id,
+        stream_id=operation_id,
         windows=tuple(geometries),
         internal_dependencies=tuple(dependencies),
         entry_window_indices=tuple(entries),
@@ -140,14 +138,13 @@ def window_geometry(commit_lo, commit_hi):
 
 
 class RecordingCode:
-    """A code card that records which patch counts it was sized for."""
+    """A code card with its own cadence."""
 
     name = "surface"
     distance = 3
 
     def __init__(self, cadence=1.25):
         self.cadence = cadence
-        self.spatial_node_calls = []
 
     def rounds_per_logical_cycle(self):
         return 5
@@ -161,21 +158,15 @@ class RecordingCode:
     def buffer_rounds(self):
         return 1
 
-    def spatial_nodes(self, patch_count):
-        self.spatial_node_calls.append(patch_count)
-        return patch_count * 10
-
     def syndrome_bits_per_round(self, patch_count):
         return patch_count * 8
 
 
-class RecordingLayout:
-    """A layout that adds one node per operation and two per patch."""
+class OneCodeLayout:
+    """A layout that gives every operation and every patch the one code."""
 
     def __init__(self, code):
         self.code = code
-        self.operation_calls = []
-        self.patch_calls = []
 
     def code_for_operation(self, operation):
         del operation
@@ -184,16 +175,6 @@ class RecordingLayout:
     def code_for_patch(self, patch_identity):
         del patch_identity
         return self.code
-
-    def spatial_nodes_for(self, operation, *, base_spatial_node_count):
-        self.operation_calls.append(operation.id)
-        return base_spatial_node_count + 1
-
-    def patch_spatial_nodes_for(
-        self, patch_identity, *, base_spatial_node_count
-    ):
-        self.patch_calls.append(patch_identity)
-        return base_spatial_node_count + 2
 
 
 class RecordingScheme:
@@ -224,7 +205,7 @@ def compiled_plan(operations, planned_ids, **overrides):
         code = RecordingCode()
     layout = overrides.pop("layout", None)
     if layout is None:
-        layout = RecordingLayout(code)
+        layout = OneCodeLayout(code)
     scheme = overrides.pop("scheme", None)
     if scheme is None:
         scheme = RecordingScheme()
@@ -257,17 +238,16 @@ def compiled_plan(operations, planned_ids, **overrides):
     )
 
 
-def test_the_plan_sizes_every_operation_and_every_patch_through_the_layout():
-    """One geometry for the run, one node count per operation and patch.
+def test_the_plan_resolves_each_patch_once_in_the_order_it_appears():
+    """One geometry for the run; each patch identity resolved once.
 
-    The card sizes a patch count and the layout may adjust it, so a
-    two-patch operation is priced from the card's two-patch figure and
-    each patch identity is resolved once, in the order it appears.
+    1 and "1" are two identities, and the card's cadence is None, so the
+    run's fallback sets the round.
     """
     first = operation_of(10, qubits=("q0",), patches=(1, "1"))
     second = operation_of(20, qubits=("q1", "q2"))
     code = RecordingCode(cadence=None)
-    layout = RecordingLayout(code)
+    layout = OneCodeLayout(code)
     scheme = RecordingScheme()
 
     plan = compiled_plan(
@@ -279,14 +259,10 @@ def test_the_plan_sizes_every_operation_and_every_patch_through_the_layout():
         fallback_round_microseconds=2.5,
     )
 
-    operation_nodes = [
-        resolved.spatial_node_count for resolved in plan.resolved_operations
-    ]
     patch_identities = [
         resolved.patch_identity for resolved in plan.resolved_patches
     ]
     assert plan.round_ticks == 2_500_000
-    assert operation_nodes == [21, 21]
     assert patch_identities == [1, "1", "q1", "q2"]
     assert scheme.plan_calls == [(10, 4, 2, 1), (20, 4, 2, 1)]
 
@@ -382,6 +358,21 @@ BOUNDARY_EDGE_TWICE = (
     memory(2, decoder_boundary_predecessors=(1, 1)),
     memory(3, predecessors=(2,), blocked_by=2),
 )
+BLOCKING_CYCLE_AFTER_A_ROOT = (
+    memory(0),
+    memory(1, predecessors=(0,), blocked_by=2),
+    memory(2, predecessors=(0,), blocked_by=1),
+)
+BLOCKED_BY_ITS_SUCCESSOR = (
+    memory(0),
+    memory(1, predecessors=(0,), blocked_by=2),
+    memory(2, predecessors=(1,)),
+)
+BLOCKED_BY_NO_DATA = (
+    memory(0),
+    memory(1, predecessors=(0,), emits_detector_data=False),
+    memory(2, predecessors=(1,), blocked_by=1),
+)
 
 
 @pytest.mark.parametrize(
@@ -391,12 +382,18 @@ BOUNDARY_EDGE_TWICE = (
         (SELF_BLOCK_AFTER_A_ROOT, "blocked by itself"),
         (BOUNDARY_CYCLE, "cycle"),
         (BOUNDARY_EDGE_TWICE, "more than once"),
+        (BLOCKING_CYCLE_AFTER_A_ROOT, "cycle"),
+        (BLOCKED_BY_ITS_SUCCESSOR, "cycle"),
+        (BLOCKED_BY_NO_DATA, "emits no detector data"),
     ],
     ids=[
         "cycle after a root",
         "self block after a root",
         "boundary cycle",
         "boundary edge twice",
+        "blocking cycle after a root",
+        "blocked by its successor",
+        "blocked by an operation with no data",
     ],
 )
 def test_a_graph_that_waits_forever_after_a_root_is_refused_at_build(
@@ -509,13 +506,13 @@ def overlapping_successor_plan():
     third = window_records.Window(3, 0, 1, 2, 3, 3)
     return window_records.WindowPlan(
         windows={(1, 0): first, (2, 0): second, (3, 0): third},
-        window_count={1: 1, 2: 1, 3: 1},
-        op_windows={1: [0]},
-        successors={1: [2, 3], 2: [3], 3: []},
-        rounds_by_operation={1: 5, 2: 3, 3: 3},
+        window_count_by_stream={1: 1, 2: 1, 3: 1},
+        windows_by_stream={1: [0]},
+        successors_by_stream={1: [2, 3], 2: [3], 3: []},
+        rounds_by_stream={1: 5, 2: 3, 3: 3},
         total_windows=3,
-        windowed_by_operation={1: True, 2: True, 3: True},
-        batch_preceding_idle_rounds_by_operation={1: False, 2: False, 3: False},
+        windowed_by_stream={1: True, 2: True, 3: True},
+        batch_preceding_idle_rounds_by_stream={1: False, 2: False, 3: False},
     )
 
 
@@ -570,13 +567,13 @@ def chained_sliding_windows():
         windows[(1, index)] = window
     return window_records.WindowPlan(
         windows=windows,
-        window_count={1: 4},
-        op_windows={1: [0, 1, 2, 3]},
-        successors={1: []},
-        rounds_by_operation={1: 15},
+        window_count_by_stream={1: 4},
+        windows_by_stream={1: [0, 1, 2, 3]},
+        successors_by_stream={1: []},
+        rounds_by_stream={1: 15},
         total_windows=4,
-        windowed_by_operation={1: True},
-        batch_preceding_idle_rounds_by_operation={1: False},
+        windowed_by_stream={1: True},
+        batch_preceding_idle_rounds_by_stream={1: False},
     )
 
 
@@ -618,13 +615,13 @@ def one_window_with_a_successor():
     window = window_records.Window(1, 0, 3, 4, 6, 7, buffer_lo=2)
     return window_records.WindowPlan(
         windows={(1, 0): window},
-        window_count={1: 1},
-        op_windows={1: [0]},
-        successors={1: [2], 2: []},
-        rounds_by_operation={1: 7, 2: 4},
+        window_count_by_stream={1: 1},
+        windows_by_stream={1: [0]},
+        successors_by_stream={1: [2], 2: []},
+        rounds_by_stream={1: 7, 2: 4},
         total_windows=1,
-        windowed_by_operation={1: True},
-        batch_preceding_idle_rounds_by_operation={1: False},
+        windowed_by_stream={1: True},
+        batch_preceding_idle_rounds_by_stream={1: False},
     )
 
 

@@ -103,7 +103,7 @@ def test_the_crossing_is_billed_to_the_frame_to_controller_path():
 
     (record,) = delivered
     assert record.path == transfer_records.FRAME_TO_CONTROLLER
-    assert record.attribution.operation_id == 7
+    assert record.attribution.owner_id == 7
 
 
 def test_with_no_fabric_the_decision_is_at_the_controller_at_once():

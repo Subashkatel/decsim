@@ -132,3 +132,63 @@ as its source.
 
 An assignment that only changes a value the cells share, such as
 `--set weak.unit_count=2` under a distance sweep, is kept.
+
+## 6. Fit the per-round rate over several lengths
+
+The per-round rate of one length mixes in the flip that preparation
+and the final readout add once. Tan et al. remove it with a fit over
+several lengths: 1 - 2 P(n) = (1 - 2 q)(1 - 2 e)^n (2209.09219,
+equations S3 to S6). Sweep the length as an axis:
+
+```python
+grid={
+    "workload.rounds_per_distance": [None],
+    "workload.rounds": [6, 12, 18, 24, 30],
+},
+```
+
+Then fit the folded counts of `sweep.csv`, one task for each length:
+
+```python
+rows = list(csv.DictReader(open("results/sweep.csv")))
+fit = failure_statistics.per_round_rate_over_lengths(
+    [int(row["workload.rounds"]) for row in rows],
+    [int(row["prefix_failures"]) for row in rows],
+    [int(row["prefix_scored_shots"]) for row in rows],
+)
+```
+
+`fit.per_round_rate` is e, `fit.low` and `fit.high` bound its 95
+percent interval, and `fit.boundary_rate` is q
+(`decsim/experiments/failure_statistics.py`). A length with no failure,
+or with failures at one half or above, is refused. Tan et al. fit the
+lengths from 2 (d + 1) to 5 (d + 1) rounds, and leave out the shorter
+ones, where the decay is not yet steady. With several patches, a shot
+fails when any patch does, so the fit gives the rate of that union.
+
+## 7. Compare a hybrid with its two decoders on the same shots
+
+A hybrid decoder pairs a fast decoder with a strong one. Run the fast
+decoder alone, the strong one alone, and the pair on the same seeds,
+as one axis of the grid. Then pair the rows of `shots.csv` by seed:
+
+```python
+rows = list(csv.DictReader(open("results/shots.csv")))
+fast = paired_shots.failures_by_seed(rows, {"decoding": "fast"})
+strong = paired_shots.failures_by_seed(rows, {"decoding": "strong"})
+pair = paired_shots.failures_by_seed(rows, {"decoding": "pair"})
+repairs = paired_shots.paired_repairs(fast, strong, pair)
+```
+
+`repairs.repaired` counts the shots the fast decoder alone failed and
+the pair did not, `repairs.broken` the reverse, and `repairs.missed`
+the shots the pair failed and the strong decoder alone did not
+(`decsim/experiments/paired_shots.py`). The pair fails broken -
+repaired more times than the fast decoder alone, and `repairs.p_value`
+is McNemar's exact test of those two counts. Only the shots all three
+runs scored are compared.
+
+`repairs.best_of_two_failures` counts the shots that the fast decoder
+alone and the strong one alone both failed. A pair that chose the
+right decoder for every shot fails only these shots, so this count is
+the lowest line for the pair: plot it beside `repairs.pair_failures`.

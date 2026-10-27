@@ -1,11 +1,12 @@
 """The issuer: an admitted operation becomes one command at the next boundary.
 
-A preloaded command (a program root, an ordinary successor) starts at
-the QPU's next cycle boundary and the runtime hears that boundary through
-on_started (SimPy's callback on the event, simpy/core.py step()); a
-feedback-blocked command pays the decision-to-pulse cost (17 ticks here)
-and the controller_to_qpu crossing first. The operation claims its
-patches' idle rounds when it starts, not here (test_idle_rounds.py).
+Every command is queued ahead and starts at the QPU's next cycle
+boundary, and the runtime hears that boundary through on_started
+(SimPy's callback on the event, simpy/core.py step()); a feedback-blocked
+one too, since its release paid the decision-to-pulse cost and the
+controller_to_qpu crossing before it was issued
+(test_instruction_output.py). The operation claims its patches' idle
+rounds when it starts, not here (test_idle_rounds.py).
 """
 
 import dataclasses
@@ -19,7 +20,6 @@ import decsim.engine as engine_module
 import decsim.links.fabric as fabric_module
 import decsim.observe.round_events as round_events
 import decsim.records.program as program_records
-import decsim.records.transfers as transfer_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph_layout as graph_layout
 import tests.experiments.run_files as run_files
@@ -89,7 +89,13 @@ def issuer_with(engine, qpu, idle_rounds, recorder):
     return issuer
 
 
-def test_a_feedback_blocked_operation_pays_the_pulse_cost_before_it_starts():
+def test_a_released_operation_starts_at_the_next_boundary():
+    """The release paid the output path, so the issue pays it no more.
+
+    A control processor queues the conditional pulse ahead and the
+    condition only gates it (eQASM 1808.02449 Sec. 3.5), so the branch
+    cost is the decision's, paid once.
+    """
     engine = engine_module.Engine()
     qpu = RecordingQpu()
     idle_rounds = RecordingIdleRounds()
@@ -104,15 +110,12 @@ def test_a_feedback_blocked_operation_pays_the_pulse_cost_before_it_starts():
         started.append((engine.now, boundary))
 
     issuer.issue_operation(operation, on_started)
-    issued_before_the_pulse = list(qpu.issued)
-    to_qpu = issuer.output.link.expected_delay_ticks(
-        transfer_records.CONTROLLER_TO_QPU, None, PULSE_TICKS
-    )
     engine.run()
 
-    assert issued_before_the_pulse == []
-    assert started == [(PULSE_TICKS + to_qpu, BOUNDARY_TICK)]
+    (command,) = qpu.issued
+    assert command.operation is operation
+    assert started == [(0, BOUNDARY_TICK)]
     kinds_and_ticks = [
         (event.kind, event.tick) for event in recorder.output_events
     ]
-    assert kinds_and_ticks == [("CONTROL_PULSE_COMMAND_ISSUED", PULSE_TICKS)]
+    assert kinds_and_ticks == [("PRELOADED_COMMAND", 0)]

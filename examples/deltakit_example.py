@@ -266,10 +266,6 @@ class RepetitionMemory:
         """The whole-shot problem needs no look-ahead."""
         return 0
 
-    def spatial_nodes(self, patch_count: int) -> int:
-        """Count the check nodes in one repetition round."""
-        return self.syndrome_bits_per_round(patch_count)
-
     def syndrome_bits_per_round(self, patch_count: int) -> int:
         """One stabilizer measurement per neighbouring data pair."""
         checks_per_patch = self.distance - 1

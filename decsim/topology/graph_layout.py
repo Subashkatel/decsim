@@ -5,15 +5,16 @@ and edge goes by its part's name, and each hop by the parts at its
 ends, <source part>_to_<target part>, with its role
 (records/routes.py HopRole): the wire's own link prices it, else the
 machine's fabric rule, on the reference card's payload rule for its
-role. The pools form a tree: one pool decodes
-the planner's windows, the entry, and every other pool is the target of
-one switching part, an escalate edge, whose results come from another
-pool. They are laid out entry first, then each edge's target in the
-order the switching parts are written.
+role. An entry pool decodes the planner's windows: the one pool no
+edge reaches, or each pool a router feeds. Every other pool is the
+target of one or more switching parts, escalate edges, each from
+another pool, and each pool leaves by at most one edge, so a window
+climbs one line from its entry pool. They are laid out entries first,
+then each edge's target, once, in the order the edges are reached.
 
 The entry pool reads the store the controller writes; an edge's target
 reads its own store, which takes an escalated window's rounds from the
-store its source pool reads. A router between the entry store and
+store each source pool reads. A router between the entry store and
 several pools makes each of them an entry pool: they share that store,
 each over a hop of its own, and the first wired is the entry
 (windows/routers.py). Two pools no edge joins trade boundaries on a hop
@@ -76,6 +77,7 @@ _POOL_KIND = "decoder_pool"
 _STORE_KIND = "syndrome_buffer"
 _SWITCHING_KIND = "switching"
 _ROUTER_KIND = "router"
+_DEVICE_KIND = "device"
 
 
 def layout_of(machine: graph.Machine) -> layout_module.Layout:
@@ -87,19 +89,22 @@ def layout_of(machine: graph.Machine) -> layout_module.Layout:
     shape = _shape(machine)
     card = _card(shape)
     frame_name = _frame_name(machine)
+    frame_site = _held_site(machine, "pauli_frame")
     if not shape.pools:
         idle = _idle_pool(frame_name)
-        return layout_module.Layout((idle,), (), (), card)
+        return layout_module.Layout(
+            (idle,), (), (), card, frame_site=frame_site
+        )
     pools = []
     stores = []
     for pool in shape.pools:
         pool_plan = _pool_plan(pool, shape, frame_name)
         pools.append(pool_plan)
-        if pool in shape.entries[1:]:
+        if not _is_first_reader(shape, pool):
             continue
         store_plan = _store_plan(shape, pool)
+        store_plan = _with_other_readers(store_plan, shape)
         stores.append(store_plan)
-    stores[0] = _with_other_readers(stores[0], shape)
     edges = []
     for edge in shape.edges:
         carried_from = shape.store_by_pool[edge.source.name]
@@ -108,6 +113,7 @@ def layout_of(machine: graph.Machine) -> layout_module.Layout:
         edges.append(edge_plan)
     router = shape.router_settings()
     entry_count = len(shape.entries)
+    devices = _devices(machine, shape)
     return layout_module.Layout(
         tuple(pools),
         tuple(stores),
@@ -115,6 +121,45 @@ def layout_of(machine: graph.Machine) -> layout_module.Layout:
         card,
         router=router,
         entry_count=entry_count,
+        frame_site=frame_site,
+        devices=devices,
+    )
+
+
+def _devices(machine: graph.Machine, shape: "_Shape") -> tuple:
+    """Each device part, at its site: one per site, and a pool there."""
+    pool_sites = {_site(pool) for pool in shape.pools}
+    plans = []
+    sites = []
+    for part in machine.parts_of(_DEVICE_KIND):
+        site = _site(part)
+        _refuse_a_second_device_at(site, sites, part)
+        _refuse_a_device_with_no_pool(site, pool_sites, part)
+        sites.append(site)
+        plan = layout_module.DevicePlan(part.name, site, part.settings)
+        plans.append(plan)
+    return tuple(plans)
+
+
+def _refuse_a_second_device_at(
+    site: str, sites: list, part: graph.Part
+) -> None:
+    if site not in sites:
+        return
+    raise graph.GraphError(
+        f"device {part.name} sits at {site}, where another device already "
+        "sits: a site's pools share one device's slots"
+    )
+
+
+def _refuse_a_device_with_no_pool(
+    site: str, pool_sites: set, part: graph.Part
+) -> None:
+    if site in pool_sites:
+        return
+    raise graph.GraphError(
+        f"device {part.name} sits at {site}, where no pool sits: a device's "
+        "slots are shared by the pools placed at its site"
     )
 
 
@@ -154,11 +199,6 @@ class _Shape:
             return None
         return self.router.settings
 
-    def entry_store(self) -> graph.Part:
-        """The store the entry pool reads."""
-        entry = self.entry
-        return self.store_by_pool[entry.name]
-
 
 def _shape(machine: graph.Machine) -> _Shape:
     """The graph's pools from its entry, its edges, each pool's store."""
@@ -173,8 +213,9 @@ def _shape(machine: graph.Machine) -> _Shape:
     if not pools:
         return _Shape(machine, (), (), {}, ())
     entries = _entry_pools(machine, pools, edges, router)
+    for entry in entries:
+        _refuse_a_chain_that_comes_back(entry, edges)
     ordered_pools, ordered_edges = _from_the_entries(entries, pools, edges)
-    _refuse_an_edge_from_a_later_entry(entries, ordered_edges)
     store_by_pool = {}
     for pool in ordered_pools:
         store_by_pool[pool.name] = _store_read_by(machine, pool)
@@ -263,18 +304,57 @@ def _routed_entries(
     """The pools the router feeds, once each pool no edge reaches is one."""
     routed = _routed_pools(machine, router)
     _refuse_entries_the_router_misses(entries, routed)
+    _refuse_a_routed_pool_an_edge_reaches(entries, routed)
     return routed
 
 
 def _routed_pools(machine: graph.Machine, router: graph.Part) -> tuple:
-    """The pools the router's windows port reaches, in wire order."""
+    """The pools the router's windows port reaches, in wire order.
+
+    A router after a store feeds the pools, which all read that store; a
+    router before the stores feeds a store per pool, each read by its
+    pool, as DecoNet's router routes "measurement data to the
+    appropriate decoder instances" (2504.11805 Sec. VI-B.2).
+    """
     windows = f"{router.name}.windows"
     routed = []
+    fed_kinds = set()
     for wire in machine.wires:
-        if wire.source == windows:
-            pool = _part_at(machine, wire.target)
-            routed.append(pool)
+        if wire.source != windows:
+            continue
+        fed = _part_at(machine, wire.target)
+        fed_kinds.add(fed.kind.name)
+        pool = _pool_fed_through(machine, fed)
+        routed.append(pool)
+    _refuse_a_router_feeding_stores_and_pools(router, fed_kinds)
     return tuple(routed)
+
+
+def _pool_fed_through(machine: graph.Machine, fed: graph.Part) -> graph.Part:
+    """The pool a router's wire reaches: the pool, or the store's reader."""
+    if fed.kind.name == _POOL_KIND:
+        return fed
+    reads = f"{fed.name}.reads"
+    for wire in machine.wires:
+        if wire.source == reads:
+            return _part_at(machine, wire.target)
+    raise graph.GraphError(
+        f"the router feeds the store {fed.name}, which no pool reads: a "
+        "router before the stores feeds one store per entry pool"
+    )
+
+
+def _refuse_a_router_feeding_stores_and_pools(
+    router: graph.Part, fed_kinds: set
+) -> None:
+    """A router feeds pools after one store, or stores; never both."""
+    if len(fed_kinds) < 2:
+        return
+    raise graph.GraphError(
+        f"{router.name}.windows reaches both stores and pools: a router "
+        "sits after the one store its pools read, or before a store per "
+        "pool"
+    )
 
 
 def _refuse_entries_the_router_misses(entries: list, routed: tuple) -> None:
@@ -289,31 +369,70 @@ def _refuse_entries_the_router_misses(entries: list, routed: tuple) -> None:
     )
 
 
+def _refuse_a_routed_pool_an_edge_reaches(entries: list, routed: tuple) -> None:
+    """A pool is an entry pool or a target, never both.
+
+    An entry pool's edge out joins no results of its own, so a pool both
+    fed by the router and reached by an edge would pass the results it
+    decodes as a target on unjoined; no source routes windows to a pool
+    another pool also escalates to.
+    """
+    entry_names = {pool.name for pool in entries}
+    reached = [pool.name for pool in routed if pool.name not in entry_names]
+    if not reached:
+        return
+    raise graph.GraphError(
+        f"the pools {reached} are fed by the router and reached by an "
+        "escalate edge: a pool decodes the planner's windows or another "
+        "pool's escalations, not both"
+    )
+
+
 def _from_the_entries(entries: tuple, pools: list, edges: list) -> tuple:
-    """The pools and edges from the entries, each edge in written order."""
+    """The pools from the entries, breadth first, each pool and edge once.
+
+    A target several edges reach, a strong pool shared by weak ones, is
+    laid out where the first of them reaches it.
+    """
     ordered_pools = list(entries)
     ordered_edges = []
     for pool in ordered_pools:
         leaving = _edges_leaving(pool, edges)
         ordered_edges.extend(leaving)
         for edge in leaving:
-            ordered_pools.append(edge.target)
+            _add_once(ordered_pools, edge.target)
     _refuse_the_unreached(entries[0], pools, ordered_pools)
     return tuple(ordered_pools), tuple(ordered_edges)
 
 
-def _refuse_an_edge_from_a_later_entry(entries: tuple, edges: tuple) -> None:
-    """Only the first entry pool escalates yet."""
-    later = {pool.name for pool in entries[1:]}
-    for edge in edges:
-        if edge.source.name not in later:
-            continue
-        raise graph.GraphError(
-            f"{edge.part.name} escalates from {edge.source.name}, an entry "
-            "pool past the first: an escalate edge from such a pool is not "
-            "implemented yet, its boundaries being the first's; "
-            f"{refusals.REFUSALS}"
-        )
+def _refuse_a_chain_that_comes_back(entry: graph.Part, edges: list) -> None:
+    """A chain from an entry pool passes each pool once.
+
+    Chains may share a target (fan-in), so a pool can be reached twice,
+    but a chain that comes back to a pool it passed would never end:
+    every chain in the sources ends at its deepest decoder (Toshio
+    2510.25222 Sec. III; Tour de gross 2506.03094).
+    """
+    passed = [entry.name]
+    leaving = _edges_leaving(entry, edges)
+    while leaving:
+        # a pool's escalate port takes one wire, so one edge leaves it
+        (edge,) = leaving
+        target = edge.target
+        if target.name in passed:
+            first = passed.index(target.name)
+            circle = passed[first:]
+            raise graph.GraphError(
+                f"the pools {circle} escalate in a circle: the chain from "
+                f"{entry.name} comes back to {target.name} and never ends"
+            )
+        passed.append(target.name)
+        leaving = _edges_leaving(target, edges)
+
+
+def _add_once(ordered_pools: list, pool: graph.Part) -> None:
+    if pool not in ordered_pools:
+        ordered_pools.append(pool)
 
 
 def _edges_leaving(pool: graph.Part, edges: list) -> list:
@@ -376,6 +495,27 @@ def _site(part: graph.Part) -> str:
     return part.placed
 
 
+def _held_site(machine: graph.Machine, kind_name: str) -> str:
+    """Where the part of a kind held once sits; the fridge with none."""
+    parts = machine.parts_of(kind_name)
+    if not parts:
+        return fabrics.FRIDGE
+    return _site(parts[0])
+
+
+def _site_variant(pool_site: str, frame_site: str) -> str:
+    """How the reference card prices a pool's own hops: by the frame or not.
+
+    The card has two rows for an answer or a same-pool hop: a pool on
+    the board with the frame (variant fridge) and one a hop away from it
+    (variant host), so a pool at any other site is priced as one a hop
+    away; a fabric that knows the site prices it (fabrics.SiteLinks).
+    """
+    if pool_site == frame_site:
+        return fabrics.FRIDGE
+    return fabrics.HOST
+
+
 def _hop(source_name: str, target_name: str) -> str:
     return route_records.hop_between(source_name, target_name)
 
@@ -383,16 +523,33 @@ def _hop(source_name: str, target_name: str) -> str:
 def _intake_shape(shape: _Shape, pool: graph.Part) -> str:
     """How a pool's store takes its rounds.
 
-    The controller writes the entry store, unless the first entry pool
-    sits on the host, which reads a store the rounds land in; an edge's
-    target store takes its rounds as they land.
+    The controller writes an entry store, unless the store's first
+    reader sits away from the controller, where it reads a store the
+    rounds land in; an edge's target store takes its rounds as they
+    land.
     """
     if pool not in shape.entries:
         return receiver_module.LANDED
-    pool = shape.entry
-    if _site(pool) == fabrics.HOST:
+    store = shape.store_by_pool[pool.name]
+    reader = _first_reader_of(shape, store)
+    controller_site = _held_site(shape.machine, "controller")
+    if _site(reader) != controller_site:
         return receiver_module.LANDED
     return receiver_module.WRITTEN
+
+
+def _first_reader_of(shape: _Shape, store: graph.Part) -> graph.Part:
+    """The first pool laid out that reads the store, whose plan it is."""
+    for pool in shape.pools:
+        if shape.store_by_pool[pool.name] is store:
+            return pool
+    raise RuntimeError(f"no pool reads the store {store.name}")
+
+
+def _is_first_reader(shape: _Shape, pool: graph.Part) -> bool:
+    """Whether no pool laid out before this one reads its store."""
+    store = shape.store_by_pool[pool.name]
+    return _first_reader_of(shape, store) is pool
 
 
 def _controller_name(machine: graph.Machine) -> str:
@@ -465,14 +622,12 @@ def _store_plan(shape: _Shape, pool: graph.Part) -> layout_module.StorePlan:
     intake_shape = _intake_shape(shape, pool)
     controller_name = _controller_name(shape.machine)
     write_hop = _hop(controller_name, store.name)
-    controller_write = receiver_module.Hop(write_hop, CONTROLLER_LABEL)
-    escalation = _escalation_hop(shape, pool)
+    controller_write = transfer_records.StoreHop(write_hop, CONTROLLER_LABEL)
     intake = receiver_module.StoreIntake(
         name=store.name,
         seat=store.name,
         shape=intake_shape,
         controller_write=controller_write,
-        escalation=escalation,
     )
     pool_settings = pool.settings
     read_hop = _hop(store.name, pool.name)
@@ -491,13 +646,16 @@ def _store_plan(shape: _Shape, pool: graph.Part) -> layout_module.StorePlan:
 
 
 def _with_other_readers(
-    entry_store: layout_module.StorePlan, shape: _Shape
+    store_plan: layout_module.StorePlan, shape: _Shape
 ) -> layout_module.StorePlan:
-    """The entry store, read by each entry pool past the first too."""
+    """The store, read by every other entry pool a router feeds from it."""
     readers = []
-    for pool in shape.entries[1:]:
+    for pool in shape.entries:
+        store = shape.store_by_pool[pool.name]
+        if store.name != store_plan.name or pool.name == store_plan.reader:
+            continue
         pool_id = window_records.PoolId(pool.name)
-        read_hop = _hop(entry_store.name, pool.name)
+        read_hop = _hop(store_plan.name, pool.name)
         reader = layout_module.StoreReader(
             pool=pool_id,
             read_hop=read_hop,
@@ -505,23 +663,7 @@ def _with_other_readers(
             reads_in_place=not pool.settings.copies_input,
         )
         readers.append(reader)
-    return dataclasses.replace(entry_store, other_readers=tuple(readers))
-
-
-def _escalation_hop(
-    shape: _Shape, pool: graph.Part
-) -> Optional[receiver_module.Hop]:
-    """The hop an escalated region lands in a target's store over.
-
-    The region is carried from the store its source pool reads.
-    """
-    entering = [edge for edge in shape.edges if edge.target.name == pool.name]
-    if not entering:
-        return None
-    edge = entering[0]
-    carried_from = shape.store_by_pool[edge.source.name]
-    forward = _hop(edge.source.name, pool.name)
-    return receiver_module.Hop(forward, carried_from.name)
+    return dataclasses.replace(store_plan, other_readers=tuple(readers))
 
 
 def _edge_plan(
@@ -608,22 +750,26 @@ def _pool_routes(
     intake_shape = _intake_shape(shape, pool)
     pool_site = _site(pool)
     store_site = _site(store)
+    frame_site = _held_site(shape.machine, "pauli_frame")
+    variant = _site_variant(pool_site, frame_site)
     read_role = route_records.HopRole(route_records.READ, intake_shape)
-    answer_role = route_records.HopRole(route_records.ANSWER, pool_site)
-    same_pool_role = route_records.HopRole(route_records.SAME_POOL, pool_site)
+    answer_role = route_records.HopRole(route_records.ANSWER, variant)
+    same_pool_role = route_records.HopRole(route_records.SAME_POOL, variant)
     read = _route((store.name, pool.name), (store_site, pool_site), read_role)
     answer = _route(
-        (pool.name, frame_name), (pool_site, fabrics.FRIDGE), answer_role
+        (pool.name, frame_name), (pool_site, frame_site), answer_role
     )
     same_pool = _route(
         (pool.name, pool.name), (pool_site, pool_site), same_pool_role
     )
-    if pool in shape.entries[1:]:
-        # the entry store is written once, on the first entry's route
+    if not _is_first_reader(shape, pool):
+        # a store several pools read is written once, on its first
+        # reader's route
         return (read, answer, same_pool)
     write_role = route_records.HopRole(route_records.WRITE, intake_shape)
+    controller_site = _held_site(shape.machine, "controller")
     write = _route(
-        (controller_name, store.name), (fabrics.FRIDGE, store_site), write_role
+        (controller_name, store.name), (controller_site, store_site), write_role
     )
     return (write, read, answer, same_pool)
 
@@ -705,7 +851,8 @@ def _wire_links(shape: _Shape) -> dict:
 
     A wire between parts held once prices its shared hop; a wire to or
     from a switching part prices its edge's forward hop, and one from a
-    router the read of the store that feeds it.
+    router the hop from what feeds it: the read of the store before it,
+    or the controller's write into each store after it.
     """
     machine = shape.machine
     target_by_switching = {}
@@ -714,9 +861,8 @@ def _wire_links(shape: _Shape) -> dict:
         target_by_switching[edge.part.name] = edge.target.name
         source_by_switching[edge.part.name] = edge.source.name
     if shape.router is not None:
-        # a wire from the router prices the entry store's read
-        entry_store = shape.entry_store()
-        source_by_switching[shape.router.name] = entry_store.name
+        feed = _router_feed(machine, shape.router)
+        source_by_switching[shape.router.name] = feed.name
     links = {}
     for wire in machine.wires:
         if wire.link is None:
@@ -728,6 +874,15 @@ def _wire_links(shape: _Shape) -> dict:
         hop = _wire_hop(source, target, source_name, target_name)
         links[hop] = wire.link
     return links
+
+
+def _router_feed(machine: graph.Machine, router: graph.Part) -> graph.Part:
+    """The part whose wire reaches the router's rounds port."""
+    rounds = f"{router.name}.rounds"
+    for wire in machine.wires:
+        if wire.target == rounds:
+            return _part_at(machine, wire.source)
+    raise RuntimeError(f"{rounds} has no wire past the unbound-port check")
 
 
 def _wire_hop(

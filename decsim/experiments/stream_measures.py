@@ -21,6 +21,11 @@ number), the windows by tier and by status, the escalated windows, the
 reaction growth rates (an exact least-squares fit in ticks), the
 deadline misses, the end-of-stream reaction and the throughput. The
 per-round latencies (cwb_per_round and the stalls) are not folded.
+
+Past measure_shot, it samples the escalated share as the stream goes:
+every hundredth committed window, the windows committed so far, the
+escalated among them and the window's first committed round, so a
+stream whose noise drifts shows its share before and after.
 """
 
 import collections
@@ -45,6 +50,8 @@ import decsim.records.windows as window_records
 KEPT_WINDOW_WIDTHS = 4
 # the windows read between two lettings-go of the rounds no window reads
 ROUNDS_LET_GO_EVERY = 64
+# the committed windows between two samples of the escalated share
+ESCALATION_SAMPLED_EVERY = 100
 
 
 @dataclasses.dataclass(frozen=True)
@@ -78,12 +85,25 @@ class StreamMeasurement:
     throughput_rounds_per_us: float
     max_queued_windows: int
     pools: dict
+    # each pool's own load and windows, the PoolRow a shot's
+    # shot_pools.csv holds, one dict a pool in layout order
+    pool_rows: list
     backlog_peak_rounds: Optional[int]
     referee_windows_checked: int
     referee_window_disagreements: int
     link_totals: dict
     statistics: list
     statistic_values: list
+    escalation_series: list
+    # one row a checkpoint round, when the run closes checkpoints
+    # (observe/checkpoints.py Checkpoints.rows)
+    checkpoints: list
+    # one row a path, when the run checks each window's two answers
+    # (observe/answer_checks.py AnswerChecks.rows)
+    answer_checks: list
+    # one row a static threshold, when the run keeps static chains
+    # (observe/answer_checks.py AnswerChecks.threshold_rows)
+    threshold_checks: list
 
 
 class StreamMeasures:
@@ -121,7 +141,7 @@ class StreamMeasures:
     def round_read_out(self, readout: round_records.QPUReadout) -> None:
         """The QPU read out one round: the generation span and the count."""
         self._readout_now()
-        self.folds.count_round(readout.operation_id, readout.round_index)
+        self.folds.count_round(readout.stream_id, readout.round_index)
 
     def idle_round_read_out(
         self,
@@ -162,9 +182,9 @@ class StreamMeasures:
         values = folds.value_summaries()
         tiers = dict(folds.window_tiers)
         end_reaction = folds.end_of_stream_reaction()
-        weak_pool, strong_pool = self.tier_pools
-        weak_growth = folds.growth_rate(weak_pool)
-        strong_growth = folds.growth_rate(strong_pool)
+        weak_pools, strong_pools = self.tier_pools
+        weak_growth = folds.growth_rate(weak_pools)
+        strong_growth = folds.growth_rate(strong_pools)
         missed, first_miss = folds.deadline_misses()
         service_us = config_module.ticks_to_microseconds(
             folds.strong_service_ticks
@@ -188,6 +208,7 @@ class StreamMeasures:
             "strong_service_sum_us": service_us,
             "throughput_windows_per_us": windows_per_us,
             "throughput_rounds_per_us": rounds_per_us,
+            "escalation_series": list(folds.counts.escalation_series),
         }
 
     def _run_numbers(
@@ -201,8 +222,7 @@ class StreamMeasures:
         missed_truth = _logical_failure(owners)
         managers = run_statistics.groups[decoders_part.MANAGERS_PATH]
         audit = observation.referee_audit
-        pools = self._pools()
-        pool_numbers = dataclasses.asdict(pools)
+        pool_numbers, pool_row_numbers = self._pool_numbers()
         link_totals = measure.link_totals(result.link_traffic)
         rows = run_statistics.rows()
         value_counts = run_statistics.value_counts()
@@ -214,12 +234,16 @@ class StreamMeasures:
             "is_scored": is_scored,
             "max_queued_windows": managers.queued.peak,
             "pools": pool_numbers,
+            "pool_rows": pool_row_numbers,
             "backlog_peak_rounds": backlog_peak,
             "referee_windows_checked": audit.windows_checked,
             "referee_window_disagreements": audit.window_disagreements,
             "link_totals": link_totals,
             "statistics": rows,
             "statistic_values": value_counts,
+            "checkpoints": _checkpoint_rows(observation),
+            "answer_checks": _answer_check_rows(observation),
+            "threshold_checks": _threshold_check_rows(observation),
         }
 
     def _connect(self, machine: machine_module.Machine) -> None:
@@ -227,6 +251,8 @@ class StreamMeasures:
         sources = window_manager.window_sources()
         sources.window_final.connect(self.window_final)
         machine.links.trace.transfer_delivered.connect(self.transfer_delivered)
+        run_statistics = machine.observation.statistics
+        run_statistics.on_reset(self.folds.restart_pool_commits)
         frame = machine.control.pauli_frame
         if frame is not None:
             frame.trace.correction_committed.connect(self.correction_committed)
@@ -247,10 +273,11 @@ class StreamMeasures:
         """A window the frame committed: its decode, then its latencies."""
         stages = self.machine.observation.stages
         decode = measure.committed_decode(stages, frame_record)
-        _weak_pool, strong_pool = self.tier_pools
-        if decode.tier == strong_pool:
+        _weak_pools, strong_pools = self.tier_pools
+        if decode.tier in strong_pools:
             self.folds.fold_strong(decode)
         self.folds.note_commit(frame_record)
+        self.folds.sample_escalation(window)
         if window.t_done is None:
             return
         send = measure.last_required_send_ticks(decode, self.transfers.qpu_send)
@@ -267,19 +294,18 @@ class StreamMeasures:
         frame_record: decoding_records.PauliFrameCommitRecord,
     ) -> measure.WindowSample:
         """The window's latencies off its own keys of the running index."""
-        _operation_id, window_id = window.key
         index = self.transfers
         link_delay = index.link_delays_of(window.key)
-        input_hop = index.input_hops_of(window_id)
+        input_hop = index.input_hops_of(window.key)
         reads = measure.TransferReads(
             link_delay, input_hop, index.qpu_send, index.answer_send
         )
         stages = self.machine.observation.stages
         layout = self.machine.layout
         input_hops = layout.input_hop_by_pool()
-        escalation_hop = layout.entry_escalation_hop()
+        escalation_hops = layout.entry_escalation_hops()
         return measure.window_sample(
-            window, frame_record, stages, reads, input_hops, escalation_hop
+            window, frame_record, stages, reads, input_hops, escalation_hops
         )
 
     def _let_go(self, window: window_records.Window) -> None:
@@ -291,32 +317,42 @@ class StreamMeasures:
         self.folds.note_width(window.round_count)
         if self.folds.folded_windows % ROUNDS_LET_GO_EVERY:
             return
-        self._let_go_of_rounds(window.operation_id)
+        self._let_go_of_rounds(window.stream_id)
 
-    def _let_go_of_rounds(self, operation_id: object) -> None:
+    def _let_go_of_rounds(self, stream_id: object) -> None:
         """The sends of rounds below every unread window's reach."""
         windows = self.machine.observation.windows.windows
         starts = [
             each.start_round
             for each in windows.values()
-            if each.operation_id == operation_id
+            if each.stream_id == stream_id
         ]
         if not starts:
             return
         margin = KEPT_WINDOW_WIDTHS * self.folds.widest_window
         kept_from = min(starts) - margin
-        let_go = self.folds.rounds_to_let_go(operation_id, kept_from)
-        self.transfers.forget_rounds(operation_id, let_go)
+        let_go = self.folds.rounds_to_let_go(stream_id, kept_from)
+        self.transfers.forget_rounds(stream_id, let_go)
 
-    def _pools(self) -> object:
-        machine = self.machine
-        device = machine.qpu.device
+    def _pool_numbers(self) -> tuple:
+        """Each tier's load, then each pool's own row, as plain data.
+
+        Both are over the span the QPU generated the region of interest's
+        rounds over.
+        """
+        run_statistics = self.machine.observation.statistics
+        layout = self.machine.layout
+        device = self.machine.qpu.device
         round_period_ticks = device.clock.period_ticks
         generation_ticks = self.folds.generation_ticks(round_period_ticks)
-        run_statistics = machine.observation.statistics
-        return measure.pool_measures(
-            run_statistics, machine.layout, generation_ticks
+        tiers = measure.pool_measures(run_statistics, layout, generation_ticks)
+        committed = self.folds.counts.committed_by_pool
+        rows = measure.pool_rows(
+            run_statistics, layout, committed, generation_ticks
         )
+        tier_numbers = dataclasses.asdict(tiers)
+        row_numbers = [dataclasses.asdict(row) for row in rows]
+        return tier_numbers, row_numbers
 
 
 class _Folds:
@@ -385,9 +421,28 @@ class _Folds:
         self, frame_record: decoding_records.PauliFrameCommitRecord
     ) -> None:
         counts = self.counts
+        counts.committed_windows += 1
+        counts.committed_by_pool[frame_record.tier] += 1
         counts.last_commit_tick = _higher(
             counts.last_commit_tick, frame_record.committed_ticks
         )
+
+    def restart_pool_commits(self, tick: int) -> None:
+        """The statistics restart: each pool's commits count from here.
+
+        A pool's row reads its load over the region of interest, so its
+        committed windows are counted over the same region.
+        """
+        del tick
+        self.counts.committed_by_pool.clear()
+
+    def sample_escalation(self, window: window_records.Window) -> None:
+        """Every hundredth committed window, the share escalated so far."""
+        counts = self.counts
+        if counts.committed_windows % ESCALATION_SAMPLED_EVERY:
+            return
+        sample = (counts.committed_windows, counts.strong_windows)
+        self.counts.escalation_series.append((*sample, window.commit_lo))
 
     def fold_decoded(
         self,
@@ -424,11 +479,9 @@ class _Folds:
         arrival_us = config_module.ticks_to_microseconds(window.t_data_complete)
         self.counts.count_against_deadline(reaction_us, arrival_us)
 
-    def count_round(self, operation_id: object, round_index: int) -> None:
-        latest = self.counts.latest_round_by_operation.get(operation_id, 0)
-        self.counts.latest_round_by_operation[operation_id] = max(
-            latest, round_index
-        )
+    def count_round(self, stream_id: object, round_index: int) -> None:
+        latest = self.counts.latest_round_by_stream.get(stream_id, 0)
+        self.counts.latest_round_by_stream[stream_id] = max(latest, round_index)
 
     def readout_at(self, tick: int, reset_tick: int) -> None:
         """A readout: the first since the region began, and the last."""
@@ -442,17 +495,15 @@ class _Folds:
         counts = self.counts
         counts.widest_window = max(counts.widest_window, round_count)
 
-    def rounds_to_let_go(self, operation_id: object, kept_from: int) -> range:
+    def rounds_to_let_go(self, stream_id: object, kept_from: int) -> range:
         """The rounds below kept_from not let go yet."""
         counts = self.counts
-        let_go_below = counts.let_go_below_by_operation.get(operation_id, 1)
-        counts.let_go_below_by_operation[operation_id] = max(
-            let_go_below, kept_from
-        )
+        let_go_below = counts.let_go_below_by_stream.get(stream_id, 1)
+        counts.let_go_below_by_stream[stream_id] = max(let_go_below, kept_from)
         return range(let_go_below, kept_from)
 
     def rounds_read_out(self) -> int:
-        rounds = self.counts.latest_round_by_operation.values()
+        rounds = self.counts.latest_round_by_stream.values()
         return sum(rounds)
 
     def value_summaries(self) -> dict:
@@ -509,11 +560,14 @@ class _Folds:
         span_ticks = counts.decoded_commit_tick - counts.final_send_tick
         return config_module.ticks_to_microseconds(span_ticks)
 
-    def growth_rate(self, tier: window_records.PoolId) -> Optional[float]:
-        growth = self.growth_by_tier.get(tier)
-        if growth is None:
-            return None
-        return growth.slope()
+    def growth_rate(self, tier_pools: tuple) -> Optional[float]:
+        """A tier's reaction growth, fit over every window of its pools."""
+        tier_growth = _Growth()
+        for pool in tier_pools:
+            growth = self.growth_by_tier.get(pool)
+            if growth is not None:
+                tier_growth.merge(growth)
+        return tier_growth.slope()
 
     def deadline_misses(self) -> tuple:
         """The recorded windows over the deadline, the earliest's arrival."""
@@ -533,6 +587,7 @@ class _Counts:
     """The running counts and ticks of the fold."""
 
     folded_windows: int = 0
+    committed_windows: int = 0
     decoded_windows: int = 0
     recorded_windows: int = 0
     provisional_windows: int = 0
@@ -546,8 +601,15 @@ class _Counts:
     decoded_commit_tick: Optional[int] = None
     first_readout_tick: Optional[int] = None
     last_readout_tick: Optional[int] = None
-    latest_round_by_operation: dict = dataclasses.field(default_factory=dict)
-    let_go_below_by_operation: dict = dataclasses.field(default_factory=dict)
+    latest_round_by_stream: dict = dataclasses.field(default_factory=dict)
+    let_go_below_by_stream: dict = dataclasses.field(default_factory=dict)
+    # the windows the frame committed off each pool's decode, by word,
+    # since the statistics' restart
+    committed_by_pool: collections.Counter = dataclasses.field(
+        default_factory=collections.Counter
+    )
+    # (committed windows, escalated windows, first committed round)
+    escalation_series: list = dataclasses.field(default_factory=list)
     # the reaction budget (observation.reaction_deadline_microseconds)
     deadline_us: Optional[float] = None
     missed: int = 0
@@ -611,6 +673,19 @@ class _Growth:
         if arrival_ticks != self.first_arrival:
             self.has_two_arrivals = True
 
+    def merge(self, other: "_Growth") -> None:
+        """Another pool's windows added, as if each had been added here."""
+        if other.first_arrival is None:
+            return
+        self.count += other.count
+        for index, value in enumerate(other.sums):
+            self.sums[index] += value
+        if self.first_arrival is None:
+            self.first_arrival = other.first_arrival
+        is_another_arrival = other.first_arrival != self.first_arrival
+        if other.has_two_arrivals or is_another_arrival:
+            self.has_two_arrivals = True
+
     def slope(self) -> Optional[float]:
         """The least-squares slope, None below two distinct arrivals.
 
@@ -641,6 +716,27 @@ def _unread_windows(windows: dict) -> list:
         for window in windows.values()
         if window.published_request_key is None
     ]
+
+
+def _checkpoint_rows(observation) -> list:
+    """The checkpoints' rows; none when the run closes no checkpoint."""
+    if observation.checkpoints is None:
+        return []
+    return observation.checkpoints.rows()
+
+
+def _answer_check_rows(observation) -> list:
+    """The answer checks' rows; none when the run checks no window."""
+    if observation.answer_checks is None:
+        return []
+    return observation.answer_checks.rows()
+
+
+def _threshold_check_rows(observation) -> list:
+    """The static chains' rows; none when the run checks no window."""
+    if observation.answer_checks is None:
+        return []
+    return observation.answer_checks.threshold_rows()
 
 
 def _scored_owners(result: result_records.RunResult) -> tuple:

@@ -17,6 +17,7 @@ import random
 
 import pytest
 
+import decsim.escalation.target_steps as target_steps
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.collect as collect
 import decsim.presets.machines as machines
@@ -39,7 +40,7 @@ def _result(
 
 def _job(window_id: int = 4) -> decoding_records.DecodeJob:
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=window_id, round_count=3
+        stream_id=1, window_id=window_id, round_count=3
     )
 
 
@@ -671,6 +672,108 @@ def test_a_fixed_threshold_task_builds_no_calibrator():
     assert task.online_threshold is None
 
 
+def test_a_rate_threshold_decides_by_the_trackers_rule_window_by_window():
+    """Target 0.25, start 1.0, step 0.5, by hand.
+
+    Gap 2.0 keeps and the threshold rises 0.125; 0.5 is under 1.125, so
+    it escalates and the threshold falls 0.375; 2.0 keeps (0.875); 0.1
+    escalates (0.5).
+    """
+    tracker = threshold_sources.EscalationRateTracker(
+        target_escalation_rate=0.25, threshold=1.0, step=0.5
+    )
+    rate = threshold_sources.RateThreshold(tracker)
+    decisions = []
+    for gap in (2.0, 0.5, 2.0, 0.1):
+        result = _result(gap)
+        job = _job()
+        kept = rate.decide_keep(job, result)
+        decisions.append(kept)
+
+    summary = rate.summary()
+    assert decisions == [True, False, True, False]
+    assert summary["threshold"] == 0.5
+    assert summary["escalated"] == 2
+    assert rate.audits_by_escalating is False
+
+
+class _Queue:
+    """A source pool whose waiting jobs are given, one count a window."""
+
+    def __init__(self, counts: list) -> None:
+        self.counts = iter(counts)
+
+    def waiting_jobs(self) -> int:
+        return next(self.counts)
+
+
+def test_an_outer_loop_hands_the_tracker_its_stepped_target():
+    """Checks every 2 windows; the mean waiting rises 0, 4, 10: down.
+
+    The third check steps 0.2 to 0.1 before the sixth window's gap, so
+    that gap's update reads the new target.
+    """
+    steps = target_steps.TargetSteps.Settings(
+        start=0.2,
+        levels=(0.1, 0.2),
+        check_every_windows=2,
+        rise_checks=2,
+        rise_margin_windows=3.0,
+    )
+    tracker = threshold_sources.EscalationRateTracker(
+        target_escalation_rate=0.2, threshold=1.0, step=0.5
+    )
+    loop = steps.build()
+    rate = threshold_sources.RateThreshold(tracker, loop)
+    rate.source_queue = _Queue([0, 0, 4, 4, 10, 10])
+    targets = []
+    for _ in range(6):
+        job = _job()
+        result = _result(2.0)
+        rate.decide_keep(job, result)
+        targets.append(tracker.target_escalation_rate)
+
+    summary = rate.summary()
+    assert targets == [0.2, 0.2, 0.2, 0.2, 0.2, 0.1]
+    assert rate.reads_source_queue is True
+    assert [share for _w, share, _m in summary["target_steps"]] == [
+        0.2,
+        0.2,
+        0.1,
+    ]
+
+
+def test_a_rate_threshold_is_built_once_a_task_and_refuses_a_bad_target():
+    settings = threshold_sources.RateThreshold.Settings(15.0, 0.1)
+
+    with pytest.raises(ValueError, match="built once per task"):
+        settings.build()
+    with pytest.raises(ValueError, match="target_escalation_rate"):
+        threshold_sources.RateThreshold.Settings(15.0, 1.0)
+    with pytest.raises(ValueError, match="step_decibels"):
+        threshold_sources.RateThreshold.Settings(15.0, 0.1, step_decibels=0)
+
+
+def test_one_rate_threshold_learns_across_every_shot_of_its_task():
+    """collect.Task builds it once; the second shot moves it on."""
+    rate = threshold_sources.RateThreshold.Settings(15.0, 0.2)
+    gate = _gate_on(rate)
+    workload = machines.memory_workload(3, 0.008, 30)
+    gate = gate.with_held("workload", workload)
+    task = collect.Task("gate", gate, {})
+    calibrator = task.online_threshold
+
+    collect.run_shot(task, 0)
+    after_one_shot = calibrator.summary()
+    collect.run_shot(task, 1)
+    after_two_shots = calibrator.summary()
+
+    first_shot_windows = after_one_shot["windows"]
+    assert type(calibrator) is threshold_sources.RateThreshold
+    assert first_shot_windows > 0
+    assert after_two_shots["windows"] == 2 * first_shot_windows
+
+
 def test_one_calibrator_learns_across_every_shot_of_its_task():
     """collect.Task builds it once and every shot's machine takes it."""
     gate = _online_gate()
@@ -696,6 +799,7 @@ class _OwnTaskThreshold:
     """
 
     audits_by_escalating = False
+    reads_source_queue = False
 
     @dataclasses.dataclass(frozen=True)
     class Settings(threshold_sources.FixedThreshold.Settings):

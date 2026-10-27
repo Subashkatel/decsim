@@ -4,13 +4,15 @@ Two rows, one of which fills SwitchingSettings.strong_window (Toshio et
 al. 2510.25222). Both pin a face on a neighbour's committed correction,
 Bombin et al. 2303.04846's input adaptation (lines 775-788). RedoWindow
 is the escalated window's commit region with its past face pinned, built
-once its rounds are stored in the strong syndrome buffer. DoubleWindow
-is Sec. III C and Fig. 12: a forward extent with both faces pinned that
-absorbs the weak windows it covers, re-slices the window past it, and is
-held until that window's weak commit or, at the operation's end, until
-its last round is stored. A shape with both faces pinned that absorbs
-nothing is not a row: it waits for the window after it, which waits for
-its own strong result, and the serial sliding chain deadlocks.
+once its rounds are stored in the strong syndrome buffer; its boundary
+row is held, or checked to let the weak chain go on
+(boundary_policies.Checked). DoubleWindow is Sec. III C and Fig. 12: a
+forward extent with both faces pinned that absorbs the weak windows it
+covers, re-slices the window past it, and is held until that window's
+weak commit or, at the operation's end, until its last round is stored.
+A shape with both faces pinned that absorbs nothing is not a row: it
+waits for the window after it, which waits for its own strong result,
+and the serial sliding chain deadlocks.
 
 The restart window's weak decode may re-read the strong region's last
 buffer regions from the weak syndrome buffer, so those rounds must still
@@ -69,15 +71,14 @@ class StrongWindowShape(Protocol):
     (release_conditions); the redecode asks held_job when those
     conditions fire. absorbs_weak_windows declares that the row's region
     replaces the weak windows it covers, so the planner claims the
-    rounds a restart would read. boundary_policy is the boundary row a
-    switching run's windows take: eager for an absorbing region, held
-    for one that absorbs nothing. window_absorbed(key, owner_key) is the
-    shape's one trace source; a shape that absorbs nothing exposes the
-    silent source.
+    rounds a restart would read. The boundary row a switching run's
+    windows take is the row's settings' (ports.StrongWindowBoundaries):
+    eager for an absorbing region, held or checked for one that absorbs
+    nothing. window_absorbed(key, owner_key) is the shape's one trace
+    source; a shape that absorbs nothing exposes the silent source.
     """
 
     absorbs_weak_windows: bool
-    boundary_policy: ports.BoundaryPolicySettings
     window_absorbed: Union[trace_source.TraceSource, trace_source.SilentSource]
 
     def plan(
@@ -113,8 +114,11 @@ class RedoWindow(StrongWindowPorts):
     closed past boundary and an open future boundary". It absorbs no
     weak window, so serial switching gives it held boundaries, under
     which a committed boundary is final, and the neighbour has committed
-    by the time its dependent escalates. The window with no earlier
-    neighbour pins nothing: the initialisation closes its past face.
+    by the time its dependent escalates. Under checked boundaries a
+    window escalates only once the boundaries its decode read are final
+    (windows/input_checks.py), so the face it pins is final too. The
+    window with no earlier neighbour pins nothing: the initialisation
+    closes its past face.
 
     The job waits for its rounds in the strong syndrome buffer, and the
     rounds the chip still holds go up with the escalation. This is not
@@ -123,13 +127,23 @@ class RedoWindow(StrongWindowPorts):
     """
 
     absorbs_weak_windows = False
-    boundary_policy = boundary_policies.Held.Settings()
     window_absorbed = trace_source.SILENT
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The redo window, as the switching slot names it."""
+        """The redo window, as the switching slot names it.
 
+        boundary_policy is the boundary row the windows take: held, the
+        default, where the window after an escalated one waits for the
+        strong answer, or checked, where it decodes on the weak
+        boundary and is checked when the strong one lands. Eager is
+        refused (policies.py): its provisional boundary is never
+        corrected.
+        """
+
+        boundary_policy: ports.BoundaryPolicySettings = (
+            boundary_policies.Held.Settings()
+        )
         # the word the refusals name this row by
         name = "redo_window"
         # it restarts no weak window, so the width the window interaction
@@ -141,11 +155,6 @@ class RedoWindow(StrongWindowPorts):
             """The row's own declaration."""
             return RedoWindow.absorbs_weak_windows
 
-        @property
-        def boundary_policy(self) -> ports.BoundaryPolicySettings:
-            """The row's own declaration."""
-            return RedoWindow.boundary_policy
-
         def build(self, engine: engine_module.Engine) -> "RedoWindow":
             """A fresh redo window on the run's engine."""
             return RedoWindow(engine)
@@ -153,7 +162,20 @@ class RedoWindow(StrongWindowPorts):
     def plan(
         self, weak_job: decoding_records.DecodeJob
     ) -> pending_strong_windows.StrongAssignment:
-        """The near-pinned job, built now or held for its own rounds."""
+        """The near-pinned job, built now or held for its own rounds.
+
+        A face the chip committed is pinned now, as the window is
+        assigned: under held boundaries the neighbour's commit is final,
+        and under checked ones the window escalates only once it is,
+        so the boundary condition is determined (Toshio et al.
+        2510.25222 Fig. 12 caption and Sec. III C) and leaves the chip
+        with the escalation (App. C: a small soft output assigns the
+        window to the strong decoder). Pinned only once the rounds land
+        on the host, it would wait a cable leg the chip cannot know of.
+        A face the strong host committed is read from its own memory
+        when the job is built, as the host learns of the escalation only
+        when it lands.
+        """
         region, folded_boundaries, model = _redo_of(self, weak_job)
         held = _held_redo(
             self,
@@ -161,6 +183,15 @@ class RedoWindow(StrongWindowPorts):
             region,
             model,
             folded_boundaries,
+        )
+        chip_faces = _faces_committed_off(self, held.folded_boundaries, False)
+        pin_faces(
+            self,
+            held.strong_window,
+            held.model,
+            held.operation,
+            held.request_key,
+            chip_faces,
         )
         return _assignment_of(self, held)
 
@@ -213,7 +244,6 @@ class DoubleWindow(StrongWindowPorts):
     """
 
     absorbs_weak_windows = True
-    boundary_policy = boundary_policies.Eager.Settings()
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
@@ -240,8 +270,8 @@ class DoubleWindow(StrongWindowPorts):
 
         @property
         def boundary_policy(self) -> ports.BoundaryPolicySettings:
-            """The row's own declaration."""
-            return DoubleWindow.boundary_policy
+            """Eager: the weak chain keeps committing past the region."""
+            return boundary_policies.Eager.Settings()
 
         def build(self, engine: engine_module.Engine) -> "DoubleWindow":
             """A fresh double window on the run's engine."""
@@ -262,10 +292,10 @@ class DoubleWindow(StrongWindowPorts):
         operation's end, for every round it reads to be stored;
         release_conditions says which.
         """
-        key = (weak_job.operation_id, weak_job.window_id)
+        key = (weak_job.stream_id, weak_job.window_id)
         target = self.edge.target
         strong_request_key = self.builder.new_request_key(
-            weak_job.operation_id, weak_job.window_id, target
+            weak_job.stream_id, weak_job.window_id, target
         )
         strong_request_created_ticks = self.engine.now
         near_source_key = self.regions.double_window_near_face(key)
@@ -286,7 +316,7 @@ class DoubleWindow(StrongWindowPorts):
             resolved_region.context_round_keys,
             resolved_region.restart_read_keys,
         )
-        operation = self.regions.operation(weak_job.operation_id)
+        operation = self.regions.operation(weak_job.stream_id)
         label = escalated_label(self, weak_job)
         held = _HeldDoubleWindow(
             key=key,
@@ -331,7 +361,9 @@ class DoubleWindow(StrongWindowPorts):
             )
         finally:
             if guard is not None:
-                self.retention.release_strong_hold_if_live(guard)
+                self.retention.release_strong_hold_if_live(
+                    guard, strong_request_key.stream_id
+                )
 
     def release_conditions(
         self, assignment: pending_strong_windows.StrongAssignment
@@ -390,13 +422,13 @@ class DoubleWindow(StrongWindowPorts):
         restart_key = held.resolved_region.restart_window_key
         if restart_key is None:
             return pending_strong_windows.ReleaseConditions(
-                stored_data_of_operation=held.key[0],
+                stored_data_of_stream=held.key[0],
                 name="terminal_data",
                 released_description="terminal data complete",
             )
         return pending_strong_windows.ReleaseConditions(
             committed_windows=(restart_key,),
-            stored_data_of_operation=held.key[0],
+            stored_data_of_stream=held.key[0],
             name="far_boundary",
             released_description="far-side weak boundary determined",
         )
@@ -555,10 +587,31 @@ def strong_job_payloads(
     gate XORs it into the landed input when the decode starts, as a weak
     window's gate folds its boundary.
     """
+    pin_faces(
+        shape, strong_window, model, operation, request_key, folded_boundaries
+    )
+    return strong_window_reads(shape, strong_window)
+
+
+def pin_faces(
+    shape: StrongWindowPorts,
+    strong_window: window_records.Window,
+    model: object,
+    operation: program_records.Operation,
+    request_key: window_records.DecoderRequestKey,
+    folded_boundaries: tuple,
+) -> None:
+    """Ship each pinned face's committed boundary to the strong host."""
     for source_key in folded_boundaries:
         shape.courier.pin_strong_face(
             source_key, strong_window, model, operation, request_key
         )
+
+
+def strong_window_reads(
+    shape: StrongWindowPorts, strong_window: window_records.Window
+) -> list:
+    """The rounds the strong window reads, from its edge's landing store."""
     target = shape.edge.target
     return shape.retention.strong_window_input(
         shape.builder, strong_window, target
@@ -573,7 +626,7 @@ def escalated_label(
     The target's name, then the window: strong(mem1 W0), or deep(mem1 W0)
     for a window a chain escalates again.
     """
-    operation = shape.regions.operation(source_job.operation_id)
+    operation = shape.regions.operation(source_job.stream_id)
     target = shape.edge.target
     return f"{target.word}({operation.name} W{source_job.window_id})"
 
@@ -591,19 +644,17 @@ def forced_class_companion(
     build_forced_companion, for a target job).
     """
     request_key = shape.builder.new_request_key(
-        lead.operation_id, lead.window_id, lead.request_key.pool
+        lead.stream_id, lead.window_id, lead.request_key.pool
     )
     label = f"{lead.label} class {forced_logical_class}"
     payloads = list(lead.payloads)
     job = decoding_records.DecodeJob(
-        operation_id=lead.operation_id,
+        stream_id=lead.stream_id,
         window_id=lead.window_id,
         round_count=lead.round_count,
         ready_time=shape.engine.now,
         label=label,
         kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
-        spatial_nodes=lead.spatial_nodes,
-        code=lead.code,
         detector_error_model=lead.detector_error_model,
         payloads=payloads,
         window=lead.window,
@@ -634,7 +685,7 @@ def _redo_of(
         region = shape.regions.revision_region(source_job.window)
         model = source_job.detector_error_model
         return region, source_job.pinned_faces, model
-    key = (source_job.operation_id, source_job.window_id)
+    key = (source_job.stream_id, source_job.window_id)
     region = shape.regions.redo_region(key)
     pinned_source_key = shape.regions.redo_pin_source(key)
     faces = _declared_faces(pinned_source_key)
@@ -673,12 +724,12 @@ def _held_redo(
     folded_boundaries: tuple,
 ) -> "_HeldStrongRedo":
     """What a row keeps from its plan: its window, its reads, its faces."""
-    key = (weak_job.operation_id, weak_job.window_id)
+    key = (weak_job.stream_id, weak_job.window_id)
     target = shape.edge.target
     request_key = shape.builder.new_request_key(
-        weak_job.operation_id, weak_job.window_id, target
+        weak_job.stream_id, weak_job.window_id, target
     )
-    operation = shape.regions.operation(weak_job.operation_id)
+    operation = shape.regions.operation(weak_job.stream_id)
     label = escalated_label(shape, weak_job)
     return _HeldStrongRedo(
         key=key,
@@ -724,7 +775,7 @@ def _stored_rounds_conditions(
 ) -> pending_strong_windows.ReleaseConditions:
     """The rounds the row reads, stored in the strong syndrome buffer."""
     return pending_strong_windows.ReleaseConditions(
-        stored_data_of_operation=held.key[0],
+        stored_data_of_stream=held.key[0],
         name="context_stored",
         released_description="strong context stored in strong syndrome buffer",
     )
@@ -766,15 +817,20 @@ def _log_hold(
 def _strong_job_of(
     shape: StrongWindowPorts, held: "_HeldStrongRedo"
 ) -> decoding_records.DecodeJob:
-    """The row's job: the rounds its store holds, the faces it pins."""
-    payloads = strong_job_payloads(
+    """The row's job: the rounds its store holds, the host's faces pinned.
+
+    The faces the chip committed were pinned at plan (RedoWindow.plan).
+    """
+    host_faces = _faces_committed_off(shape, held.folded_boundaries, True)
+    pin_faces(
         shape,
         held.strong_window,
         held.model,
         held.operation,
         held.request_key,
-        held.folded_boundaries,
+        host_faces,
     )
+    payloads = strong_window_reads(shape, held.strong_window)
     job = _strong_redecode_job(
         shape,
         held.weak_job,
@@ -788,6 +844,19 @@ def _strong_job_of(
     return job
 
 
+def _faces_committed_off(
+    shape: StrongWindowPorts, faces: tuple, on_target: bool
+) -> tuple:
+    """The faces whose neighbour committed on the edge's target, or off it."""
+    target = shape.edge.target
+    chosen = []
+    for source_key in faces:
+        committed_on = shape.courier.committed_pool(source_key)
+        if (committed_on == target) == on_target:
+            chosen.append(source_key)
+    return tuple(chosen)
+
+
 def _strong_redecode_job(
     shape: StrongWindowPorts,
     weak_job: decoding_records.DecodeJob,
@@ -798,18 +867,16 @@ def _strong_redecode_job(
     request_created_ticks: int,
 ) -> decoding_records.DecodeJob:
     """The strong job every row submits, its input held until it lands."""
-    key = (weak_job.operation_id, weak_job.window_id)
+    key = (weak_job.stream_id, weak_job.window_id)
     payload_round_count = decoding_records.distinct_round_count(payloads)
     label = escalated_label(shape, weak_job)
     job = decoding_records.DecodeJob(
-        operation_id=key[0],
+        stream_id=key[0],
         window_id=key[1],
         round_count=payload_round_count,
         ready_time=shape.engine.now,
         label=label,
         kind=decoding_records.DecodeJobKind.STRONG_REDECODE,
-        spatial_nodes=weak_job.spatial_nodes,
-        code=weak_job.code,
         detector_error_model=model,
         payloads=payloads,
         window=strong_window,

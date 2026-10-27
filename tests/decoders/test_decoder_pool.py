@@ -43,7 +43,7 @@ def _pool(unit_count):
 
 def _job(label):
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=1, label=label
+        stream_id=1, window_id=0, round_count=1, label=label
     )
 
 

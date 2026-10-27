@@ -131,7 +131,7 @@ class _Capture:
         capture = self
 
         def revision(verdict, job, result) -> None:
-            key = (job.request_key.operation_id, job.request_key.window_id)
+            key = (job.request_key.stream_id, job.request_key.window_id)
             capture.note_result(key, job, result)
             _REVISION(verdict, job, result)
 
@@ -185,7 +185,7 @@ class _Capture:
     def _sources_for(self, job) -> list:
         sources = []
         for source_key, destination_key, committed in self.pins:
-            if destination_key == (job.operation_id, job.window_id):
+            if destination_key == (job.stream_id, job.window_id):
                 sources.append((source_key, committed))
         return sources
 
@@ -245,7 +245,7 @@ def _face_correction(job, result, destination_key, flip, column_by_detectors):
     al. 2510.25222 lines 1248-1250); a neighbour's face carries its
     whole commit.
     """
-    source_key = (job.operation_id, job.window_id)
+    source_key = (job.stream_id, job.window_id)
     if source_key != destination_key:
         return _external_correction(job, result, flip, column_by_detectors)
     return _crossing_correction(job, result, flip, column_by_detectors)
@@ -327,7 +327,7 @@ def _run_case(monkeypatch, case: tuple, strong_window) -> tuple:
 
 def _pinned_flips(job, sources, flip, column_by_detectors) -> set:
     """The detectors the pinned faces' committed corrections flip."""
-    destination_key = (job.operation_id, job.window_id)
+    destination_key = (job.stream_id, job.window_id)
     flipped = set()
     for _source_key, committed in sources:
         source_job, source_result = committed
@@ -553,7 +553,7 @@ def _self_pinned_face_counts(capture, job, sources, flip, columns) -> list:
     strong = _strong_kappa(capture, job, flip, columns)
     if strong is None:
         return []
-    destination_key = (job.operation_id, job.window_id)
+    destination_key = (job.stream_id, job.window_id)
     counts = []
     for source_key, committed in sources:
         if source_key != destination_key:
@@ -606,7 +606,7 @@ def _decided_columns(run: tuple) -> list:
     counts = []
     for job, _raw, _masked, sources in capture.pinned_jobs():
         model = job.detector_error_model
-        destination_key = (job.operation_id, job.window_id)
+        destination_key = (job.stream_id, job.window_id)
         for _source_key, committed in sources:
             source_job, _result = committed
             decided = _faults_the_face_decided(source_job, destination_key)
@@ -624,7 +624,7 @@ def _faults_the_face_decided(source_job, destination_key: tuple) -> dict:
     (Toshio et al. 2510.25222 lines 1248-1250).
     """
     model = source_job.detector_error_model
-    source_key = (source_job.operation_id, source_job.window_id)
+    source_key = (source_job.stream_id, source_job.window_id)
     if source_key != destination_key:
         return model.owned_fault_ids()
     return model.crossing_fault_ids()
@@ -652,7 +652,7 @@ def _placed_view(model, representation):
 
 def _strong_kappa(capture, job, flip, columns):
     """The strong window's own committed correction, or None."""
-    key = (job.operation_id, job.window_id)
+    key = (job.stream_id, job.window_id)
     strong = capture.result_by_window.get(key)
     if strong is None:
         return None
@@ -664,7 +664,7 @@ def _strong_kappa(capture, job, flip, columns):
 
 def _pinned_kappa(job, sources, flip, columns):
     """The corrections the window's pinned faces stand on, together."""
-    destination_key = (job.operation_id, job.window_id)
+    destination_key = (job.stream_id, job.window_id)
     column_count = flip.shape[1]
     kappa = numpy.zeros(column_count, dtype=numpy.uint8)
     for _source_key, committed in sources:

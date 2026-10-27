@@ -17,7 +17,7 @@ import decsim.presets.machines as machines
 SEED = 0
 # the log hash of the point; it moves when a log line changes text, and the
 # results the gate hashes do not move with it
-POINT_LOG_SHA256 = "181e34788d3d"
+POINT_LOG_SHA256 = "cfaa74d775e5"
 
 
 def point(**observation_changes):

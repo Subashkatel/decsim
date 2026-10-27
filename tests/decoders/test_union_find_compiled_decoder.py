@@ -52,17 +52,19 @@ REQUIREMENT = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
 WEIGHT_STEP = 0.1
 
 # the four distances below eleven, each with as many rounds as its
-# distance, at the low, middle and high error rates of a memory sweep
-CORPUS_DISTANCES = (3, 5, 7, 9)
+# distance, at the low, middle and high error rates of a memory sweep,
+# with the shots the oracle affords: a shot costs it about a millisecond
+# at distance three and a fifth of a second at nine, so the small
+# distances, where most shapes repeat, take many and the large ones few
 CORPUS_PROBABILITIES = (0.001, 0.005, 0.01)
-CORPUS_SHOTS = 300
+CORPUS_SHOTS_BY_DISTANCE = ((3, 300), (5, 300), (7, 40), (9, 10))
 CIRCUIT_SEED = 5
 
 # the two distances above that, at the middle rate, with fewer shots
-# because the oracle costs a second a decode there
+# because the oracle costs most of a second a decode there
 LARGE_DISTANCES = (11, 13)
 LARGE_PROBABILITY = 0.005
-LARGE_SHOTS = 30
+LARGE_SHOTS = 8
 
 # every prior of the hand graph is 0.1, so every edge is this long; a
 # front covers one half tick per tick, so an edge with one growing end
@@ -223,14 +225,14 @@ def compare_corpus_point(distance: int, probability: float, shots: int) -> None:
 
 
 def test_the_property_corpus_of_surface_code_shots_matches_the_oracle():
-    """Twelve points of three hundred sampled syndromes, decode for decode."""
-    for distance in CORPUS_DISTANCES:
+    """Twelve points of sampled syndromes, decode for decode."""
+    for distance, shots in CORPUS_SHOTS_BY_DISTANCE:
         for probability in CORPUS_PROBABILITIES:
-            compare_corpus_point(distance, probability, CORPUS_SHOTS)
+            compare_corpus_point(distance, probability, shots)
 
 
 def test_the_property_corpus_of_the_two_largest_distances_matches_the_oracle():
-    """Distances eleven and thirteen, thirty sampled syndromes each."""
+    """Distances eleven and thirteen, eight sampled syndromes each."""
     for distance in LARGE_DISTANCES:
         compare_corpus_point(distance, LARGE_PROBABILITY, LARGE_SHOTS)
 

@@ -31,6 +31,7 @@ import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.records.rounds as round_records
 import decsim.records.routes as route_records
+import decsim.records.transfers as transfer_records
 import decsim.records.windows as window_records
 import decsim.statistics.kinds as statistic_kinds
 import decsim.statistics.registry as statistics_registry
@@ -110,15 +111,16 @@ class StrongRedecode:
         self,
         engine: engine_module.Engine,
         hops: route_records.EdgeHops,
+        arrival: transfer_records.StoreHop,
         rules: revision_rules.EdgeRules = revision_rules.DEFAULT_RULES,
     ) -> None:
         self.engine = engine
         self.hops = hops
+        # the hop a carried region lands in the target's store over: the
+        # edge's forward hop, its bits read out of the source's store
+        self.arrival = arrival
         self.rules = rules
         self.selections = _StrongSelections()
-        # the rounds sent up and not landed yet, so a wake-up while a
-        # region crosses does not carry them twice
-        self.carried_round_keys: set = set()
         # trace sources: the wait a held strong window sits in, from the
         # hold to the condition that ends it
         self.trace = _TraceSources()
@@ -256,7 +258,7 @@ class StrongRedecode:
         weak job. One whose input has not landed is held and enqueued
         when its condition fires, so there is no submission.
         """
-        key = (weak_job.operation_id, weak_job.window_id)
+        key = (weak_job.stream_id, weak_job.window_id)
         if weak_job.window.deps_remaining > 0:
             self.selections.defer_speculative_decode(key, weak_job)
             return None
@@ -274,12 +276,12 @@ class StrongRedecode:
     def _planned_speculative_decode(
         self, weak_job: decoding_records.DecodeJob
     ) -> Optional[decoding_records.Submission]:
-        key = (weak_job.operation_id, weak_job.window_id)
+        key = (weak_job.stream_id, weak_job.window_id)
         assignment = self.shape.plan(weak_job)
         self.selections.remember_speculative_decode(key, assignment.request_key)
         if assignment.job is None:
             self._hold(key, assignment, None)
-            self.submit_if_stored_data_releases(weak_job.operation_id)
+            self.submit_if_stored_data_releases(weak_job.stream_id)
             return None
         send_input = self._strong_input_send(assignment.job, None)
         return decoding_records.Submission(assignment.job, send_input)
@@ -293,7 +295,7 @@ class StrongRedecode:
         under its conditions.
         """
         self.statistics.escalated.add()
-        key = (weak_job.operation_id, weak_job.window_id)
+        key = (weak_job.stream_id, weak_job.window_id)
         speculative_request_key = self.selections.take_speculative_decode(key)
         if speculative_request_key is not None:
             self.statistics.speculative_selected.add()
@@ -307,7 +309,7 @@ class StrongRedecode:
             self._enqueue(assignment.job, selection_arrival_ticks)
         else:
             self._hold(key, assignment, selection_arrival_ticks)
-            self.submit_if_stored_data_releases(weak_job.operation_id)
+            self.submit_if_stored_data_releases(weak_job.stream_id)
         self.decode_queue.await_strong_result(key, request_key)
 
     # ---- the two events that meet a declared condition
@@ -319,10 +321,10 @@ class StrongRedecode:
 
     def submit_if_stored_data_releases(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> None:
         """A round is stored: a strong window waiting on that data leaves."""
-        released = self.pending.released_by_stored_data(operation_id)
+        released = self.pending.released_by_stored_data(stream_id)
         self._submit_released(released)
 
     def cancel_strong_request(self, window_key: tuple) -> None:
@@ -453,21 +455,29 @@ class StrongRedecode:
     # ---- private: carrying the strong window's rounds up
 
     def _carry_missing_rounds(self, assignment) -> None:
-        """Send the rounds the strong side lacks, once each."""
+        """Send the rounds the strong side lacks, once each.
+
+        A round already on its way into the target's store, carried by
+        this edge or another edge into the same pool, is not sent again;
+        it counts as coming until the store holds it, so a wake-up
+        between the landing and the store sends nothing twice.
+        """
         wanted = self.shape.rounds_to_carry(assignment)
         missing = []
         for round_key in wanted:
-            if round_key not in self.carried_round_keys:
+            if not self.strong_receiver.is_round_coming(round_key):
                 missing.append(round_key)
         if not missing:
             return
-        target = self.target
-        packets = self.retention.escalated_rounds(missing, target)
+        stream_id = assignment.request_key.stream_id
+        packets = self.retention.escalated_rounds(
+            stream_id, missing, self.target
+        )
+
         region = round_records.EscalatedRegion.of(
             assignment.request_key, packets, assignment.first_round
         )
         self.strong_receiver.reserve_region(region)
-        self.carried_round_keys.update(missing)
         landed = functools.partial(self._region_landed, region)
         self.decoder_output.send_region(
             self.hops.forward, self.carried_from, region, landed
@@ -480,16 +490,8 @@ class StrongRedecode:
         )
 
     def _region_landed(self, region: round_records.EscalatedRegion) -> None:
-        """The region reached the strong side: its store takes every round.
-
-        The rounds count as carried until the store has all of them, so
-        a wake-up between the landing and the store sends nothing twice.
-        """
-        stored = functools.partial(self._region_stored, region)
-        self.strong_receiver.receive_region(region, stored)
-
-    def _region_stored(self, region: round_records.EscalatedRegion) -> None:
-        self.carried_round_keys.difference_update(region.round_keys)
+        """The region reached the strong side: its store takes every round."""
+        self.strong_receiver.receive_region(region, _nothing, self.arrival)
 
     # ---- private: submitting a strong job with its input send
 
@@ -574,7 +576,7 @@ class StrongRedecode:
         strong_request_key: window_records.DecoderRequestKey,
     ) -> int:
         """Send the window's selection; returns the tick it is expected."""
-        key = (weak_job.operation_id, weak_job.window_id)
+        key = (weak_job.stream_id, weak_job.window_id)
         on_selection_delivered = functools.partial(
             self.decode_queue.accept_selection, key, strong_request_key
         )
@@ -644,7 +646,7 @@ class _StrongSelections:
         """Forget the delivered selections of the stream's windows before it."""
         stale = []
         for request_key in self.delivered_request_keys:
-            if request_key.operation_id != stream_id:
+            if request_key.stream_id != stream_id:
                 continue
             if request_key.window_id < window_index:
                 stale.append(request_key)
@@ -666,3 +668,7 @@ class _TraceSources:
 
     strong_window_held: trace_source.TraceSource = trace_source.new_source()
     strong_window_left: trace_source.TraceSource = trace_source.new_source()
+
+
+def _nothing() -> None:
+    """A region's store needs no word back: its rounds count as coming."""

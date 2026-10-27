@@ -39,8 +39,11 @@ class CollectionSettings:
 
     max_failures is the target, None for none; min_shots the scored shots
     run whatever the failures; max_shots and max_core_seconds the caps, at
-    least one set; piece_rounds the rounds of one piece. Python input
-    enters here, so it checks its own values.
+    least one set; piece_rounds the rounds of one piece. first_seed is
+    the task's first root seed, so its shots are seeds first_seed
+    onward: two runs of a task on disjoint seeds share no shot, as a
+    threshold calibrated on one and evaluated on the other must not.
+    Python input enters here, so it checks its own values.
     """
 
     max_shots: Optional[int] = None
@@ -48,14 +51,16 @@ class CollectionSettings:
     max_failures: Optional[int] = None
     min_shots: int = 0
     piece_rounds: int = DEFAULT_PIECE_ROUNDS
+    first_seed: int = 0
 
     def __post_init__(self) -> None:
         _check_caps(self)
         _check_optional_count(self.max_shots, "max_shots")
         _check_optional_count(self.max_failures, "max_failures")
         _check_core_seconds(self.max_core_seconds)
-        _check_minimum(self.min_shots)
+        _check_minimum(self.min_shots, "min_shots")
         _check_count(self.piece_rounds, "piece_rounds")
+        _check_minimum(self.first_seed, "first_seed")
 
     def text(self) -> str:
         """Every key the collection sets and its value, as one phrase."""
@@ -150,6 +155,12 @@ class TaskRule:
     settings: Optional[CollectionSettings] = None
     is_adaptive: bool = False
 
+    def first_seed(self) -> int:
+        """The seed the prefix starts at: the collection's, else 0."""
+        if self.settings is None:
+            return 0
+        return self.settings.first_seed
+
     @classmethod
     def from_record(cls, record: Mapping) -> "TaskRule":
         """The rule a task's machine.json says its prefix is read by.
@@ -184,7 +195,8 @@ class PrefixTracker:
         if not self.is_open:
             return
         seed = fold.number_of(row["seed"])
-        if seed != self.counts.shots:
+        expected = self.rule.first_seed() + self.counts.shots
+        if seed != expected:
             self.is_open = False
             return
         shot_counts = _shot_counts_of(row)
@@ -310,12 +322,11 @@ def _check_core_seconds(value) -> None:
     )
 
 
-def _check_minimum(value) -> None:
-    """min_shots is a whole number, zero for no minimum."""
+def _check_minimum(value, key: str) -> None:
+    """A count that may be zero: min_shots, or the first seed."""
     is_whole_number = isinstance(value, int) and not isinstance(value, bool)
     if is_whole_number and value >= 0:
         return
     raise ValueError(
-        f"collection min_shots must be a whole number of at least 0, got "
-        f"{value!r}"
+        f"collection {key} must be a whole number of at least 0, got {value!r}"
     )

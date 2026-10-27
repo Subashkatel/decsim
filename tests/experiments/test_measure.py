@@ -70,6 +70,7 @@ import decsim.frontends.settings as workload_settings
 import decsim.machine as machine_module
 import decsim.observe.decode_records as decode_records
 import decsim.observe.link_traffic as link_traffic
+import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.presets.clocks as clocks
 import decsim.presets.experiment_one as experiment_one
@@ -86,10 +87,14 @@ import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph as graph
+import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.revision_rules as revision_rules
+import decsim.windows.routers as routers
 import decsim.windows.settings as window_settings
 import examples.live_memory_example as live_memory_example
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
+import tests.patch_pools as patch_pools
 import tests.qpu.memory_programs as memory_programs
 import tests.topology.test_graph_layout as layout_tests
 from decsim.decoders.measured_table import decoder as measured_table_decoder
@@ -151,6 +156,7 @@ CHAIN = (
     "service",
     "confidence",
     "selection_wait",
+    "input_check_wait",
     "output_link_per_window",
     "frame_commit",
 )
@@ -622,6 +628,59 @@ def test_a_strong_primary_runs_pool_columns_are_the_strong_tiers():
     assert measurement.strong_busy_fraction > 0.0
 
 
+def test_a_tiers_columns_are_its_pools_rows_read_together():
+    """A weak pool per patch, one unit each, all escalating to one strong.
+
+    The weak tier is the three pools: its offered load is their busy
+    time over their three units, here the mean of their own loads, and
+    its queue peak the largest of theirs. Each window is committed off
+    one pool's decode, and each escalated window off the strong pool's
+    (tests/patch_pools.py).
+    """
+    machine = patch_pools.shared_strong_per_patch()
+    shot = patch_pools.shot(machine)
+
+    measurement = measure.measure_shot(shot)
+
+    weak, w1, w2, strong = measurement.pools
+    weak_rows = (weak, w1, w2)
+    weak_loads = [row.offered_load for row in weak_rows]
+    weak_queues = [row.queue_max for row in weak_rows]
+    weak_escalated = [row.escalated_windows for row in weak_rows]
+    committed = [row.committed_windows for row in measurement.pools]
+    assert [row.pool for row in measurement.pools] == [
+        "weak",
+        "w1",
+        "w2",
+        "strong",
+    ]
+    mean_load = statistics.fmean(weak_loads)
+    assert measurement.weak_offered_load == pytest.approx(mean_load)
+    assert measurement.weak_queue_max == max(weak_queues)
+    assert measurement.strong_offered_load == strong.offered_load
+    assert sum(committed) == measurement.decoded_windows
+    assert sum(weak_escalated) == measurement.escalated_windows
+    assert strong.committed_windows == measurement.escalated_windows
+    assert min(weak_escalated) > 0
+
+
+def test_entry_pools_of_two_kinds_name_both_as_the_tasks_algorithm():
+    machine = patch_pools.one_pool()
+    weak = machine.part(machines.WEAK_POOL)
+    matching_settings = (
+        minimum_weight_perfect_matching.PyMatchingDecoder.Settings()
+    )
+    matching = dataclasses.replace(weak.settings, algorithm=matching_settings)
+    pools = (("w1", matching), ("w2", weak.settings))
+    rule = routers.ByPatch.Settings(pool_by_patch=patch_pools.POOL_BY_PATCH)
+    routed = machines.with_router(machine, rule, pools)
+    layout = layout_tests.laid_out(routed)
+
+    kind = measure.active_decoder_kind(layout)
+
+    assert kind == "union_find+pymatching"
+
+
 def test_patches_named_by_an_int_and_a_str_are_measured():
     """Windows are ordered by records/identity.py, not Python's comparison."""
     minimal = run_files.minimal_machine(TASK_CELLS)
@@ -979,6 +1038,27 @@ def test_an_escalated_windows_points_sum_to_its_reaction_time():
     assert totals == reaction_ticks(measurement)
 
 
+def test_a_checked_windows_points_sum_to_its_reaction_time():
+    """A kept answer on a guessed boundary waits in input_check_wait.
+
+    Under checked boundaries the window after an escalated one decodes
+    on the weak boundary, and its kept answer waits for the final one
+    before it leaves for the frame (windows/input_checks.py); a window
+    whose guess was wrong is decoded again, the dropped decode in its
+    dep_block. Every point still adds up to the window's reaction time
+    to the tick.
+    """
+    checked = boundary_policies.Checked.Settings()
+    redo = strong_window_shapes.RedoWindow.Settings(boundary_policy=checked)
+    settings = switching_settings(20.0, strong_window=redo)
+    task = task_at(settings, SWITCHING_ERROR_PROBABILITY)
+
+    measurement = measured(task)
+
+    assert chain_sum_ticks(measurement) == reaction_ticks(measurement)
+    assert max(measurement.samples["input_check_wait"]) > 0
+
+
 def test_a_batched_windows_points_sum_to_its_reaction_time():
     """A merged batch's stages are found under each member's window.
 
@@ -1289,6 +1369,33 @@ def test_a_cancelled_speculative_decode_ends_at_the_cancel():
     cancelled_stages = [record.stage for record in cancelled]
     assert ends == verdicts
     assert cancelled_stages == ["algorithm"] * 10
+
+
+def test_a_no_cancel_shot_answers_as_the_cancelling_one():
+    """Every window is kept while its strong decode runs on, unwanted.
+
+    no_cancel lets each speculative strong decode run to its end and
+    drops its answer (revision_rules.NoCancel). Those decodes still read
+    the stream's rounds after its last window is final, and the result
+    is delivered then all the same, so the shot answers and is measured
+    as the cancelling one is.
+    """
+    no_cancel = revision_rules.NoCancel.Settings()
+    settings = switching_settings(0.0, run_both_at_once=True)
+    letting_run = settings.with_settings(
+        machines.SWITCHING, cancel_rule=no_cancel
+    )
+    task = task_at(letting_run, SWITCHING_ERROR_PROBABILITY)
+
+    shot = collect.run_shot(task, 0)
+    measurement = measure.measure_shot(shot)
+    cancelling = switching_run(0.0, run_both_at_once=True)
+
+    counts = shot.machine.decoders.decoder_manager.strong_requests.counts
+    cancelling_results = cancelling.result.operation_results
+    assert counts.abandoned == 10
+    assert shot.result.operation_results == cancelling_results
+    assert measurement.logical_failure is False
 
 
 def test_a_full_buffer_0_holds_rounds_and_the_wait_is_a_point():
@@ -1768,7 +1875,7 @@ def _boundary_row(source_index, destination_index, attributed_index, times):
         "destination_window_key": destination,
     }
     attribution = {
-        "operation_id": operation,
+        "owner_id": operation,
         "window_id": attributed_index,
         "relation": relation,
     }
@@ -3007,7 +3114,7 @@ def _verdicts_of_rows(rows) -> dict:
     """Each row's window: its gap, and whether it escalated."""
     verdicts = {}
     for row in rows:
-        key = (row["operation_id"], row["window_index"])
+        key = (row["stream_id"], row["window_index"])
         verdicts[key] = (row["gap_nats"], row["escalated"])
     return verdicts
 
@@ -3020,7 +3127,7 @@ def _verdicts_of_requests(requests) -> dict:
         if ended.outcome not in decode_records.VERDICT_OUTCOMES:
             continue
         request_key = ended.job.request_key
-        key = (request_key.operation_id, request_key.window_id)
+        key = (request_key.stream_id, request_key.window_id)
         gap = _gap_of(ended.result)
         verdicts[key] = (gap, ended.outcome is escalated)
     return verdicts
@@ -3071,6 +3178,33 @@ def test_a_shot_fails_exactly_when_its_window_answers_miss_their_labels():
     assert "1" in weak_labels
     assert all(row.detection_events is not None for row in rows)
     assert "window_outcomes" not in shot_row
+
+
+def test_an_escalated_window_records_whether_belief_matching_matched():
+    """Higgott et al. 2203.04948 Algorithm 1: matching only when BP fails.
+
+    Every window escalates to belief matching, and each row carries the
+    strong decode's own report, so a run's windows split into those BP
+    answered and those the matching answered.
+    """
+    timing = belief_matching.IterationTime(
+        iteration_microseconds=1.0, matching_microseconds=10.0
+    )
+    strong = belief_matching.BeliefMatchingDecoder.Settings(
+        max_iterations=20, timing=timing
+    )
+    settings = switching_settings(
+        1000000.0,
+        observation=("record_window_outcomes",),
+        strong_algorithm=strong,
+    )
+    task = task_at(settings, SWITCHING_ERROR_PROBABILITY)
+    measurement = measured(task, seed=3)
+    rows = measurement.window_outcomes
+    reports = [json.loads(row.strong_evidence) for row in rows]
+    assert rows
+    assert all(row.is_escalated for row in rows)
+    assert {tuple(report) for report in reports} == {("matched",)}
 
 
 def test_a_chains_deep_windows_are_measured_on_the_deep_pools_input():
@@ -3156,3 +3290,30 @@ def _tier_columns(machine) -> dict:
         if field.name.startswith(("weak_", "strong_")):
             columns[field.name] = getattr(measured, field.name)
     return columns
+
+
+def _write_row(path: str, relation, delay_ticks: int) -> dict:
+    """A controller write's transfer row, as the link ledger writes one."""
+    return {
+        "path": path,
+        "attribution": {
+            "rounds_by_stream": [{"round_lo": 1}],
+            "relation": relation,
+        },
+        "total_delay_ticks": delay_ticks,
+    }
+
+
+def test_a_rounds_copy_is_not_counted_as_a_second_write_of_the_round():
+    own = _write_row("controller_to_weak_buffer", None, 1_000_000)
+    copy = _write_row(
+        "controller_to_fpga_b_buffer",
+        {"copy_into": "fpga_b_buffer"},
+        2_000_000,
+    )
+    hops = ("controller_to_weak_buffer", "controller_to_fpga_b_buffer")
+
+    settings = observe_settings.ObservationSettings()
+    delays = measure.controller_write_delays_us([own, copy], hops, settings)
+
+    assert delays == [1.0]

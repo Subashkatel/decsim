@@ -218,7 +218,7 @@ class MostCritical:
 
     def served(self, job: decoding_records.DecodeJob) -> None:
         """A served job's critical operation is no longer ahead."""
-        self.served_operation_ids.add(job.operation_id)
+        self.served_operation_ids.add(job.stream_id)
 
     def _critical_decodes_ahead(self, patch: Any) -> int:
         critical_ids = self.program.critical_ids_by_patch.get(patch, ())
@@ -246,7 +246,7 @@ class ProgramTable:
 
     def patches_of(self, job: decoding_records.DecodeJob) -> tuple:
         """The job's patches; a job the program does not list has none."""
-        return self.patches_by_operation.get(job.operation_id, ())
+        return self.patches_by_operation.get(job.stream_id, ())
 
     def patch_of(self, job: decoding_records.DecodeJob) -> Any:
         """The patch a policy ranks the job by: its operation's first.
@@ -257,11 +257,11 @@ class ProgramTable:
         patches = self.patches_of(job)
         if patches:
             return patches[0]
-        return ("operation", job.operation_id)
+        return ("operation", job.stream_id)
 
     def is_critical(self, job: decoding_records.DecodeJob) -> bool:
         """Whether another operation waits on this job's decision."""
-        return job.operation_id in self.critical_ids
+        return job.stream_id in self.critical_ids
 
     def spans_patches(self, job: decoding_records.DecodeJob) -> bool:
         """Whether the job's operation measures over several patches."""

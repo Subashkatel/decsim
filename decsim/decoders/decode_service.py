@@ -24,6 +24,7 @@ import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.decoder_unit as decoder_unit_module
 import decsim.decoders.strong_requests as strong_requests_module
 import decsim.engine as engine_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.log_sources as log_sources
 import decsim.statistics.kinds as statistic_kinds
@@ -85,6 +86,11 @@ class DecodeService:
         ),
     )
     statistics = statistics_registry.unrecorded(STATISTICS)
+
+    # the execution slots of the device the pool sits on, shared with
+    # every pool there; None for a pool whose units' compute is their
+    # own, as an FPGA's or an ASIC's is (decoders/execution_slots.py)
+    device = ports.Port(ports.ExecutionSlots, optional=True)
 
     def __init__(
         self,
@@ -237,9 +243,19 @@ class DecodeService:
             self._predict_compute_free(job)
 
     def begin(self, job: decoding_records.DecodeJob) -> None:
-        """The unit's memory holds the input: start the decode."""
+        """The unit's memory holds the input: start the decode.
+
+        On a shared device it starts once it has a slot; until then it
+        waits with its input landed, and the device starts it.
+        """
         if job.cancelled:  # cancelled while its input was in flight
             return
+        if self.device is not None and not self.device.take(job, self._run):
+            return
+        self._run(job)
+
+    def _run(self, job: decoding_records.DecodeJob) -> None:
+        """Start the decode on its unit, its compute and its slot held."""
         if job.gate is not None:
             # the seam mask is XORed into the landed input exactly once,
             # at the moment the decode actually starts
@@ -258,6 +274,8 @@ class DecodeService:
         unit.evict(job)
         if unit.holder is job:
             unit.release_compute()
+        if self.device is not None:
+            self.device.give_back(job)
         self.engine.log_io(
             f"unit {unit.name} SRAM",
             lambda: _emitted_description(job, unit),
@@ -274,6 +292,8 @@ class DecodeService:
         unit = job.unit
         self.statistics.evicted.add()
         self._cancel_held_inputs(job)
+        if self.device is not None:
+            self.device.withdraw(job)
         unit.evict(job)
         if unit.holder is job:
             unit.release_compute()

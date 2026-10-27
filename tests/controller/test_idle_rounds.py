@@ -15,6 +15,9 @@ import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.policies as policies
 import decsim.observe.controller_counters as controller_counters
 import decsim.records.program as program_records
+import decsim.records.windows as window_records
+import decsim.windows.routers as routers
+import tests.one_entry as one_entry
 
 
 class RecordingQpu:
@@ -55,37 +58,33 @@ class RecordingDecodeQueue:
     def __init__(self):
         self.demands = []
 
-    def enqueue_without_input(
-        self, round_count, on_done, label, code, spatial_nodes
-    ):
+    def enqueue_without_input(self, round_count, on_done, label):
         del on_done
-        self.demands.append(
-            {
-                "rounds": round_count,
-                "code": code,
-                "spatial_nodes": spatial_nodes,
-                "label": label,
-            }
-        )
+        self.demands.append({"rounds": round_count, "label": label})
 
 
 def patch_record():
-    geometry = types.SimpleNamespace(
-        commit_round_count=2, buffer_round_count=1, code_name="surface-code"
-    )
-    return types.SimpleNamespace(code_geometry=geometry, spatial_node_count=17)
+    geometry = types.SimpleNamespace(commit_round_count=2, buffer_round_count=1)
+    return types.SimpleNamespace(code_geometry=geometry)
 
 
-def accounting_with(policy, streams=None):
+def accounting_with(policy, streams=None, entry_queues=None):
+    """The accounting over patch-a and patch-b, one pool's queue for both.
+
+    entry_queues, when given, is the router that picks each operation's
+    queue instead.
+    """
     if streams is None:
         streams = RecordingStreams()
     qpu = RecordingQpu()
     demand = RecordingDecodeQueue()
+    if entry_queues is None:
+        entry_queues = one_entry.router(decode_queue=demand)
     geometry_by_patch = {"patch-a": patch_record(), "patch-b": patch_record()}
     accounting = idle_rounds_module.IdleRoundAccounting(
         policy, geometry_by_patch
     )
-    accounting.decode_queue = demand
+    accounting.entry_queues = entry_queues
     accounting.streams = streams
     accounting.qpu = qpu
     accounting.windows = RecordingWindows()
@@ -261,3 +260,32 @@ def test_the_workload_end_charges_every_patchs_remaining_idle_rounds():
         (2, "mem(memory,r3)"),
         (2, "mem(other,r1)"),
     ]
+
+
+def test_each_patchs_idle_decodes_go_to_the_pool_its_router_names():
+    """patch-a's to weak, patch-b's to fpga_b: VQD's decoder per qubit.
+
+    An idle patch's rounds are its operation's, so its decode goes
+    where that operation's windows go (2406.17995v2 Sec. 4.1).
+    """
+    weak_queue = RecordingDecodeQueue()
+    fpga_queue = RecordingDecodeQueue()
+    fpga_b = window_records.PoolId("fpga_b")
+    table = (("patch-a", "weak"), ("patch-b", "fpga_b"))
+    rule = routers.ByPatch.Settings(pool_by_patch=table)
+    router = routers.Router(rule)
+    weak_side = routers.EntrySide(window_records.WEAK_POOL_ID, weak_queue, None)
+    fpga_side = routers.EntrySide(fpga_b, fpga_queue, None)
+    router.add_side(weak_side)
+    router.add_side(fpga_side)
+    charged = policies.SeparateDecodeJobs()
+    accounting, _qpu, _demand = accounting_with(charged, entry_queues=router)
+
+    emit_idle_rounds(accounting, 7, "patch-a", (1, 2, 3))
+    accounting.emit_idle_round(8, "patch-b", 1)
+    accounting.end_every_idle_period()
+
+    weak_labels = [job["label"] for job in weak_queue.demands]
+    fpga_labels = [job["label"] for job in fpga_queue.demands]
+    assert weak_labels == ["mem(memory,r2)", "mem(memory,r3)"]
+    assert fpga_labels == ["mem(other,r1)"]

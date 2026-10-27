@@ -49,6 +49,15 @@ A decoder that grows clusters also holds a weight_step and a timing, which a clu
 | `name` | `str` |
 | `build(self, weak_algorithm: DecoderSettings, threshold_nats: Optional[float])` | `ConfidenceSignal` |
 
+### `CouplingOrderSettings`
+
+`decsim/ports.py`. A coupling order row's settings record.
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `build(self)` | `CouplingOrder` |
+
 ### `IdlePolicySettings`
 
 `decsim/ports.py`. An idle policy's row: the record that builds the policy.
@@ -113,11 +122,14 @@ fragments is a folder of the four fragments and physical.json (workload_files.re
 
 ### `ClusterGap.Settings`
 
-`decsim/confidence/cluster.py`. Its settings: walk_microseconds prices the walk, None measures it.
+`decsim/confidence/cluster.py`. Its settings: what the walk costs, or None for both to measure it.
+
+walk_microseconds declares the walk's time. walk_decodes prices it as that many of its own decode's cycle counts on the weak unit; 1 is one more decode.
 
 | Field | Type | Default |
 | --- | --- | --- |
 | `walk_microseconds` | `Optional[float]` | `None` |
+| `walk_decodes` | `Optional[float]` | `None` |
 
 ### `ComplementaryGap.Settings`
 
@@ -217,11 +229,13 @@ As a gem5 FUPool takes its units as one parameter (src/cpu/o3/FUPool.py:49). nam
 
 ### `PresetLatencyDecoder.Settings`
 
-`decsim/decoders/decoders.py`. The one latency every job takes.
+`decsim/decoders/decoders.py`. The latency every job takes, and the one from a window on.
 
 | Field | Type | Default |
 | --- | --- | --- |
 | `latency_microseconds` | `float` | `1.0` |
+| `later_latency_microseconds` | `Optional[float]` | `None` |
+| `from_window` | `Optional[int]` | `None` |
 
 ### `PoolingSettings`
 
@@ -261,6 +275,16 @@ As a gem5 FUPool takes its units as one parameter (src/cpu/o3/FUPool.py:49). nam
 | --- | --- | --- |
 | `members` | `tuple` | `()` |
 | `pooling` | `PoolingSettings` | `MostLikely.Settings()` |
+
+### `ExecutionSlots.Settings`
+
+`decsim/decoders/execution_slots.py`. slot_count decodes may run at once on the device.
+
+A device part placed at a site holds this record; every pool at that site shares the slots.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `slot_count` | `int` | required |
 
 ### `FifoScheduler.Settings`
 
@@ -578,13 +602,14 @@ The facts at_task and for_task read are the machine's task facts (topology/graph
 
 `decsim/escalation/settings.py`. A verdict row's settings record (verdicts.py).
 
-reads_threshold says whether the verdict decides on the edge's threshold; reads_consensus whether it decides on an ensemble's agreement, the consensus row's soft output.
+reads_threshold says whether the verdict decides on the edge's threshold; reads_consensus whether it decides on an ensemble's agreement, the consensus row's soft output; reads_source_queue whether it reads the source pool's waiting jobs, a port the build binds.
 
 | Member | Type |
 | --- | --- |
 | `name` | `str` |
 | `reads_threshold` | `bool` |
 | `reads_consensus` | `bool` |
+| `reads_source_queue` | `bool` |
 | `build(self)` | `ports.EscalationVerdict` |
 
 ### `ReplaceRuleSettings`
@@ -670,6 +695,12 @@ strong_answer_route names one of records/routes.py ANSWER_ROUTE_NAMES, the way a
 
 `decsim/escalation/strong_window_shapes.py`. The redo window, as the switching slot names it.
 
+boundary_policy is the boundary row the windows take: held, the default, where the window after an escalated one waits for the strong answer, or checked, where it decodes on the weak boundary and is checked when the strong one lands. Eager is refused (policies.py): its provisional boundary is never corrected.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `boundary_policy` | `ports.BoundaryPolicySettings` | `boundary_policies.Held.Settings()` |
+
 ### `DoubleWindow.Settings`
 
 `decsim/escalation/strong_window_shapes.py`. The double window, as the switching slot names it.
@@ -679,6 +710,19 @@ restart_reread_buffer_regions is how many of the strong region's buffer regions 
 | Field | Type | Default |
 | --- | --- | --- |
 | `restart_reread_buffer_regions` | `int` | `1` |
+
+### `TargetSteps.Settings`
+
+`decsim/escalation/target_steps.py`. The levels, the start, the cadence and the trend's tests.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `start` | `float` | required |
+| `levels` | `tuple` | `(0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)` |
+| `check_every_windows` | `int` | `100` |
+| `rise_checks` | `int` | `2` |
+| `rise_margin_windows` | `float` | `5.0` |
+| `calm_checks` | `int` | `5` |
 
 ### `FixedThreshold.Settings`
 
@@ -717,6 +761,17 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 | `min_escalation_rate` | `float` | `1e-05` |
 | `max_escalation_rate` | `float` | `0.3` |
 
+### `RateThreshold.Settings`
+
+`decsim/escalation/threshold_sources.py`. The start in decibels, the target share and the step.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `threshold_decibels` | `float` | required |
+| `target_escalation_rate` | `float` | required |
+| `step_decibels` | `float` | `0.25` |
+| `steps` | `Optional[target_steps.TargetSteps.Settings]` | `None` |
+
 ### `GapThreshold.Settings`
 
 `decsim/escalation/verdicts.py`. The gap row, which reads the edge's confidence and threshold.
@@ -741,6 +796,24 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 
 `decsim/escalation/verdicts.py`. The never row, which takes no setting.
 
+### `Bernoulli.Settings`
+
+`decsim/escalation/verdicts.py`. rate is the probability that a window escalates.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `rate` | `float` | required |
+| `later_rate` | `Optional[float]` | `None` |
+| `from_window` | `Optional[int]` | `None` |
+
+### `BacklogBernoulli.Settings`
+
+`decsim/escalation/verdicts.py`. The outer loop's settings.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `steps` | `target_steps.TargetSteps.Settings` | required |
+
 ## decsim/frontends
 
 ### `WorkloadSettings`
@@ -757,6 +830,7 @@ fixes_the_distance and fields_set_in_the_run_file name what an assignment by pat
 | `protected_regions` | `tuple` | `()` |
 | `rounds_policy` | `Optional[ports.RoundsPolicy]` | `None` |
 | `physical_circuits` | `tuple` | `()` |
+| `patch_lives` | `tuple` | `()` |
 | `feedback_boundary_mode` | `str` | `'trailing_buffer'` |
 | `workload_record` | `Optional[workload_records.Workload]` | `None` |
 
@@ -940,6 +1014,12 @@ folds_windows is a stream's: the run keeps no run-long ledger of windows, frame 
 
 record_window_outcomes keeps each window's committed answer, and its true label when the source keeps its errors (ErrorModelStimDevice), for window_outcomes.csv (observe/window_outcomes.py).
 
+checkpoint_every_rounds closes a checkpoint of each stream every that many rounds and at its last round: the logical outcome had the stream been read out there, a source copy read out without noise and decoded to the end on the machine's own path at no simulated time (Tan et al. 2209.09219 lines 1003-1037; observe/checkpoints.py). Its rows give the logical error rate of runs of every length from one run (experiments/failure_statistics.py). None, the default, closes none.
+
+answer_check_paths checks each window's weak and strong answers against the truth, each at the checkpoint after the window, and keeps one chain of answers a path named: weak, strong or best_of_two (observe/answer_checks.py). One switching run then gives each decoder alone and the per-window best-of-two line on the same shots. Empty, the default, checks nothing.
+
+answer_check_thresholds keeps one more chain a threshold named, in decibels: a static chain, which keeps the weak answer unless the machine's own verdict row escalates it at that fixed threshold, and then keeps the strong one. Only its outcome and its escalated and decided windows are kept, so one switching run gives the failure rate and escalated share of every static threshold on the same shots. Empty, the default, keeps none.
+
 The log and the trace are labels (compare=False) and no part of a task's id, as sinter keeps output options out of a task's strong id (sinter/_data/_task.py:167-204): the writers schedule nothing. The others stay in the id because they add or shape a shot's columns: record_switching_windows and backlog_trace the wait and backlog columns, data_movement the shot_data_movement rows, record_window_outcomes the window_outcomes rows, the interval the latency columns, the deadline the deadline columns.
 
 | Field | Type | Default |
@@ -957,6 +1037,9 @@ The log and the trace are labels (compare=False) and no part of a task's id, as 
 | `reaction_deadline_microseconds` | `Optional[float]` | `None` |
 | `warmup_rounds` | `int` | `config.added_field(0)` |
 | `folds_windows` | `bool` | `config.added_field(False)` |
+| `checkpoint_every_rounds` | `Optional[int]` | `config.added_field(None)` |
+| `answer_check_paths` | `tuple` | `config.added_field(())` |
+| `answer_check_thresholds` | `tuple` | `config.added_field(())` |
 
 ## decsim/pauli_frame
 
@@ -1000,6 +1083,8 @@ stabilizer_randomization draws the random outcomes of the first measurement of e
 | --- | --- | --- |
 | `rollover_rounds` | `int` | `DEFAULT_ROLLOVER_ROUNDS` |
 | `stabilizer_randomization` | `bool` | `True` |
+| `drift_round` | `Optional[int]` | `None` |
+| `drift_factor` | `float` | `1.0` |
 
 ### `UniformLayout.Settings`
 
@@ -1094,6 +1179,14 @@ burst_onset_round is the first one-based round with extra noise. It climbs to bu
 
 `decsim/qpu/stim_device.py`. The error model row has no keys: the circuit states its model.
 
+### `DatasetStimDevice.Settings`
+
+`decsim/qpu/stim_device.py`. The dataset row: the folder written by shot_datasets.seal.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `dataset_folder` | `str` | required |
+
 ### `StreamingStimDevice.Settings`
 
 `decsim/qpu/streaming_stim_device.py`. The live source has no keys: the fragments state every width.
@@ -1156,6 +1249,22 @@ bits bounds the store; None is unbounded. A full store makes the controller hold
 
 `decsim/windows/boundary_policies.py`. The held row, which takes no setting.
 
+### `Checked.Settings`
+
+`decsim/windows/boundary_policies.py`. The checked row, which takes no setting.
+
+### `CoordinateOrder.Settings`
+
+`decsim/windows/coupling_orders.py`. The coordinate order, which takes no setting.
+
+### `OwnStreams.Settings`
+
+`decsim/windows/release_rules.py`. The own-streams row, which takes no setting.
+
+### `DecodedAncestors.Settings`
+
+`decsim/windows/release_rules.py`. The decoded-ancestors row, which takes no setting.
+
 ### `LatestRevision.Settings`
 
 `decsim/windows/revision_rules.py`. The latest row, which takes no setting.
@@ -1190,13 +1299,24 @@ bits bounds the store; None is unbounded. A full store makes the controller hold
 | --- | --- | --- |
 | `pool_by_patch` | `tuple` | `()` |
 
+### `OnePool.Settings`
+
+`decsim/windows/routers.py`. The one entry pool, by its part's name.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `pool` | `str` | required |
+
 ### `Router.Settings`
 
-`decsim/windows/routers.py`. The router's rule (this module's rows).
+`decsim/windows/routers.py`. The router's rule (this module's rows), and the factory's pool.
+
+factory_pool names the pool the magic-state factory's correction decodes go to; None names the one entry pool of a machine with one. No paper sets decoders aside for a factory: DecoNet decodes 15-to-1 distillation on its per-qubit decoders (2504.11805 Sec. VIII-F) and VQD decodes the factory's storage patches in its shared pool (2406.17995 Sec. 5.3), so a run names which pool serves them (build/layout.py factory_pool).
 
 | Field | Type | Default |
 | --- | --- | --- |
 | `rule` | `RuleSettings` | `ByPatch.Settings()` |
+| `factory_pool` | `Optional[str]` | `None` |
 
 ### `SchemeSettings`
 
@@ -1211,6 +1331,16 @@ It holds the window sizes, None being the code distance, and builds the scheme w
 | `buffer_rounds` | `Optional[int]` |
 | `build(self, terminal_policy: str)` | `ports.WindowingScheme` |
 
+### `ReleaseRuleSettings`
+
+`decsim/windows/settings.py`. A release rule row's settings record (windows/release_rules.py).
+
+| Member | Type |
+| --- | --- |
+| `name` | `str` |
+| `awaits_ancestors` | `bool` |
+| `build(self, operations: tuple)` | `release_rules.ReleaseRule` |
+
 ### `BoundaryPayloadSettings`
 
 `decsim/windows/settings.py`. A payload row's settings record (windows/boundary_payloads.py).
@@ -1223,7 +1353,7 @@ It holds the window sizes, None being the code distance, and builds the scheme w
 
 `decsim/windows/settings.py`. The window side's settings.
 
-scheme is a windowing scheme row's Settings record (windows/schemes/), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a tail or a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py), how the hand-off between windows is written on the hop between their decoders. clock and decision_cycles price issuing one decode request; clock None is the machine's clock. recorded_confidence is a confidence row's Settings record (decsim/confidence/) that a run with no switching computes on every window and records, deciding nothing, so a decoder run alone gives each window's gap beside its answer; its work is charged as on a switching run. None computes none; a switching run records its own edge's signal.
+scheme is a windowing scheme row's Settings record (windows/schemes/), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a tail or a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py), how the hand-off between windows is written on the hop between their decoders. clock and decision_cycles price issuing one decode request; clock None is the machine's clock. recorded_confidence is a confidence row's Settings record (decsim/confidence/) that a run with no switching computes on every window and records, deciding nothing, so a decoder run alone gives each window's gap beside its answer; its work is charged as on a switching run. None computes none; a switching run records its own edge's signal. release_rule is a release rule row's Settings record (windows/release_rules.py), the decodes a blocking operation's outcome waits for; None is release_rule_for's choice by the run.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -1234,6 +1364,7 @@ scheme is a windowing scheme row's Settings record (windows/schemes/), which hol
 | `boundary_policy` | `ports.BoundaryPolicySettings` | `boundary_policies.Eager.Settings()` |
 | `boundary_payload` | `BoundaryPayloadSettings` | `boundary_payloads.DenseSeamMask.Settings()` |
 | `recorded_confidence` | `Optional[ports.ConfidenceSettings]` | `None` |
+| `release_rule` | `Optional[ReleaseRuleSettings]` | `None` |
 
 ## decsim/windows/schemes
 
@@ -1254,6 +1385,18 @@ scheme is a windowing scheme row's Settings record (windows/schemes/), which hol
 | --- | --- | --- |
 | `commit_rounds` | `Optional[int]` | `None` |
 | `buffer_rounds` | `Optional[int]` | `None` |
+
+### `RegionSlidingScheme.Settings`
+
+`decsim/windows/schemes/region_sliding.py`. The region length, None being the code distance, and the order.
+
+A window's buffer is the whole next region, so no buffer length is set. coupling_order is a row of windows/coupling_orders.py.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `commit_rounds` | `Optional[int]` | `None` |
+| `buffer_rounds` | `Optional[int]` | `None` |
+| `coupling_order` | `ports.CouplingOrderSettings` | `coupling_orders.CoordinateOrder.Settings()` |
 
 ### `TanSandwichScheme.Settings`
 

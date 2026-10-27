@@ -56,9 +56,9 @@ class DecoderManager:
     # one ledger for both sides: the chip's side opens a strong request
     # and the host's side serves it
     strong_requests = ports.Port(strong_requests_module.StrongRequests)
-    # the switching policy, which learns from a strong result; None on a
-    # run with no switching
-    escalation_policy = ports.Port(ports.EscalationPolicy, optional=True)
+    # who learns from a strong result this pool serves: the policy of the
+    # edge that escalated it; None on a pool no edge targets
+    strong_result_learner = ports.Port(ports.StrongResultLearner, optional=True)
 
     def __init__(
         self,
@@ -97,6 +97,10 @@ class DecoderManager:
             self.queue, pool, self.service
         )
         self.outcomes = decode_outcomes.DecodeOutcomes(engine, self)
+
+    def place_on(self, device: ports.ExecutionSlots) -> None:
+        """The pool's decodes run in the slots of a device it shares."""
+        self.service.device = device
 
     def attach_statistics(
         self, run_statistics: statistics_registry.Registry, path: str
@@ -228,8 +232,6 @@ class DecoderManager:
         round_count: int,
         on_done: Callable[[], None],
         label: str = "external",
-        code: Optional[str] = None,
-        spatial_nodes: Optional[int] = None,
     ) -> None:
         """Queue a self-contained decode: a factory correction, an idle decode.
 
@@ -238,14 +240,12 @@ class DecoderManager:
         round credits.
         """
         job = decoding_records.DecodeJob(
-            operation_id=-1,
+            stream_id=-1,
             window_id=0,
             round_count=round_count,
             ready_time=self.engine.now,
             on_done=on_done,
             label=label,
-            code=code,
-            spatial_nodes=spatial_nodes,
             kind=decoding_records.DecodeJobKind.SELF_CONTAINED,
         )
         self.queue.add(job)
@@ -373,6 +373,14 @@ class DecoderManager:
     ) -> None:
         """The window side decided this weak request; close its attempt."""
         self.outcomes.resolve_weak_request(job, result, verdict)
+
+    def discard_weak_request(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """The window side dropped this weak result; close its attempt."""
+        self.outcomes.discard_weak_request(job, result)
 
     def close_companion_request(
         self,
@@ -697,7 +705,7 @@ def _refuse_spent_job(job: decoding_records.DecodeJob) -> None:
         return
     raise RuntimeError(
         f"decode job {job.label!r} for window "
-        f"({job.operation_id}, {job.window_id}) has already been {spent}: a "
+        f"({job.stream_id}, {job.window_id}) has already been {spent}: a "
         "DecodeJob is submitted once, build a new one"
     )
 
@@ -715,7 +723,7 @@ def _spent_state(job: decoding_records.DecodeJob) -> Optional[str]:
 def _is_live_weak_window_job(
     job: decoding_records.DecodeJob, window_key: tuple
 ) -> bool:
-    key = (job.operation_id, job.window_id)
+    key = (job.stream_id, job.window_id)
     if key != window_key:
         return False
     if job.kind is not decoding_records.DecodeJobKind.WINDOW:

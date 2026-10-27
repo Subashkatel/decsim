@@ -19,7 +19,6 @@ import functools
 from collections.abc import Callable
 from typing import Optional
 
-import decsim.config as config
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
@@ -34,16 +33,18 @@ import decsim.records.windows as window_records
 class DecoderOutput:
     """Sends one decoder's answers where they go.
 
-    A correction commits into the frame as a priced write. Each pool's
-    answer takes its route in routes, and clock prices a route's commit
-    step on the weak chip. An answer names the request it answers on
-    every hop that crosses the wall: CUDA-Q's reply echoes the request's
-    id, "enabling out-of-order or pipelined verification of responses"
-    (cudaq_realtime_message_protocol.md, Request ID Semantics), and gem5
-    sizes a response that carries data as that data plus the control
-    size (gem5 src/mem/ruby/network/Network.cc MessageSizeType_to_int,
-    Response_Data). An answer on the board with its frame carries no
-    name; a run that frames that hop sets its header_bits_per_transfer.
+    A correction commits into the frame as a priced write. Each answer
+    takes its route in routes, by its pool and the pool that asked, and
+    clock_by_asker prices a route's commit step on the asking pool's
+    chip, on its edge's switching clock. An answer names the request it
+    answers on every hop that crosses the wall: CUDA-Q's reply echoes the
+    request's id, "enabling out-of-order or pipelined verification of
+    responses" (cudaq_realtime_message_protocol.md, Request ID
+    Semantics), and gem5 sizes a response that carries data as that data
+    plus the control size (gem5 src/mem/ruby/network/Network.cc
+    MessageSizeType_to_int, Response_Data). An answer on the board with
+    its frame carries no name; a run that frames that hop sets its
+    header_bits_per_transfer.
     """
 
     transfers = ports.Port(ports.WindowTransfers)
@@ -57,11 +58,13 @@ class DecoderOutput:
         self,
         engine: engine_module.Engine,
         routes: route_records.Routes,
-        clock: Optional[config.Clock] = None,
+        clock_by_asker: Optional[dict] = None,
     ) -> None:
         self.engine = engine
         self.routes = routes
-        self.clock = clock
+        if clock_by_asker is None:
+            clock_by_asker = {}
+        self.clock_by_asker = clock_by_asker
 
     def publish(
         self,
@@ -70,14 +73,17 @@ class DecoderOutput:
         result: decoding_records.DecodeResult,
         request_key: window_records.DecoderRequestKey,
         on_committed: Callable[[], None],
+        asked_by: Optional[window_records.PoolId] = None,
     ) -> None:
-        """Send the result home on its pool's route; commit it at delivery.
+        """Send the result home on its route; commit it at delivery.
 
-        A route with a hop down sends the answer to the weak chip first,
-        whose commit step sends it home; the frame's priced write, when
-        the run has a frame, gates on_committed.
+        asked_by is the source of the edge that asked for the decode,
+        None for a window the pool decoded first. A route with a hop
+        down sends the answer to that source's chip first, whose commit
+        step sends it home; the frame's priced write, when the run has
+        a frame, gates on_committed.
         """
-        route = self.routes.answer(request_key.pool)
+        route = self.routes.answer(request_key.pool, asked_by)
         flip_bits = result_payload_bits(result, operation)
         commit = functools.partial(
             self._commit, window.key, result, request_key, on_committed
@@ -95,7 +101,7 @@ class DecoderOutput:
             send_home()
             return
         at_the_chip = functools.partial(
-            self._commit_on_the_chip, route.commit_cycles, send_home
+            self._commit_on_the_chip, route.commit_cycles, asked_by, send_home
         )
         self._send_answer(
             route.down, window, operation, request_key, flip_bits, at_the_chip
@@ -160,9 +166,13 @@ class DecoderOutput:
         weak_job: decoding_records.DecodeJob,
         strong_request_key: window_records.DecoderRequestKey,
     ) -> int:
-        """The request's name, then the crossing commit the host joins."""
+        """The request's name, then the crossing commit the host joins.
+
+        The source job's pool is the one that asks.
+        """
         name_bits = window_records.REQUEST_KEY_WIRE_BITS
-        strong_route = self.routes.answer(strong_request_key.pool)
+        asked_by = weak_job.request_key.pool
+        strong_route = self.routes.answer(strong_request_key.pool, asked_by)
         if strong_route.down is not None:
             return name_bits
         crossing_bits = crossing_commit_bits(weak_job)
@@ -184,10 +194,14 @@ class DecoderOutput:
         )
 
     def _commit_on_the_chip(
-        self, commit_cycles: int, send_home: Callable[[], None]
+        self,
+        commit_cycles: int,
+        asked_by: window_records.PoolId,
+        send_home: Callable[[], None],
     ) -> None:
-        """The weak chip joins the landed answer, then sends it home."""
-        delay_ticks = self.clock.ticks_to_edge(commit_cycles, self.engine.now)
+        """The asking pool's chip joins the landed answer, then sends it."""
+        clock = self.clock_by_asker[asked_by]
+        delay_ticks = clock.ticks_to_edge(commit_cycles, self.engine.now)
         self.engine.schedule(delay_ticks, send_home, label="weak chip commit")
 
     def _commit(

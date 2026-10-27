@@ -76,6 +76,7 @@ class TaskCollection:
     def __post_init__(self) -> None:
         rule = self.rule()
         self.tracker = collection_module.PrefixTracker(rule)
+        self.next_seed = self.settings.first_seed
 
     def next_units(self, run_dir: pathlib.Path, wanted: int) -> list:
         """Up to `wanted` unsaved pieces past the prefix, as work units.
@@ -203,7 +204,8 @@ class TaskCollection:
         max_shots = self.settings.max_shots
         if max_shots is None:
             return self.piece_shots
-        seeds_left = max_shots - self.next_seed
+        last_seed_after = self.settings.first_seed + max_shots
+        seeds_left = last_seed_after - self.next_seed
         remaining = max(seeds_left, 0)
         return min(self.piece_shots, remaining)
 
@@ -215,12 +217,20 @@ class SeedRange:
     first_seed: int
     end_seed: int
 
-    def seeds_of(self, _task_name: str, max_shots: Optional[int]) -> range:
-        """The range, stopped at the task's max_shots when it has one."""
+    def seeds_of(
+        self, _task_name: str, first_seed: int, max_shots: Optional[int]
+    ) -> range:
+        """The range, inside the task's own seeds.
+
+        The task's seeds start at its first_seed and, when it has
+        max_shots, stop max_shots later.
+        """
+        start = max(self.first_seed, first_seed)
         end_seed = self.end_seed
         if max_shots is not None:
-            end_seed = min(end_seed, max_shots)
-        return range(self.first_seed, end_seed)
+            task_end = first_seed + max_shots
+            end_seed = min(end_seed, task_end)
+        return range(start, end_seed)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -238,8 +248,12 @@ class Share:
     index: int
     count: int
 
-    def seeds_of(self, task_name: str, max_shots: Optional[int]) -> range:
+    def seeds_of(
+        self, task_name: str, first_seed: int, max_shots: Optional[int]
+    ) -> range:
         """Run index of the task's seeds; a task with no max_shots is refused.
+
+        The task's seeds are its max_shots seeds from its first_seed.
 
         A task that stops on failures or time has no seed count to cut.
         """
@@ -250,11 +264,13 @@ class Share:
                 "name its seeds with --seeds, or give it max_shots"
             )
         first_product = self.index * max_shots
-        first_seed = first_product // self.count
+        share_first = first_product // self.count
         next_index = self.index + 1
         end_product = next_index * max_shots
-        end_seed = end_product // self.count
-        return range(first_seed, end_seed)
+        share_end = end_product // self.count
+        start = first_seed + share_first
+        end_seed = first_seed + share_end
+        return range(start, end_seed)
 
 
 def run_experiment(
@@ -591,7 +607,9 @@ def _recorded_calibrator(
     task_id = record["id"]
     task_folders = pieces.task_folders(folders, task_id)
     saved = pieces.saved_counts(task_folders)
-    prefix = pieces.contiguous_ranges(saved, 0)
+    rule = collection_module.TaskRule.from_record(record)
+    first_seed = rule.first_seed()
+    prefix = pieces.contiguous_ranges(saved, first_seed)
     if not prefix:
         return None
     first_seed, count = prefix[-1]
@@ -703,11 +721,13 @@ def _resolved_tasks(study: experiment.Experiment) -> list:
     """Each task checked and its record built, in the experiment's order.
 
     Two tasks of one id would share their pieces, so they are refused,
-    and so is a task whose shot runs no round, which sizes no piece.
+    and so is a task whose shot runs no round, which sizes no piece, and
+    one whose threshold steps by a backlog each shot starts without.
     """
     resolved = []
     names_by_id = {}
     for given_task in study.tasks:
+        _refuse_a_backlog_loop_on_shots(given_task)
         task = _with_its_own_calibrator(given_task)
         task_id = task.strong_id()
         earlier_name = names_by_id.setdefault(task_id, task.name)
@@ -739,6 +759,18 @@ def _refuse_two_tasks_of_one_id(first_name: str, second_name: str) -> None:
         f"the tasks {first_name} and {second_name} run the same settings "
         "with the same metadata, so they would share their shots; give "
         "them metadata that tells them apart"
+    )
+
+
+def _refuse_a_backlog_loop_on_shots(task: collect.Task) -> None:
+    """An outer loop reads a stream's backlog, which a shot starts empty."""
+    source = task.online_threshold
+    if source is None or not source.reads_source_queue:
+        return
+    raise refusal.RefusalError(
+        f"the task {task.name}'s threshold steps its target by the "
+        "backlog, and each shot starts with none; run it as a stream "
+        "(decsim stream)"
     )
 
 
@@ -821,15 +853,16 @@ def _unsaved_units(
     settings = study.collection_of(task)
     rounds_per_shot = record["rounds_per_shot"]
     piece_shots = settings.piece_shots(rounds_per_shot)
-    seeds = selection.seeds_of(task.name, settings.max_shots)
+    seeds = selection.seeds_of(
+        task.name, settings.first_seed, settings.max_shots
+    )
     task_folders = pieces.folders_of(run_dir, [record["id"]])
     saved = pieces.saved_counts(task_folders)
-    gaps = pieces.unsaved_ranges(saved, seeds.stop)
+    gaps = pieces.unsaved_ranges(saved, seeds.start, len(seeds))
     units = []
     for gap_first, gap_count in gaps:
         gap_end = gap_first + gap_count
-        first_seed = max(gap_first, seeds.start)
-        for piece_first in range(first_seed, gap_end, piece_shots):
+        for piece_first in range(gap_first, gap_end, piece_shots):
             seeds_left = gap_end - piece_first
             count = min(piece_shots, seeds_left)
             unit = collect.Unit(task, piece_first, count)
@@ -990,7 +1023,8 @@ def _say_the_task_stopped(collection: TaskCollection) -> None:
     shots = collection.tracker.counts.shots
     reason = collection.tracker.stop_kind.value
     line = f"{collection.name}: {shots} shots done ({reason})"
-    past_the_stop = collection.next_seed - shots
+    seeds_handed_out = collection.next_seed - collection.settings.first_seed
+    past_the_stop = seeds_handed_out - shots
     if past_the_stop > 0:
         line += f"; {past_the_stop} more ran past the stop"
     print(line, file=sys.stderr)
@@ -1088,12 +1122,19 @@ def _trajectory_rows(
 
 
 def _threshold_summary_line(summary: dict, threshold_db: float) -> str:
-    """The online threshold's one-line summary for a finished task."""
-    return (
-        f"    online threshold: {summary['windows']} windows, "
-        f"escalation rate {summary['escalation_rate']:.4f}, "
-        f"threshold {threshold_db:.2f} dB, "
-        f"{summary['audited']} audits ({summary['audited_bad']} bad), "
-        f"{summary['raises']} raises, {summary['relaxes']} relaxes, "
-        f"{summary['pending_audits']} pending"
-    )
+    """The online threshold's one-line summary for a finished task.
+
+    The windows, the escalated share and the threshold, then every other
+    counter the calibrator's summary holds, by its name.
+    """
+    parts = [
+        f"{summary['windows']} windows",
+        f"escalation rate {summary['escalation_rate']:.4f}",
+        f"threshold {threshold_db:.2f} dB",
+    ]
+    shown = ("windows", "escalation_rate", "threshold")
+    for name, value in summary.items():
+        if name not in shown:
+            parts.append(f"{name} {value}")
+    joined = ", ".join(parts)
+    return f"    online threshold: {joined}"

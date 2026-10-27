@@ -17,6 +17,7 @@ import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.instruction_output as instruction_output_module
 import decsim.controller.operation_issue as operation_issue
+import decsim.controller.patch_streams as patch_streams
 import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.frontends.execution_runtime as execution_runtime_module
@@ -35,7 +36,9 @@ class Control:
     execution_runtime: execution_runtime_module.ExecutionRuntime
     issuer: operation_issue.OperationIssuer
     streams: Union[
-        feedback_streams.NoFeedbackStreams, feedback_streams.FeedbackStreams
+        feedback_streams.NoFeedbackStreams,
+        feedback_streams.FeedbackStreams,
+        patch_streams.PatchStreams,
     ]
     idle_rounds: idle_rounds_module.IdleRoundAccounting
     instruction_output: instruction_output_module.InstructionOutput
@@ -98,7 +101,7 @@ class Control:
         qpu: ports.Qpu,
         factory: ports.MagicStateFactory,
         windows: ports.WindowInput,
-        decode_queue: ports.DecodeQueue,
+        entry_queues: ports.EntryQueues,
     ) -> None:
         """Drive the QPU and hand the window side each stream and idle."""
         self.execution_runtime.factory = factory
@@ -107,7 +110,7 @@ class Control:
         self.streams.windows = windows
         self.idle_rounds.qpu = qpu
         self.idle_rounds.windows = windows
-        self.idle_rounds.decode_queue = decode_queue
+        self.idle_rounds.entry_queues = entry_queues
 
     def seed_roots(self) -> tuple:
         """This part's stochastic owners, each by the name its seed hashes."""
@@ -138,9 +141,15 @@ class Control:
 def _feedback_streams(
     engine: engine_module.Engine, plan: plan_build.Plan
 ) -> Union[
-    feedback_streams.NoFeedbackStreams, feedback_streams.FeedbackStreams
+    feedback_streams.NoFeedbackStreams,
+    feedback_streams.FeedbackStreams,
+    patch_streams.PatchStreams,
 ]:
-    """The stream bookkeeping, only when the workload has feedback."""
+    """The stream bookkeeping: the patch lives, or the feedback streams."""
+    if plan.patch_lives:
+        return patch_streams.PatchStreams(
+            plan.patch_lives, plan.dynamic_streams
+        )
     if not _has_feedback(plan):
         return feedback_streams.NoFeedbackStreams()
     run_plan = plan.run_plan

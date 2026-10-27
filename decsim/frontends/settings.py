@@ -43,6 +43,7 @@ class WorkloadSettings:
         "protected_regions",
         "physical_circuits",
         "rounds_policy",
+        "patch_lives",
         "workload_record",
     )
 
@@ -52,6 +53,8 @@ class WorkloadSettings:
     protected_regions: tuple = ()
     rounds_policy: Optional[ports.RoundsPolicy] = None
     physical_circuits: tuple = ()
+    # each patch's life as one decode stream (frontends/patch_lives.py)
+    patch_lives: tuple = ()
     feedback_boundary_mode: str = "trailing_buffer"
     # the record the fields above were lowered from, which a run folder
     # writes to its inputs (experiments/run_folder.py record_task)
@@ -154,6 +157,7 @@ def _lowered_fields(workload: workload_records.Workload) -> dict:
         "protected_regions": program.protected_regions,
         "rounds_policy": program.rounds_policy,
         "physical_circuits": program.physical_circuits,
+        "patch_lives": program.patch_lives,
         "workload_record": workload,
     }
 

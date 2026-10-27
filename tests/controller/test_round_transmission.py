@@ -21,6 +21,7 @@ import dataclasses
 import pytest
 
 import decsim.config as config
+import decsim.controller.round_destinations as round_destinations
 import decsim.controller.round_transmission as round_transmission
 import decsim.detector_error_model.detection_event_formation as formation
 import decsim.detector_error_model.settings as event_settings
@@ -84,8 +85,8 @@ class RecordingWindows:
     def accept_window_input(self, packet):
         self.published.append((self.engine.now, packet.round_index))
 
-    def receive_memory_round(self, source_operation_id):
-        self.memory_rounds.append((self.engine.now, source_operation_id))
+    def receive_memory_round(self, source_stream_id):
+        self.memory_rounds.append((self.engine.now, source_stream_id))
 
 
 class DispatchingWindows:
@@ -98,8 +99,8 @@ class DispatchingWindows:
         self.memory_rounds = []
         self.decode_inputs_delivered = []
 
-    def receive_memory_round(self, source_operation_id):
-        self.memory_rounds.append((self.engine.now, source_operation_id))
+    def receive_memory_round(self, source_stream_id):
+        self.memory_rounds.append((self.engine.now, source_stream_id))
 
     def accept_window_input(self, packet):
         self.published.append((self.engine.now, packet.round_index))
@@ -115,7 +116,7 @@ class DispatchingWindows:
 
 def packed(round_index, route=round_records.WINDOW_INPUT_ROUTE, wire_bits=2):
     fragment = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0),
@@ -216,20 +217,31 @@ def transmitter_with(engine, profile, windows=None, settings=None):
         None, at_the_controller
     )
     write_path = weak_store_plan.intake.controller_write.path_name
-    transmitter = round_transmission.RoundTransmitter(engine, write_path)
+    side = round_destinations.StoreSide(
+        "weak_buffer", store, weak_receiver, write_path, False
+    )
+    transmitter = round_transmission.RoundTransmitter(engine)
     transmitter.link = links
     transmitter.memory_arrivals = windows
-    transmitter.receiver = weak_receiver
     transmitter.packing_line = RecordingPackingLine(transmitter)
     transmitter.trace.round_event.connect(recorder.record)
     weak_receiver.trace.round_event.connect(recorder.record)
-    return transmitter, store, windows, recorder, ledger
+    sending = Sending(transmitter, side)
+    return sending, store, windows, recorder, ledger
 
 
-def reserve_and_send(transmitter, packed) -> None:
+class Sending:
+    """The transmitter and the one store side it sends to."""
+
+    def __init__(self, transmitter, side):
+        self.transmitter = transmitter
+        self.side = side
+
+
+def reserve_and_send(sending: Sending, packed) -> None:
     """The sender's two steps: the room is reserved, then the round leaves."""
-    transmitter.receiver.reserve_write(packed)
-    transmitter.send(packed)
+    sending.side.receiver.reserve_write(packed)
+    sending.transmitter.send(packed, sending.side, False)
 
 
 def first_rounds_on(ledger, path: str) -> list:
@@ -239,7 +251,7 @@ def first_rounds_on(ledger, path: str) -> list:
     for transfer in traffic["transfers"]:
         if transfer["path"] != path:
             continue
-        (rounds,) = transfer["attribution"]["rounds_by_operation"]
+        (rounds,) = transfer["attribution"]["rounds_by_stream"]
         first_rounds.append(rounds["round_lo"])
     return first_rounds
 
@@ -253,15 +265,15 @@ def test_a_round_that_leaves_its_route_lets_a_waiting_round_enter():
     """
     engine = engine_module.Engine()
     profile = priced_cwb_profile()
-    transmitter, _store, _windows, _recorder, _ledger = transmitter_with(
+    sending, _store, _windows, _recorder, _ledger = transmitter_with(
         engine, profile
     )
     first = packed(1)
 
-    reserve_and_send(transmitter, first)
+    reserve_and_send(sending, first)
     engine.run()
 
-    assert transmitter.packing_line.in_flight_at_retry == [0]
+    assert sending.transmitter.packing_line.in_flight_at_retry == [0]
 
 
 def test_a_window_round_is_in_flight_until_its_write_publishes_it():
@@ -276,35 +288,35 @@ def test_a_window_round_is_in_flight_until_its_write_publishes_it():
     settings = syndrome_buffer_module.SyndromeBufferSettings(
         clock=clock, write_cycles=5
     )
-    transmitter, _store, windows, _recorder, _ledger = transmitter_with(
+    sending, _store, windows, _recorder, _ledger = transmitter_with(
         engine, profile, settings=settings
     )
     counts_after_the_landing = []
     first = packed(1)
     probe_ticks = CWB_TICKS + 1
 
-    reserve_and_send(transmitter, first)
+    reserve_and_send(sending, first)
     engine.schedule(
         probe_ticks,
-        lambda: counts_after_the_landing.append(transmitter.in_flight),
+        lambda: counts_after_the_landing.append(sending.transmitter.in_flight),
     )
     engine.run()
     publication_tick, _round_index = windows.published[0]
 
     assert counts_after_the_landing == [1]
     assert publication_tick > probe_ticks
-    assert transmitter.in_flight == 0
+    assert sending.transmitter.in_flight == 0
 
 
 def test_a_memory_round_crosses_the_store_hop_then_tells_the_windows():
     engine = engine_module.Engine()
     profile = five_microsecond_wbd_profile()
-    transmitter, store, windows, recorder, _ledger = transmitter_with(
+    sending, store, windows, recorder, _ledger = transmitter_with(
         engine, profile
     )
     memory_round = packed(1, route=MEMORY_ROUTE)
 
-    reserve_and_send(transmitter, memory_round)
+    reserve_and_send(sending, memory_round)
     engine.run()
 
     delivery_ticks = STORE_HOP_TICKS + WBD_TICKS
@@ -317,14 +329,14 @@ def test_a_memory_round_crosses_the_store_hop_then_tells_the_windows():
 def test_memory_rounds_pipeline_onto_the_link_without_a_landing_wait():
     engine = engine_module.Engine()
     profile = five_microsecond_wbd_profile()
-    transmitter, store, windows, _recorder, _ledger = transmitter_with(
+    sending, store, windows, _recorder, _ledger = transmitter_with(
         engine, profile
     )
     first = packed(1, route=MEMORY_ROUTE)
     second = packed(2, route=MEMORY_ROUTE)
 
     def send(memory_round):
-        reserve_and_send(transmitter, memory_round)
+        reserve_and_send(sending, memory_round)
 
     engine.schedule(0, lambda: send(first))
     engine.schedule(CYCLE_TICKS, lambda: send(second))
@@ -364,14 +376,14 @@ def test_two_routes_take_one_wire_in_the_order_they_reach_it(
     """
     engine = engine_module.Engine()
     profile = five_microsecond_wbd_profile(bits_per_microsecond=1000.0)
-    transmitter, store, windows, _recorder, ledger = transmitter_with(
+    sending, store, windows, _recorder, ledger = transmitter_with(
         engine, profile, windows=DispatchingWindows
     )
     memory_round = packed(1, route=MEMORY_ROUTE, wire_bits=ROUND_BITS)
     window_round = packed(2, wire_bits=ROUND_BITS)
 
     def send(finished):
-        reserve_and_send(transmitter, finished)
+        reserve_and_send(sending, finished)
 
     engine.schedule(memory_send_ticks, lambda: send(memory_round))
     engine.schedule(0, lambda: send(window_round))

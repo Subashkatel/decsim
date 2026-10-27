@@ -12,11 +12,11 @@ ANSWER_HOP = "weak_decoder_to_controller"
 INPUT_HOP = "weak_buffer_to_weak_decoder"
 
 
-def _row(path, window_index, times, run_sequence=None) -> dict:
-    """One transfer of operation 1 for a window; times: request, delivery."""
+def _row(path, window_index, times, run_sequence=None, stream_id=1) -> dict:
+    """One transfer of a stream's window; times: request, delivery."""
     request, delivery = times
-    operation = identity_records.stable_identity_json(1)
-    attribution = {"operation_id": operation, "window_id": window_index}
+    owner = identity_records.stable_identity_json(stream_id)
+    attribution = {"owner_id": owner, "window_id": window_index}
     if run_sequence is not None:
         request_key = {"run_sequence": run_sequence}
         attribution["relation"] = {"request_key": request_key}
@@ -43,7 +43,7 @@ def test_a_hops_overlapping_transfers_span_once_and_an_input_sums():
     index = _index([first, second])
 
     assert index.link_delays() == {(INPUT_HOP, 1, 2): 60}
-    assert index.input_hops() == {(INPUT_HOP, 2, 7): (70, 160)}
+    assert index.input_hops() == {(INPUT_HOP, 1, 2, 7): (70, 160)}
 
 
 def test_an_answer_counts_from_its_first_send_home():
@@ -66,5 +66,18 @@ def test_letting_a_window_go_keeps_the_others():
     index.forget_window((1, 2))
 
     assert index.link_delays() == {(INPUT_HOP, 1, 3): 40}
-    assert index.input_hops() == {(INPUT_HOP, 3, 8): (40, 240)}
+    assert index.input_hops() == {(INPUT_HOP, 1, 3, 8): (40, 240)}
     assert index.answer_send == {}
+
+
+def test_letting_one_streams_window_go_keeps_anothers_of_the_same_index():
+    """Every stream counts its windows from 0; window 0 of each is its own."""
+    rows = [
+        _row(INPUT_HOP, 0, (100, 105), run_sequence=1, stream_id=1),
+        _row(INPUT_HOP, 0, (100, 105), run_sequence=2, stream_id=2),
+    ]
+    index = _index(rows)
+
+    index.forget_window((1, 0))
+
+    assert index.input_hops() == {(INPUT_HOP, 2, 0, 2): (5, 105)}

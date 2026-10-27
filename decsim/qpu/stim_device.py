@@ -26,6 +26,7 @@ import decsim.detector_error_model.error_model_sampler as error_model_sampler
 import decsim.detector_error_model.window_model_builders as window_models
 import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.ports as ports
+import decsim.qpu.shot_datasets as shot_datasets
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.formation as formation_records
@@ -79,6 +80,7 @@ class StimDevice(seeding.AtomicRunSeedConsumer):
     operation_circuit_scope = "per_operation"
     emits_bit_values = True
     errors_sampled = trace_source.SILENT
+    checkpoint_reached = trace_source.SILENT
 
     def __init__(
         self,
@@ -176,10 +178,10 @@ class StimDevice(seeding.AtomicRunSeedConsumer):
 
     def formation_table(
         self,
-        operation_id: Any,  # an opaque identity
+        stream_id: Any,  # an opaque identity
     ) -> formation_records.FormationTable:
-        """The recipes the operation's rounds are formed by, off its circuit."""
-        shot = self._shot_for(operation_id)
+        """The recipes the stream's rounds are formed by, off its circuit."""
+        shot = self._shot_for(stream_id)
         return shot.table
 
     def round_payloads(
@@ -773,15 +775,74 @@ class ErrorModelStimDevice(StimDevice):
         sampler = error_model_sampler.sampler_of(circuit)
         sample_seed = self._sample_seed(key)
         self._mark_stochastic_use()
-        detection_events, observable_flips, error_indices = sampler.draw(
-            sample_seed
-        )
+        drawn = self._drawn_shot(circuit, sample_seed)
+        detection_events, observable_flips, error_indices = drawn
         detector_rounds = table.detector_rounds()
         fired_errors = sampler.fired_errors(error_indices, detector_rounds)
         self.errors_sampled.fire(operation, fired_errors)
         return detector_formation.measurements_forming(
             table, detection_events, observable_flips
         )
+
+    def _drawn_shot(
+        self, circuit: stim.Circuit, sample_seed: Optional[int]
+    ) -> tuple:
+        """(detection events, observable flips, fired error indices)."""
+        sampler = error_model_sampler.sampler_of(circuit)
+        return sampler.draw(sample_seed)
+
+
+class DatasetStimDevice(ErrorModelStimDevice):
+    """Reads each shot from a saved dataset instead of drawing it.
+
+    The dataset (shot_datasets.py) holds the shot the error-model source
+    draws for each root seed of its range, so a run on it is that run on
+    the live source, on data that cannot change between runs.
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """The dataset row: the folder written by shot_datasets.seal."""
+
+        dataset_folder: str
+        # the word the reports name this row by
+        name = "dataset_stim"
+
+        def build(
+            self, code: ports.CodeModel, circuit_arguments: Mapping
+        ) -> "DatasetStimDevice":
+            """A fresh source over the dataset and the workload's circuits."""
+            del code
+            return DatasetStimDevice(self.dataset_folder, **circuit_arguments)
+
+    def __init__(
+        self,
+        dataset_folder: str,
+        seed: Optional[numbers.Integral] = None,
+        detector_rounds: Optional[dict] = None,
+        terminal_detector_ids: Optional[dict] = None,
+        measurement_rounds: Optional[dict] = None,
+    ) -> None:
+        ErrorModelStimDevice.__init__(
+            self,
+            seed=seed,
+            detector_rounds=detector_rounds,
+            terminal_detector_ids=terminal_detector_ids,
+            measurement_rounds=measurement_rounds,
+        )
+        self.dataset_folder = dataset_folder
+
+    def _drawn_shot(
+        self, circuit: stim.Circuit, sample_seed: Optional[int]
+    ) -> tuple:
+        """The saved shot for this seed; an unseeded run has none."""
+        if sample_seed is None:
+            raise ValueError(
+                "a dataset source reads the shot of a root seed; give the "
+                "run a seed inside the dataset's range"
+            )
+        dataset = shot_datasets.opened(self.dataset_folder)
+        return dataset.shot(circuit, sample_seed)
 
 
 def validated_seed(seed: Optional[numbers.Integral]) -> Optional[int]:

@@ -77,19 +77,19 @@ to this table, when the machine is built:
 |---|---|
 | `double_window` on an edge past the entry pool | Toshio defines it over the entry pool's sliding chain; a pool past it decodes only what it is sent. A `redo_window` there redoes the double region. |
 | `double_window` beside a router | it absorbs neighbouring windows, which a router may send to two pools |
-| an escalate edge from an entry pool past the first | the edge's boundaries are the first entry pool's |
 | more than one router | |
 | a VQD scheduler over a stream | a stream's critical point is a segment's end, which the scheduler does not read |
 | likelihood pooling over members of two fault representations | Harmony prices a matching's hyperedge errors by an edge decomposition |
 | an ensemble member, or a pool's batching, over a strong backend row | the device prices each decode as it runs it, and an ensemble or a batch does not take its time from there yet |
 | a pool's batching with `run_both_at_once` or `double_window` | a batch of every window's speculative decode, or of deferred windows, is not built |
-| `decsim stream` over a workload other than one decoded Stim memory patch | a stream repeats the one REPEAT block of Stim's memory circuit on one patch |
+| `decsim stream` over a workload other than decoded Stim memory patches | a stream repeats the one REPEAT block of each patch's Stim memory circuit |
 | `decsim stream` with a source other than the Stim device | the flip stream samples the circuit as the Stim device does |
 | `decsim stream` with the trace, the log, or the data movement or window outcome records | each keeps something for every round or window, and a stream keeps nothing that grows with its length |
 | `decsim stream` with a pool's batching or `bulk_strong` | a merged batch files its stages under its own key, which the per-window measures do not read |
 | `decsim stream` with the double window | it absorbs windows the plan lays up front, and a stream lays its windows as its rounds arrive |
-| `decsim stream` over a graph of a new shape | a stream runs a machine today's slots hold |
-| a logical failure counted inside a stream | no source defines one inside an unbounded stream; a stream's one outcome is its end readout's |
+| a logical failure counted inside a stream, other than at a checkpoint | no source defines one inside an unbounded stream; a checkpoint is the outcome had the stream ended there |
+| checkpoints or answer checks beside an escalate edge past the entry pool | that edge's source pool joins its solves where no checkpoint reads them |
+| checkpoints or answer checks beside a decoder or a verdict that draws from the run's seed | a checkpoint decides its last windows as the machine does, and a draw there would change the run |
 
 Not built, because no source describes it: one window's results merged
 across separate pools (a race or a vote across pools); a router rule

@@ -85,7 +85,7 @@ def _job(model, syndrome) -> decoding_records.DecodeJob:
         bits.append(int(bit))
     bits = tuple(bits)
     payload = round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=1,
         bits=bits,
@@ -93,7 +93,7 @@ def _job(model, syndrome) -> decoding_records.DecodeJob:
         fragment_index=0,
     )
     return decoding_records.DecodeJob(
-        operation_id=1,
+        stream_id=1,
         window_id=0,
         round_count=1,
         detector_error_model=model,
@@ -272,6 +272,36 @@ def ring_at(weight_step: float):
     return window_decoder.graph_from_model(
         placed, location="ring", weight_step=weight_step
     )
+
+
+def test_a_fault_the_window_does_not_own_flips_no_logical_in_its_graph():
+    """The cluster gap counts only what the window commits.
+
+    The window commits its owned faults alone
+    (decoder.result_from_selected_faults), so a buffer fault that
+    crosses the logical changes no committed answer, and a walk through
+    it must not close an odd loop (Meister et al. 2405.07433
+    Definition 9).
+    """
+    check = numpy.asarray(((1, 0, 1), (1, 1, 0), (0, 1, 1)), numpy.uint8)
+    priors = numpy.asarray((0.1, 0.1, 0.1))
+    observables = numpy.ones((1, 3), dtype=numpy.uint8)
+    owned = numpy.asarray((False, True, True))
+    placed = fault_models.PlacedFaultModel(
+        representation=GRAPHLIKE,
+        check=check,
+        priors=priors,
+        observables=observables,
+        owned=owned,
+        source_fault_ids=(0, 1, 2),
+        boundary_flips={},
+    )
+    graph = window_decoder.graph_from_model(
+        placed, location="ring", weight_step=0.1
+    )
+    parities = tuple(graph.logical_parities)
+    assert parities == (0, 1, 1)
+    assert graph.logical_observables_by_fault == ((0,), (1,), (1,))
 
 
 def test_a_weight_step_whose_sums_would_wrap_the_compiled_counters_is_refused():

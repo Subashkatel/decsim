@@ -26,6 +26,14 @@ fault, its graphlike components read the same way. The name is the same
 in every short circuit, so a weak window's commits and a strong window's
 priors share it. A test holds every window's model to the whole
 circuit's, sliced in window order.
+
+A short circuit's frame, its slicer and its faults' names, is a function
+of the program's circuits, the decoders' requirement and its round
+count, and of nothing a seed touches; building one is most of a live
+stream's wall time. So every stream of one program in this process
+shares one set of frames, kept by the circuits' text as circuit_builds
+keeps the formation tables, and one numbering of shapes names their
+faults for every reader.
 """
 
 import collections
@@ -36,6 +44,7 @@ from typing import Optional
 
 import numpy
 
+import decsim.detector_error_model.circuit_builds as circuit_builds
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.periodic_formation as periodic_formation
 import decsim.detector_error_model.window_slicer as window_slicer
@@ -65,7 +74,7 @@ class MovedStimModels:
         requirement: fault_models.DecoderFaultModelRequirement,
     ) -> None:
         self.template = periodic_formation.StreamTemplate(program)
-        self.frames = _Frames(program, requirement)
+        self.frames = _frames_of(program, requirement)
         self.models = _Recent(MODEL_LIMIT)
         self.final_round_count: Optional[int] = None
         template_frame = self.frames.frame(self.template.round_count)
@@ -84,8 +93,19 @@ class MovedStimModels:
         self, window: window_records.Window
     ) -> fault_models.WindowErrorModel:
         """One window's model: its short circuit's, moved to its rounds."""
-        geometry = self._geometry_of(window)
-        placement = self._placement_of(geometry)
+        return self.for_window_ending_at(window, self.final_round_count)
+
+    def for_window_ending_at(
+        self, window: window_records.Window, final_round: Optional[int]
+    ) -> fault_models.WindowErrorModel:
+        """The window's model in the stream read out at final_round.
+
+        A checkpoint reads a stream out early (records/checkpoints.py),
+        so its last window's model is the one this stream would have had
+        ending there; None is a stream whose end is not known.
+        """
+        geometry = self._geometry_of(window, final_round)
+        placement = self._placement_of(geometry, final_round)
         local = geometry.moved(-placement.shift)
         key = (placement.round_count, local)
         model = self.models.get(
@@ -100,8 +120,9 @@ class MovedStimModels:
         prior_faults: Optional[dict],
     ) -> fault_models.WindowErrorModel:
         """A strong window's model, its priors named as the weak commits."""
-        geometry = self._geometry_of(window)
-        placement = self._placement_of(geometry)
+        final = self.final_round_count
+        geometry = self._geometry_of(window, final)
+        placement = self._placement_of(geometry, final)
         local = geometry.moved(-placement.shift)
         frame = self.frames.frame(placement.round_count)
         exclusions = _moved_ranges(fault_exclusion_ranges, -placement.shift)
@@ -122,12 +143,13 @@ class MovedStimModels:
         named = frame.named(model)
         return self._moved(named, placement.shift)
 
-    def _geometry_of(self, window: window_records.Window) -> "_Geometry":
+    def _geometry_of(
+        self, window: window_records.Window, final: Optional[int]
+    ) -> "_Geometry":
         if window.closed_temporal_boundaries:
             raise ValueError(
                 "live Stim streams require trailing-buffer feedback"
             )
-        final = self.final_round_count
         last_buffer_round = window.buffer_hi
         if final is not None:
             last_buffer_round = min(last_buffer_round, final)
@@ -140,7 +162,9 @@ class MovedStimModels:
             is_last=is_last,
         )
 
-    def _placement_of(self, geometry: "_Geometry") -> "_Placement":
+    def _placement_of(
+        self, geometry: "_Geometry", final: Optional[int]
+    ) -> "_Placement":
         """The short circuit a window is sliced on, and the move to it.
 
         Its faults lie in the rounds from lowest to highest. The first
@@ -151,7 +175,6 @@ class MovedStimModels:
         lowest = geometry.start_round - self.span
         highest = geometry.last_buffer_round + self.span
         first_repeated_only = self.template.prefix_rounds + 2
-        final = self.final_round_count
         near_end = final is not None and highest >= final
         if lowest <= first_repeated_only:
             return _unmoved_placement(highest, final, near_end)
@@ -310,7 +333,7 @@ class _Frame:
 
 
 class _Frames:
-    """The short circuits of one program, by their rounds."""
+    """The short circuits of one program, by their rounds, for its streams."""
 
     def __init__(
         self,
@@ -333,7 +356,7 @@ class _Frames:
 
 
 class _Shapes:
-    """A number for every fault shape a stream's circuits hold."""
+    """A number for every fault shape a program's circuits hold."""
 
     def __init__(self) -> None:
         self.number_by_shape: dict = {}
@@ -435,6 +458,37 @@ class _Recent:
         if len(self.by_key) > self.limit:
             self.by_key.popitem(last=False)
         return made
+
+
+# (the program's circuits' text, the requirement) -> its short circuits,
+# in this process; one set is about 60 MB at d = 7 and 120 MB at d = 11,
+# and a task reads one program under one or two requirements
+_FRAMES = circuit_builds.KeptBuilds(kept_count=4)
+
+
+def _frames_of(
+    program: circuit_records.RepeatedStimCircuit,
+    requirement: fault_models.DecoderFaultModelRequirement,
+) -> _Frames:
+    """The program's short circuits, made once in this process.
+
+    They are kept by the text of the circuits they are a function of, so
+    a copy of the program finds them too (circuit_builds).
+    """
+    circuits = (
+        program.first_round,
+        program.repeated_round,
+        program.final_round,
+        program.single_round,
+    )
+    texts = tuple(str(circuit) for circuit in circuits)
+    key = (texts, requirement)
+    frames = _FRAMES.held(key)
+    if frames is not None:
+        return frames
+    frames = _Frames(program, requirement)
+    _FRAMES.keep(key, frames)
+    return frames
 
 
 def _unmoved_placement(

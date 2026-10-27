@@ -1,11 +1,12 @@
-"""`decsim stream`: one memory task run as an unbounded stream.
+"""`decsim stream`: a memory task's patches run as unbounded streams.
 
     decsim stream <run file> --rounds N [--only NAME] [--warmup W]
         [--seed S] [--out FILE] [--set PATH=VALUE ...]
 
-The task's memory circuit becomes a stream of N rounds read out at the
+Each memory patch's circuit becomes a stream of N rounds read out at the
 last (frontends/memory_stream.py), sampled a round at a time by the flip
-stream source (qpu/flip_stream_device.py), on the task's own machine. The
+stream source (qpu/flip_stream_device.py), the task's own when it names
+that source, as a drift study does, on the task's own machine. The
 machine lets each window go once it is final and the stream's measures
 fold it (observation.folds_windows; windows/window_release.py,
 experiments/stream_measures.py), so a stream of 10^6 rounds runs in
@@ -17,17 +18,21 @@ windows that commit from the round after it
 
 It writes one record, as json: the task, its id, the rounds, the warmup,
 the seed and the StreamMeasurement, which holds the region of
-interest's latencies, windows, queues, backlog, links and statistics
-and the one logical outcome of the end readout. A logical failure
-inside the stream is not counted: no source defines one inside an
-unbounded stream.
+interest's latencies, windows, queues, backlog, links and statistics,
+each pool's own row, and the logical outcome of the end readouts, a
+failure when any patch's is wrong; and, for a task whose
+threshold moves (collect.Task.online_threshold), that source's summary
+and its trajectory of (windows, threshold in nats, event). A logical failure
+inside the stream is a checkpoint's (observation.checkpoint_every_rounds,
+observe/checkpoints.py): the outcome had the stream been read out there.
 
 A shape a stream does not build yet is refused, each "not implemented
-yet" with its reason: a workload other than one decoded Stim memory
-patch, a source other than Stim's, the trace, the log, the data
+yet" with its reason: a workload other than decoded Stim memory
+patches, a source other than Stim's, the trace, the log, the data
 movement and window outcome ledgers, a strong window that absorbs weak ones
-(the double window), batched or bulk strong decoding, and a graph of a
-new shape.
+(the double window), and batched or bulk strong decoding. Any graph of
+pools streams: several patches routed to a pool each, a shared strong
+pool, a chain, as a shot runs them.
 """
 
 import argparse
@@ -86,7 +91,7 @@ def stream_record(
     measurement = measures.measurement(result)
     measured = dataclasses.asdict(measurement)
     task_id = task.strong_id()
-    return {
+    record = {
         "task": task.name,
         "task_id": task_id,
         "rounds": rounds,
@@ -94,6 +99,14 @@ def stream_record(
         "seed": seed,
         "measurement": measured,
     }
+    source = task.online_threshold
+    if source is not None:
+        summary = source.summary()
+        record["online_threshold"] = {
+            "summary": summary,
+            "trajectory": source.trajectory,
+        }
+    return record
 
 
 def stream_machine(
@@ -104,13 +117,14 @@ def stream_machine(
     A task with no Pauli frame gets the default one, whose commit is
     what a window's measures are read at.
     """
-    _refuse_a_graph_of_a_new_shape(task)
     machine = task.machine
     _refuse_what_a_stream_does_not_build(machine, task.layout)
     workload = machine.held("workload")
     streamed = _stream_workload(workload, rounds)
     qpu = machine.held("qpu")
-    source = flip_stream_device.FlipStreamDevice.Settings()
+    source = qpu.source
+    if source.name != flip_stream_device.FlipStreamDevice.Settings.name:
+        source = flip_stream_device.FlipStreamDevice.Settings()
     flip_qpu = dataclasses.replace(qpu, source=source)
     first_after_warmup = warmup + 1
     first_recorded = max(
@@ -136,18 +150,6 @@ def _stream_workload(workload, rounds: int):
         return memory_stream.memory_stream(workload, rounds)
     except ValueError as refused:
         raise refusal.RefusalError(f"{refused}; {refusals.REFUSALS}") from None
-
-
-def _refuse_a_graph_of_a_new_shape(task: collect.Task) -> None:
-    """A stream builds the entry edge alone: at most two pools, no router."""
-    layout = task.layout
-    if len(layout.pools) <= 2 and layout.router is None:
-        return
-    raise refusal.RefusalError(
-        f"not implemented yet: task {task.name} is a graph of a new shape, "
-        "and a stream runs its entry edge alone; "
-        f"{refusals.REFUSALS}"
-    )
 
 
 def _refuse_what_a_stream_does_not_build(

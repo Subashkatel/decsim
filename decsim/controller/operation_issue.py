@@ -1,8 +1,9 @@
 """The issuer: an admitted operation becomes one QPU command.
 
-A program root or an ordinary successor is preloaded and starts at the
-next boundary; a feedback-blocked operation is dynamic and pays the
-output path first. The runtime hears the start boundary through
+Every command is queued ahead and starts at the next boundary; a
+feedback-blocked one is issued once its release has crossed the output
+path (instruction_output.py), so the branch cost is paid once, by the
+decision. The runtime hears the start boundary through
 on_started, so the issuer never calls the runtime.
 """
 
@@ -61,10 +62,7 @@ class OperationIssuer:
         self.streams.begin(operation)
         self._log_start(operation)
         command = self._command(operation)
-        if operation.blocked_by is None:
-            self.output.start_preloaded(command, on_started)
-            return
-        self.output.send_command(command, on_started)
+        self.output.start_preloaded(command, on_started)
 
     def before_successor_release(
         self, operation: program_records.Operation
@@ -98,15 +96,15 @@ class OperationIssuer:
         binding = self.streams.binding_for(operation.id)
         if binding is None:
             issued_operation = operation
-            source_operation_id = operation.id
+            source_stream_id = operation.id
         else:
             issued_operation = dataclasses.replace(
                 operation,
                 stream_id=binding.stream_id,
                 stream_offset=binding.stream_offset,
             )
-            source_operation_id = binding.stream_id
-        source = self.resolved_operation_by_id[source_operation_id]
+            source_stream_id = binding.stream_id
+        source = self.resolved_operation_by_id[source_stream_id]
         round_ticks = self.round_ticks_for(operation)
         round_count = self.round_count_for(operation)
         return program_records.RunOperationBody(

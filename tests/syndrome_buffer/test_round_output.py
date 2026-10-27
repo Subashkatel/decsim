@@ -101,9 +101,9 @@ class _OneTable:
     def __init__(self, table) -> None:
         self.table = table
 
-    def formation_table(self, operation_id):
+    def formation_table(self, stream_id):
         """The one table."""
-        del operation_id
+        del stream_id
         return self.table
 
 
@@ -165,7 +165,7 @@ def _output(
 
 def _fragment(round_index=1) -> round_records.RetainedSyndromeFragment:
     return round_records.RetainedSyndromeFragment(
-        operation_id=1,
+        stream_id=1,
         patch_ids=(0,),
         round_index=round_index,
         bits=(1, 0),
@@ -177,7 +177,7 @@ def _fragment(round_index=1) -> round_records.RetainedSyndromeFragment:
 def _job(round_index=1) -> decoding_records.DecodeJob:
     fragment = _fragment(round_index)
     return decoding_records.DecodeJob(
-        operation_id=1, window_id=0, round_count=1, payloads=[fragment]
+        stream_id=1, window_id=0, round_count=1, payloads=[fragment]
     )
 
 

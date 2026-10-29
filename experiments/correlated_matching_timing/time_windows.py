@@ -24,8 +24,12 @@ Usage
 Through Slurm, one core:
 
 ```
-python time_windows.py --capture DIR --out DIR
+python time_windows.py --capture DIR --out DIR [--files "windows_d5*.csv"]
 ```
+
+Each fitted cell is one distance and one window size, scaled on its own
+to Table IX, so the cells may be timed in separate jobs on the same
+processor model.
 """
 
 import argparse
@@ -117,12 +121,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--capture", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--files", default="windows_d*.csv")
     arguments = parser.parse_args()
     core = pinned_core()
     capture = pathlib.Path(arguments.capture)
     out = pathlib.Path(arguments.out)
     out.mkdir(parents=True, exist_ok=True)
-    rows = _capture_rows(capture)
+    rows = _capture_rows(capture, arguments.files)
     timed = time_rows(capture, rows)
     text = host_text(core)
     host_path = out / "host.txt"
@@ -136,10 +141,10 @@ def main() -> None:
     print(f"wrote {path}: {len(timed)} windows on core {core}")
 
 
-def _capture_rows(capture: pathlib.Path) -> list:
-    """Every window of every windows file the capture wrote."""
+def _capture_rows(capture: pathlib.Path, pattern: str) -> list:
+    """Every window of the capture's windows files the pattern names."""
     rows = []
-    found = capture.glob("windows_d*.csv")
+    found = capture.glob(pattern)
     paths = sorted(found)
     for path in paths:
         with path.open(newline="") as handle:

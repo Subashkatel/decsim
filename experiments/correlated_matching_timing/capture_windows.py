@@ -89,17 +89,21 @@ _DECODED_WINDOWS: list = []
 
 
 class RecordingCorrelatedMatching(matching.CorrelatedPyMatchingDecoder):
-    """Correlated matching at its preset time, keeping each window decoded."""
+    """Correlated matching in no time, keeping each window it decodes.
+
+    The windows a stream lays out do not depend on how long a decode
+    takes, and at the preset average the one strong unit falls behind
+    the windows (experiments.md, decision D1), so every waiting window
+    would keep its model in memory; a decode of no time keeps the line
+    empty.
+    """
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row the machine's strong pool held, at its preset time.
+        """The recording row; models_folder is where it writes each model."""
 
-        models_folder is where the row writes each distinct model.
-        """
-
-        preset_latency_microseconds: float
         models_folder: str
+        preset_latency_microseconds: float = 0.0
         # the word the reports name this row by
         name = "recording_correlated_pymatching"
 
@@ -132,10 +136,8 @@ def capture_machine(
 ):
     """Correlated matching alone on windows of the scheme's rounds."""
     machine = five_results.alone("strong_alone", distance, CALM_PROBABILITY)
-    strong_pool = machine.part(machines.STRONG_POOL)
-    preset = strong_pool.settings.algorithm.preset_latency_microseconds
     models_folder = out / "models"
-    recording = RecordingCorrelatedMatching.Settings(preset, str(models_folder))
+    recording = RecordingCorrelatedMatching.Settings(str(models_folder))
     machine = machine.with_settings(machines.STRONG_POOL, algorithm=recording)
     read_distances = five_results.STRONG_DECODE_DISTANCES_BY_SCHEME[scheme]
     buffer_distances = read_distances - 1

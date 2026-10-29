@@ -14,6 +14,14 @@ spreads over every noise level alike, and the garbage collector is off
 while they run, since a running decoder has none. It needs numpy and
 PyMatching only, so the same file runs on any host.
 
+With --without-observables each model's logical observable targets are
+removed before the graph is built. The row's model gives every column
+its own observable, so PyMatching recovers the matched paths on both
+passes (mwpm_decoding.cc, decode_detection_events, more than 64
+observables); Table IX's decode of one observable takes the bit-mask
+path on its second pass. Timing the same graph both ways shows how much
+of the time, and of its growth, that path is.
+
 It writes times.csv, each window's row, less its fired rows, with the
 median and the fastest of its repeats in nanoseconds, and host.txt: the
 node, lscpu, the core and the versions.
@@ -39,6 +47,7 @@ import os
 import pathlib
 import platform
 import random
+import re
 import subprocess
 import sys
 import time
@@ -49,6 +58,8 @@ import pymatching
 REPEATS = 7
 WARM_UP_DECODES = 10
 SHUFFLE_SEED = 20261029
+# a logical observable target of a Stim model line, " L12"
+OBSERVABLE_TARGET = re.compile(r" L[0-9]+")
 
 
 def pinned_core() -> int:
@@ -72,8 +83,11 @@ def timed_window(matching, syndrome) -> list:
     return nanoseconds
 
 
-def time_rows(capture: pathlib.Path, rows: list) -> list:
-    """Each row with its median and fastest decode, in a shuffled order."""
+def time_rows(rows: list, models: pathlib.Path) -> list:
+    """Each row with its median and fastest decode, in a shuffled order.
+
+    models is the folder the graphs are read from.
+    """
     order = list(range(len(rows)))
     shuffler = random.Random(SHUFFLE_SEED)
     shuffler.shuffle(order)
@@ -84,7 +98,7 @@ def time_rows(capture: pathlib.Path, rows: list) -> list:
         row = rows[index]
         matching = matching_by_model.get(row["model"])
         if matching is None:
-            matching = _warm_matching(capture, row)
+            matching = _warm_matching(models, row)
             matching_by_model[row["model"]] = matching
         syndrome = _syndrome(row)
         nanoseconds = timed_window(matching, syndrome)
@@ -122,13 +136,17 @@ def main() -> None:
     parser.add_argument("--capture", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--files", default="windows_d*.csv")
+    parser.add_argument("--without-observables", action="store_true")
     arguments = parser.parse_args()
     core = pinned_core()
     capture = pathlib.Path(arguments.capture)
     out = pathlib.Path(arguments.out)
     out.mkdir(parents=True, exist_ok=True)
     rows = _capture_rows(capture, arguments.files)
-    timed = time_rows(capture, rows)
+    models = capture / "models"
+    if arguments.without_observables:
+        models = _models_without_observables(capture, rows, out)
+    timed = time_rows(rows, models)
     text = host_text(core)
     host_path = out / "host.txt"
     host_path.write_text(text)
@@ -153,9 +171,25 @@ def _capture_rows(capture: pathlib.Path, pattern: str) -> list:
     return rows
 
 
-def _warm_matching(capture: pathlib.Path, row: dict):
+def _models_without_observables(
+    capture: pathlib.Path, rows: list, out: pathlib.Path
+) -> pathlib.Path:
+    """Each model the rows name, written again with no observable target."""
+    folder = out / "models_without_observables"
+    folder.mkdir(exist_ok=True)
+    names = {row["model"] for row in rows}
+    for name in names:
+        source = capture / "models" / name
+        text = source.read_text()
+        stripped = OBSERVABLE_TARGET.sub("", text)
+        target = folder / name
+        target.write_text(stripped)
+    return folder
+
+
+def _warm_matching(models: pathlib.Path, row: dict):
     """The window's correlated graph, warmed on its first window's syndrome."""
-    path = capture / "models" / row["model"]
+    path = models / row["model"]
     matching = pymatching.Matching.from_detector_error_model_file(
         path, enable_correlations=True
     )

@@ -29,7 +29,10 @@ every hundredth committed window, the windows committed so far, the
 escalated among them and the window's first committed round, so a
 stream whose noise drifts shows its share before and after. With
 observation.series_every_rounds it also writes a row every that many
-rounds, each pool's waiting line among it (stream_series.py).
+rounds, each pool's waiting line among it (stream_series.py). With
+answer checks, each checked window's row also holds the machine's own
+decode of it: the pool that committed, its decode time and its reaction
+(_WindowTimes).
 """
 
 import collections
@@ -59,6 +62,12 @@ KEPT_WINDOW_WIDTHS = 4
 ROUNDS_LET_GO_EVERY = 64
 # the committed windows between two samples of the escalated share
 ESCALATION_SAMPLED_EVERY = 100
+# a checked window the frame never committed (_WindowTimes)
+NO_WINDOW_TIMES = {
+    "committed_pool": None,
+    "decode_us": None,
+    "reaction_us": None,
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -107,7 +116,8 @@ class StreamMeasurement:
     # (observe/checkpoints.py Checkpoints.rows)
     checkpoints: list
     # one row a path, when the run checks each window's two answers
-    # (observe/answer_checks.py AnswerChecks.rows)
+    # (observe/answer_checks.py AnswerChecks.rows), each window's
+    # committed_pool, decode_us and reaction_us joined (_WindowTimes)
     answer_checks: list
     # one row a static threshold, when the run keeps static chains
     # (observe/answer_checks.py AnswerChecks.threshold_rows)
@@ -133,6 +143,7 @@ class StreamMeasures:
         # the weak and the strong tier's pools (Layout.tier_pools)
         self.tier_pools = machine.layout.tier_pools()
         self.series = _series_of(machine)
+        self.window_times = _window_times_of(machine)
         self._connect(machine)
 
     def transfer_delivered(
@@ -273,7 +284,7 @@ class StreamMeasures:
             "statistics": rows,
             "statistic_values": value_counts,
             "checkpoints": _checkpoint_rows(observation),
-            "answer_checks": _answer_check_rows(observation),
+            "answer_checks": _answer_check_rows(observation, self.window_times),
             "threshold_checks": _threshold_check_rows(observation),
             "series": _series_rows(self.series),
         }
@@ -314,9 +325,11 @@ class StreamMeasures:
         self.folds.sample_escalation(window)
         if window.t_done is None:
             return
+        reaction_us = measure.reaction_microseconds(window, frame_record)
         if self.series is not None:
-            reaction_us = measure.reaction_microseconds(window, frame_record)
             self.series.window_committed(reaction_us, is_escalated)
+        if self.window_times is not None:
+            self.window_times.add(window.key, decode, reaction_us)
         send = measure.last_required_send_ticks(decode, self.transfers.qpu_send)
         self.folds.fold_decoded(frame_record, send)
         observation_settings = self.machine.graph.observation
@@ -748,6 +761,52 @@ class _Growth:
         return float(slope)
 
 
+class _WindowTimes:
+    """Each committed window's own decode and reaction, for its checks.
+
+    A run that checks answers keeps a row a window already
+    (observe/answer_checks.py). This keeps beside it the machine's own
+    decode of the window, the one the frame committed: its pool, its
+    time from compute start to done (measure.committed_decode), and the
+    window's reaction (measure.reaction_microseconds). So a window's
+    check reads beside the time the machine took on it, and a slow
+    decode can be set against a failed one. A window the frame never
+    committed reads None.
+    """
+
+    def __init__(self) -> None:
+        # window key -> the times a checked window's row takes
+        self.by_key: dict = {}
+
+    def add(self, window_key: tuple, decode, reaction_us: float) -> None:
+        """One committed window's decode and reaction."""
+        decode_ticks = decode.done_ticks - decode.compute_start_ticks
+        decode_us = config_module.ticks_to_microseconds(decode_ticks)
+        self.by_key[window_key] = {
+            "committed_pool": decode.tier.word,
+            "decode_us": decode_us,
+            "reaction_us": reaction_us,
+        }
+
+    def join_into(self, rows: list, stream_ids: tuple) -> None:
+        """Each checked window's times, written into its row.
+
+        rows are the answer checks' (AnswerChecks.rows), each holding a
+        list of windows for each stream in stream_ids' order.
+        """
+        for row in rows:
+            stream_windows = row["windows"]
+            streams = zip(stream_ids, stream_windows, strict=True)
+            for stream_id, windows in streams:
+                self._join_stream(stream_id, windows)
+
+    def _join_stream(self, stream_id, windows: list) -> None:
+        for window in windows:
+            key = (stream_id, window["window_index"])
+            times = self.by_key.get(key, NO_WINDOW_TIMES)
+            window.update(times)
+
+
 def _backlog_peak(backlog) -> Optional[int]:
     """The backlog sampler's peak, None when the run samples none."""
     if backlog is None:
@@ -787,6 +846,13 @@ def _queue_levels(run_statistics, queue_paths: dict) -> dict:
     }
 
 
+def _window_times_of(machine: machine_module.Machine) -> Optional[_WindowTimes]:
+    """The windows' times, None when the run checks no answer."""
+    if machine.observation.answer_checks is None:
+        return None
+    return _WindowTimes()
+
+
 def _series_rows(series: Optional[stream_series.StreamSeries]) -> list:
     """The series' rows; none when the run writes no series."""
     if series is None:
@@ -801,11 +867,20 @@ def _checkpoint_rows(observation) -> list:
     return observation.checkpoints.rows()
 
 
-def _answer_check_rows(observation) -> list:
-    """The answer checks' rows; none when the run checks no window."""
-    if observation.answer_checks is None:
+def _answer_check_rows(
+    observation, window_times: Optional[_WindowTimes]
+) -> list:
+    """The answer checks' rows, each window's times joined (_WindowTimes).
+
+    None when the run checks no window.
+    """
+    answer_checks = observation.answer_checks
+    if answer_checks is None:
         return []
-    return observation.answer_checks.rows()
+    rows = answer_checks.rows()
+    stream_ids = answer_checks.stream_ids()
+    window_times.join_into(rows, stream_ids)
+    return rows
 
 
 def _threshold_check_rows(observation) -> list:

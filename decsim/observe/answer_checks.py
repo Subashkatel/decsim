@@ -170,6 +170,10 @@ class AnswerChecks:
             rows.append(row)
         return rows
 
+    def stream_ids(self) -> tuple:
+        """The streams' ids, in the order rows and threshold_rows list them."""
+        return tuple(self.streams)
+
     def _stream(self, stream_id: Any) -> "_StreamChecks":
         stream = self.streams.get(stream_id)
         if stream is None:

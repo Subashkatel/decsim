@@ -10,7 +10,8 @@ the strong answer only where the weak one fails its check and the
 strong one passes, so it fails a window only where both answers do.
 A static chain keeps the weak answer unless the machine's verdict row
 escalates it at the chain's threshold: at the machine's own threshold
-it must end and escalate as the machine does.
+it must end and escalate as the machine does. Each checked window also
+holds the machine's own decode of it, from the pool its verdict chose.
 """
 
 import dataclasses
@@ -90,6 +91,13 @@ def _under_threshold(row: dict) -> bool:
     if gap is None:
         return True
     return gap < checkpoint_tests.FIXED.threshold_nats
+
+
+def _verdict_pool(row: dict) -> str:
+    """The pool the machine's verdict sends the window to."""
+    if row["would_escalate"]:
+        return machines.STRONG_POOL
+    return machines.WEAK_POOL
 
 
 def _strong_machine(weak):
@@ -188,6 +196,20 @@ def test_a_real_chain_keeps_a_passing_answer_wherever_one_passes_property():
             assert kept_failed is not either_passes
         escalates = [row["would_escalate"] for row in rows]
         assert escalates == [_under_threshold(row) for row in rows]
+
+
+def test_each_checked_window_holds_the_machine_decode_the_frame_committed():
+    """Its pool is the verdict's, and its decode lies inside its reaction."""
+    rows = []
+    for seed in SEEDS:
+        chains = _chains(seed)
+        rows.extend(chains["weak"]["windows"][0])
+
+    pools = [row["committed_pool"] for row in rows]
+    assert pools == [_verdict_pool(row) for row in rows]
+    assert machines.STRONG_POOL in pools
+    for row in rows:
+        assert 0 < row["decode_us"] <= row["reaction_us"]
 
 
 def test_each_path_keeps_its_answer_and_the_best_keeps_the_one_that_passes():

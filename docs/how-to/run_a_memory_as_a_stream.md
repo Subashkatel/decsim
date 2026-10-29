@@ -200,6 +200,12 @@ check's round, are decided as in a checkpoint. A row of
 - `would_escalate` is the machine's verdict on the weak answer, on a
   copy of the threshold at that time.
 - `kept` is the answer the chain kept.
+- `committed_pool`, `decode_us` and `reaction_us` are the machine's own
+  decode of the window: the pool whose answer the frame committed, that
+  decode's time from compute start to done, and the window's reaction
+  time (`buffer0_ready_to_frame`). They are null for a window the frame
+  never committed. With them, a slow decode can be set against a
+  failed check.
 
 `decsim/experiments/answer_check_bins.py` bins the rows by the weak
 gap, for the confidence plots. In each bin it gives how often the

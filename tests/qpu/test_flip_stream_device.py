@@ -8,9 +8,17 @@ FlipSimulator.do over the whole assembled circuit under the same seed
 live source's, which reads them off the circuit run so far. A checkpoint
 after round t must equal Stim's own generated circuit of t rounds whose
 readout is noiseless, run under the same seed.
+
+A burst over every qubit must be Stim's generated memory at the raised
+probability. On the SD6 memory, a burst's detection rates must be those
+Stim's detector error model of the raised rounds gives, each detector
+firing with probability (1 - prod(1 - 2 p)) / 2 over the independent
+errors that flip it, and a detector no raised error reaches keeps the
+calm model's rate.
 """
 
 import dataclasses
+import math
 
 import numpy
 import pytest
@@ -37,6 +45,15 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 SEED = 5
 # high enough that a 9-round d=3 memory fires detectors and flips
 NOISY = 0.02
+# the burst study's calm SD6 noise (values.md section 1)
+CALM = 0.003
+# a burst's rounds sampled at its peak: about 40,000 detection events
+# in each class at d = 9, a standard error near 1% of the raised rate
+PEAK_ROUNDS = 1000
+# the standard errors a sampled rate may lie from its model: one error
+# flips up to two detectors, so the binomial error is about 1.4 times
+# too small
+ALLOWED_STANDARD_ERRORS = 5
 
 
 def _program():
@@ -294,6 +311,157 @@ def test_a_drift_to_no_noise_repeats_each_round_from_two_after_it():
     assert bits[0:4] != [bits[0]] * 4
 
 
+@pytest.mark.parametrize(
+    "name", ["first_round", "repeated_round", "final_round"]
+)
+def test_a_burst_over_every_qubit_is_stims_memory_at_the_raised_probability(
+    name: str,
+):
+    program = memory_programs.memory_program(3, "Z", 0.01)
+    doubled = memory_programs.memory_program(3, "Z", 0.02)
+    every_qubit = frozenset(range(program.first_round.num_qubits))
+    fragment = getattr(program, name)
+
+    burst_fragment = flip_stream_device.BurstFragment(fragment, every_qubit)
+
+    assert burst_fragment.raised(2.0) == getattr(doubled, name)
+
+
+def test_a_pair_across_the_disks_edge_is_raised_whole():
+    fragment = stim.Circuit("DEPOLARIZE2(0.01) 0 1 2 3")
+    disk = frozenset({1})
+
+    burst_fragment = flip_stream_device.BurstFragment(fragment, disk)
+
+    raised = burst_fragment.raised(2.0)
+    assert raised == stim.Circuit(
+        "DEPOLARIZE2(0.02) 0 1\nDEPOLARIZE2(0.01) 2 3"
+    )
+
+
+def test_a_measurement_cut_at_the_disk_keeps_its_targets_in_order():
+    fragment = stim.Circuit("MR(0.01) 0 1 2 3\nDETECTOR rec[-3]")
+    disk = frozenset({1, 2})
+
+    burst_fragment = flip_stream_device.BurstFragment(fragment, disk)
+
+    raised = burst_fragment.raised(2.0)
+    assert raised == stim.Circuit(
+        "MR(0.01) 0\nMR(0.02) 1 2\nMR(0.01) 3\nDETECTOR rec[-3]"
+    )
+
+
+def test_a_burst_of_peak_one_runs_the_bits_of_no_burst():
+    """The cut and joined SD6 rounds run every bit of the program's own."""
+    program = memory_programs.sd6_memory_program(5, CALM)
+    burst = flip_stream_device.BurstSettings(onset_round=4, peak_factor=1.0)
+    plain = flip_stream_device.RoundPlan(program, 10)
+    inert = flip_stream_device.RoundPlan(program, 10, None, burst)
+
+    plain_bits = _run_plan(plain, 40)
+    inert_bits = _run_plan(inert, 40)
+
+    assert inert_bits == plain_bits
+
+
+def test_the_disks_noise_rises_and_decays_as_its_profile():
+    """1 + 9 f at peak factor 10: f is 1/3, 2/3, 1, then 1/e a decay on.
+
+    The noise off the disk and the measurements stay the program's.
+    """
+    program = memory_programs.sd6_memory_program(5, CALM)
+    burst = flip_stream_device.BurstSettings(
+        onset_round=3, peak_factor=10.0, decay_rounds=20.0
+    )
+    plan = flip_stream_device.RoundPlan(program, 10, None, burst)
+    rounds = (2, 3, 4, 5, 25)
+    one_decay_on = 1 + 9 / math.e
+
+    largest, smallest = _noise_extremes(plan, rounds)
+    quiet_rounds = _quiet_rounds(plan, rounds)
+
+    factors = (1.0, 4.0, 7.0, 10.0, one_decay_on)
+    assert largest == pytest.approx([CALM * factor for factor in factors])
+    assert smallest == [CALM] * 5
+    assert quiet_rounds == [program.repeated_round.without_noise()] * 5
+
+
+def test_the_disks_detectors_fire_as_stims_model_and_the_rest_stay_calm():
+    """Sampled rates at a held peak, beside the detector error models.
+
+    One rise round and a decay of 10^9 rounds hold the peak, so every
+    round samples it. Each detector is read by its position; a
+    position whose raised model rate is its calm one has no raised error
+    within reach. At d = 9 the 30-qubit disk leaves 41 of the 80
+    positions so.
+    """
+    program = memory_programs.sd6_memory_program(9, CALM)
+    burst = flip_stream_device.BurstSettings(
+        onset_round=1, peak_factor=10.0, rise_rounds=1, decay_rounds=1e9
+    )
+    plan = flip_stream_device.RoundPlan(program, 10, None, burst)
+    calm_plan = flip_stream_device.RoundPlan(program, 10)
+    raised_model = _model_rates(plan)
+    calm_model = _model_rates(calm_plan)
+
+    sampled = _sampled_events(plan, program, PEAK_ROUNDS)
+
+    calm_positions = _positions_kept_calm(raised_model, calm_model)
+    raised_positions = set(calm_model) - calm_positions
+    sampled_calm, calm_error = _pooled(sampled, calm_positions)
+    sampled_raised, raised_error = _pooled(sampled, raised_positions)
+    model_calm = _mean_over(calm_model, calm_positions)
+    model_raised = _mean_over(raised_model, raised_positions)
+    calm_gap = sampled_calm - model_calm
+    raised_gap = sampled_raised - model_raised
+    assert len(calm_positions) >= 30
+    assert len(raised_positions) >= 30
+    assert abs(calm_gap) < ALLOWED_STANDARD_ERRORS * calm_error
+    assert abs(raised_gap) < ALLOWED_STANDARD_ERRORS * raised_error
+
+
+def test_a_bursting_stream_runs_the_same_bits_for_the_same_seed():
+    """And the burst begins at its onset: the rounds before are calm's."""
+    program = _program()
+    burst = flip_stream_device.BurstSettings(
+        onset_round=3, peak_factor=10.0, qubit_count=8
+    )
+    bursting = flip_stream_device.FlipStreamDevice.Settings(burst=burst)
+    calm = flip_stream_device.FlipStreamDevice.Settings()
+
+    first = _device_bits(program, bursting, 12)
+    second = _device_bits(program, bursting, 12)
+    calm_bits = _device_bits(program, calm, 12)
+
+    assert first == second
+    assert first[:2] == calm_bits[:2]
+    assert first[2:] != calm_bits[2:]
+
+
+@pytest.mark.parametrize(
+    "values, sentence",
+    [
+        ({"onset_round": 0}, "flip_stream.burst.onset_round must be"),
+        ({"peak_factor": -1.0}, "flip_stream.burst.peak_factor must be"),
+        ({"rise_rounds": 0}, "flip_stream.burst.rise_rounds must be"),
+        ({"decay_rounds": 0.0}, "flip_stream.burst.decay_rounds must be"),
+        ({"qubit_count": 0}, "flip_stream.burst.qubit_count must be"),
+        ({"center": (1.0,)}, "flip_stream.burst.center is \\[x, y\\]"),
+    ],
+)
+def test_the_burst_settings_refuse_a_value_by_name(values, sentence):
+    arguments = {"onset_round": 1, "peak_factor": 10.0, **values}
+    with pytest.raises(ValueError, match=sentence):
+        flip_stream_device.BurstSettings(**arguments)
+
+
+def test_a_burst_needs_the_qubits_coordinates():
+    program = memory_programs.joint_repetition_program(False)
+    burst = flip_stream_device.BurstSettings(onset_round=1, peak_factor=10.0)
+    with pytest.raises(ValueError, match="first round declares none"):
+        flip_stream_device.RoundPlan(program, 10, None, burst)
+
+
 def _checkpoint_after_a_round(history):
     """The next round run, then the stream as if read out after it."""
     history.run_round(False)
@@ -349,6 +517,150 @@ def _run_plan(plan, round_count: int) -> list:
         is_final = round_index == round_count
         round_bits = history.run_round(is_final)
         bits.append(round_bits)
+    return bits
+
+
+def _noise_extremes(plan, rounds: tuple) -> tuple:
+    """The largest and the smallest noise probability of each round."""
+    largest = []
+    smallest = []
+    for round_index in rounds:
+        fragment = plan.fragment("repeated_round", round_index)
+        probabilities = _noise_probabilities(fragment)
+        largest.append(max(probabilities))
+        smallest.append(min(probabilities))
+    return largest, smallest
+
+
+def _quiet_rounds(plan, rounds: tuple) -> list:
+    """Each round's repeated fragment without its noise."""
+    quiet = []
+    for round_index in rounds:
+        fragment = plan.fragment("repeated_round", round_index)
+        quiet_fragment = fragment.without_noise()
+        quiet.append(quiet_fragment)
+    return quiet
+
+
+def _noise_probabilities(fragment: stim.Circuit) -> list:
+    """Every probability on the fragment's noisy instructions."""
+    probabilities = []
+    for instruction in fragment:
+        gate = stim.gate_data(instruction.name)
+        if gate.is_noisy_gate:
+            arguments = instruction.gate_args_copy()
+            probabilities.extend(arguments)
+    return probabilities
+
+
+def _model_rates(plan) -> dict:
+    """Each position's detector rate in round 3 of 5, from Stim's model.
+
+    A detector fires when an odd number of its independent errors do:
+    (1 - prod(1 - 2 p)) / 2.
+    """
+    circuit = stim.Circuit()
+    for round_index in range(1, 6):
+        name = _fragment_name(round_index, 5)
+        circuit += plan.fragment(name, round_index)
+    model = circuit.detector_error_model(approximate_disjoint_errors=True)
+    calm_products = [1.0] * circuit.num_detectors
+    for error in model.flattened():
+        _multiply_reached(error, calm_products)
+    coordinates = circuit.get_detector_coordinates()
+    rates = {}
+    for detector, product in enumerate(calm_products):
+        position_x, position_y, time_step = coordinates[detector]
+        if time_step == 2:
+            rates[(position_x, position_y)] = (1 - product) / 2
+    return rates
+
+
+def _multiply_reached(error, products: list) -> None:
+    """Each detector the error flips takes its (1 - 2 p)."""
+    if error.type != "error":
+        return
+    arguments = error.args_copy()
+    probability = arguments[0]
+    for target in error.targets_copy():
+        if target.is_relative_detector_id():
+            products[target.val] *= 1 - 2 * probability
+
+
+def _sampled_events(plan, program, round_count: int) -> dict:
+    """Each position's detection events over the stream's middle rounds.
+
+    The rounds after the second and before the last two are read, as
+    the model's middle round is; the detectors are the program's own.
+    """
+    history = flip_stream_device.FlipHistory(plan, SEED, False)
+    packets = {}
+    after_last_round = round_count + 1
+    for round_index in range(1, after_last_round):
+        is_final = round_index == round_count
+        packets[round_index] = history.run_round(is_final)
+    table = history.table()
+    events = _formed(table, packets)
+    circuit, _measurement_rounds = program.assemble(round_count)
+    coordinates = circuit.get_detector_coordinates()
+    fired_by_position: dict = {}
+    for detector, event in enumerate(events):
+        position_x, position_y, time_step = coordinates[detector]
+        if 2 <= time_step <= round_count - 3:
+            fired = fired_by_position.setdefault((position_x, position_y), [])
+            fired.append(event)
+    return fired_by_position
+
+
+def _fragment_name(round_index: int, round_count: int) -> str:
+    """The fragment a round of a stream of round_count rounds runs."""
+    if round_index == 1:
+        return "first_round"
+    if round_index == round_count:
+        return "final_round"
+    return "repeated_round"
+
+
+def _positions_kept_calm(raised_model: dict, calm_model: dict) -> set:
+    """The positions whose raised model rate is their calm one."""
+    return {
+        position
+        for position, rate in calm_model.items()
+        if raised_model[position] == pytest.approx(rate, rel=1e-9)
+    }
+
+
+def _pooled(events_by_position: dict, positions: set) -> tuple:
+    """The positions' pooled detection rate and its binomial error."""
+    events = []
+    for position in positions:
+        events.extend(events_by_position[position])
+    rate = sum(events) / len(events)
+    variance = rate * (1 - rate) / len(events)
+    return rate, math.sqrt(variance)
+
+
+def _mean_over(rates: dict, positions: set) -> float:
+    """The mean rate over the positions."""
+    chosen = [rates[position] for position in positions]
+    return sum(chosen) / len(chosen)
+
+
+def _device_bits(program, settings, round_count: int) -> list:
+    """Each round's raw bits of one seeded stream on a fresh device."""
+    owner = program_records.Operation(100, "memory", (0,), patches=(0,))
+    device = flip_stream_device.FlipStreamDevice(
+        {100: program}, seed=SEED, settings=settings
+    )
+    device.declare_stream(owner, 0)
+    bits = []
+    after_last_round = round_count + 1
+    for round_index in range(1, after_last_round):
+        is_final = round_index == round_count
+        payloads = device.idle_round_payloads(
+            owner, 100, round_index, is_final=is_final, round_period_ticks=1
+        )
+        bits.append(payloads[0].bits)
     return bits
 
 

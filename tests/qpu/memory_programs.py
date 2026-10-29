@@ -4,9 +4,12 @@ The generator supplies one preparation, a repeated extraction round and a
 terminal data readout. Their assembled circuit is checked against Stim.
 """
 
+import pytest
 import stim
 
+import decsim.frontends.deltakit as deltakit
 import decsim.frontends.memory_stream as memory_stream
+import decsim.frontends.settings as workload_settings
 import decsim.records.circuits as circuit_records
 
 
@@ -36,6 +39,28 @@ def memory_circuit(
         after_clifford_depolarization=physical_error_probability,
         before_measure_flip_probability=physical_error_probability,
     )
+
+
+def sd6_memory_program(
+    distance: int, physical_error_probability: float
+) -> circuit_records.RepeatedStimCircuit:
+    """The SD6 memory the experiments decode, cut into its rounds.
+
+    Stim's generated Z memory with Deltakit's SD6 and noiseless time
+    boundaries, as experiments/basic_case/config.py memory makes it. A
+    test is skipped where Deltakit is not installed.
+    """
+    pytest.importorskip("deltakit_explorer")
+    sd6 = deltakit.SD6Noise()
+    circuit = workload_settings.memory_circuit(
+        "surface_code:rotated_memory_z",
+        4,
+        distance,
+        physical_error_probability,
+        sd6,
+        True,
+    )
+    return memory_stream.repeated_memory(circuit)
 
 
 def joint_repetition_program(

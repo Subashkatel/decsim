@@ -1076,11 +1076,30 @@ qubit_count is n and logical_qubit_count is k in [[n, k, d]]. The defaults are t
 | `qubit_count` | `int` | `144` |
 | `logical_qubit_count` | `int` | `12` |
 
+### `BurstSettings`
+
+`decsim/qpu/flip_stream_device.py`. One noise burst on a disk of qubits, which the decoders are not told of.
+
+From onset_round on, every noise probability of an instruction on a qubit inside the disk is multiplied by 1 + (peak_factor - 1) f: f climbs to 1 over rise_rounds, (i + 1) / rise_rounds in the i-th round, then decays as exp(-(rounds since the peak) / decay_rounds) to the stream's end, the shot burst's shape (burst_shapes.peak_share). Scaling the circuit's own probabilities reads no noise names, so it raises Deltakit's SD6 and Stim's generated noise alike; Tan et al. 2406.18897 raise every channel of a burst by one factor too.
+
+The disk is the qubit_count qubits, data and measure, nearest center in their first two Stim coordinates (the patch's midpoint when None), the lower qubit index first at equal distance; a patch of fewer qubits is raised whole. A burst has a physical size, so its count stays the same at every distance. Every stream of the source runs the burst on its own patch.
+
+The defaults are Willow's large burst in its error-correction data (2408.13687 p.4-5 and p.20): about 30 qubits, decaying over 0.4 to 0.7 ms, 550 rounds at 1.1 us a round, about once an hour. The rise of about 3 rounds is our fit of 39 bursts in Willow's data (specs/adaptive-switching/bursts.md), as the six largest bursts of 2408.13687 peak about 3 rounds after onset. peak_factor has no source; a study sweeps it.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `onset_round` | `int` | required |
+| `peak_factor` | `float` | required |
+| `rise_rounds` | `int` | `3` |
+| `decay_rounds` | `float` | `550.0` |
+| `qubit_count` | `int` | `30` |
+| `center` | `Optional[tuple]` | `None` |
+
 ### `FlipStreamDevice.Settings`
 
 `decsim/qpu/flip_stream_device.py`. rollover_rounds is how often the simulator lets go of its past.
 
-stabilizer_randomization draws the random outcomes of the first measurement of each stabilizer, as Stim does by default; off, the rollover changes no bit.
+stabilizer_randomization draws the random outcomes of the first measurement of each stabilizer, as Stim does by default; off, the rollover changes no bit. burst is one noise burst in every stream, None for none.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -1088,6 +1107,7 @@ stabilizer_randomization draws the random outcomes of the first measurement of e
 | `stabilizer_randomization` | `bool` | `True` |
 | `drift_round` | `Optional[int]` | `None` |
 | `drift_factor` | `float` | `1.0` |
+| `burst` | `Optional[BurstSettings]` | `None` |
 
 ### `UniformLayout.Settings`
 

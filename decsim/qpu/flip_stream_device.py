@@ -27,6 +27,14 @@ rates drift away from its last calibration does (Toshio et al.
 2510.25222 Sec. III B calibrates once). Under a noise row linear in p,
 such as SD6, a factor k is the memory at k p.
 
+A burst (BurstSettings) raises the noise on a disk of qubits from its
+onset round on, by a factor that rises over a few rounds and then
+decays, as a particle's hit does on a chip (Google 2408.13687 p.4-5).
+Each round from the onset runs its fragment cut at the disk's edge and
+joined again at that round's factor (BurstFragment). The decoders are
+not told: the reference record, the truth and the window models are
+the program's, as with the drift.
+
 A round's raw bits are its flips XOR the noiseless reference record,
 read once off a short circuit of the program, as the flips are against
 it (FlipSimulator: "measurement flips ... relative to the noiseless
@@ -58,6 +66,7 @@ import decsim.config as config
 import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.periodic_formation as periodic_formation
 import decsim.ports as ports
+import decsim.qpu.burst_shapes as burst_shapes
 import decsim.qpu.moved_stream_models as moved_stream_models
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
@@ -81,6 +90,59 @@ FRAGMENT_NAMES = (
 )
 
 
+@dataclasses.dataclass(frozen=True)
+class BurstSettings:
+    """One noise burst on a disk of qubits, which the decoders are not told of.
+
+    From onset_round on, every noise probability of an instruction on a
+    qubit inside the disk is multiplied by 1 + (peak_factor - 1) f: f
+    climbs to 1 over rise_rounds, (i + 1) / rise_rounds in the i-th
+    round, then decays as exp(-(rounds since the peak) / decay_rounds)
+    to the stream's end, the shot burst's shape
+    (burst_shapes.peak_share). Scaling the circuit's own probabilities
+    reads no noise names, so it raises Deltakit's SD6 and Stim's
+    generated noise alike; Tan et al. 2406.18897 raise every channel of
+    a burst by one factor too.
+
+    The disk is the qubit_count qubits, data and measure, nearest center
+    in their first two Stim coordinates (the patch's midpoint when
+    None), the lower qubit index first at equal distance; a patch of
+    fewer qubits is raised whole. A burst has a physical size, so its
+    count stays the same at every distance. Every stream of the source
+    runs the burst on its own patch.
+
+    The defaults are Willow's large burst in its error-correction data
+    (2408.13687 p.4-5 and p.20): about 30 qubits, decaying over 0.4 to
+    0.7 ms, 550 rounds at 1.1 us a round, about once an hour. The rise
+    of about 3 rounds is our fit of 39 bursts in Willow's data
+    (specs/adaptive-switching/bursts.md), as the six largest bursts of
+    2408.13687 peak about 3 rounds after onset. peak_factor has no
+    source; a study sweeps it.
+    """
+
+    onset_round: int
+    peak_factor: float
+    rise_rounds: int = 3
+    decay_rounds: float = 550.0
+    qubit_count: int = 30
+    center: Optional[tuple] = None
+
+    def __post_init__(self) -> None:
+        """Every value checked, with the sentence the caller reads."""
+        config.check_whole_count(
+            "flip_stream.burst.onset_round", self.onset_round, "rounds"
+        )
+        _check_factor("flip_stream.burst.peak_factor", self.peak_factor)
+        config.check_whole_count(
+            "flip_stream.burst.rise_rounds", self.rise_rounds, "rounds"
+        )
+        _check_decay_rounds(self.decay_rounds)
+        config.check_whole_count(
+            "flip_stream.burst.qubit_count", self.qubit_count, "qubits"
+        )
+        stim_device.check_burst_center("flip_stream.burst.center", self.center)
+
+
 class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
     """Runs each live stream's rounds on a FlipSimulator, kept flat.
 
@@ -96,13 +158,15 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
 
         stabilizer_randomization draws the random outcomes of the first
         measurement of each stabilizer, as Stim does by default; off, the
-        rollover changes no bit.
+        rollover changes no bit. burst is one noise burst in every
+        stream, None for none.
         """
 
         rollover_rounds: int = DEFAULT_ROLLOVER_ROUNDS
         stabilizer_randomization: bool = True
         drift_round: Optional[int] = None
         drift_factor: float = 1.0
+        burst: Optional[BurstSettings] = None
         # the word the reports name this row by
         name = "flip_stream"
 
@@ -119,12 +183,7 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
                 config.check_whole_count(
                     "flip_stream.drift_round", self.drift_round, "rounds"
                 )
-            factor = self.drift_factor
-            if not config.is_number(factor) or not 0 <= factor < math.inf:
-                raise ValueError(
-                    "flip_stream.drift_factor must be a finite number of at "
-                    f"least 0, got {factor!r}"
-                )
+            _check_factor("flip_stream.drift_factor", self.drift_factor)
 
         def build(
             self, code: ports.CodeModel, circuit_arguments: Mapping
@@ -175,7 +234,9 @@ class FlipStreamDevice(seeding.AtomicRunSeedConsumer):
         drift = None
         if settings.drift_round is not None:
             drift = (settings.drift_round, settings.drift_factor)
-        plan = RoundPlan(program, settings.rollover_rounds, drift)
+        plan = RoundPlan(
+            program, settings.rollover_rounds, drift, settings.burst
+        )
         is_randomized = self.settings.stabilizer_randomization
         history = FlipHistory(plan, seed, is_randomized)
         self._streams_by_id[stream_id] = _Stream(stream_operation, history)
@@ -504,6 +565,8 @@ class RoundPlan:
     the first reads (streaming_stim_device._program_reach). drift is
     (round, factor): every round after round runs its fragment with each
     noise probability times factor; None runs the program as written.
+    burst raises the noise on its disk from its onset on; None is no
+    burst.
     """
 
     def __init__(
@@ -511,8 +574,9 @@ class RoundPlan:
         program: circuit_records.RepeatedStimCircuit,
         rollover_rounds: int,
         drift: Optional[tuple] = None,
+        burst: Optional[BurstSettings] = None,
     ) -> None:
-        self.fragment_eras = _fragment_eras(program, drift)
+        self.noise = _NoiseSchedule(program, drift, burst)
         self.template = periodic_formation.StreamTemplate(program)
         self.references = _references(program, self.template)
         self.rollover_rounds = rollover_rounds
@@ -527,10 +591,7 @@ class RoundPlan:
 
     def fragment(self, name: str, round_index: int) -> stim.Circuit:
         """The named fragment as round round_index runs it."""
-        for last_round, fragments in self.fragment_eras:
-            if last_round is None or round_index <= last_round:
-                return fragments[name]
-        raise AssertionError("the last era runs every later round")
+        return self.noise.fragment(name, round_index)
 
     def rolls_over_after(self, round_index: int) -> bool:
         """Whether the simulator lets go of its past after this round."""
@@ -579,6 +640,99 @@ def scaled_noise(circuit: stim.Circuit, factor: float) -> stim.Circuit:
     return scaled
 
 
+class BurstFragment:
+    """One fragment cut at a burst's disk, joined again at any factor.
+
+    Each noisy instruction on the disk is cut into runs of its target
+    groups, in order: a one-qubit gate's qubits, a two-qubit gate's
+    pairs, any other noisy instruction (a correlated error, a Pauli
+    product) whole. A group is inside when any of its qubits is in the
+    disk, so a pair across the disk's edge is raised, as the shot burst
+    keeps a pair (stim_device._pairs_touching). The runs keep the
+    targets' order, so a measurement's record, and every detector that
+    reads it, is unchanged.
+
+    A run inside is written as text at its raised probabilities and read
+    by Stim, and joined to kept segments that stay Stim circuits: Stim's
+    parser reads Python's repr of a float exactly, while Stim's own text
+    rounds it. Joining fuses equal neighbours, so at factor 1 the
+    fragment comes back as it was. On stim 1.16 appending one run
+    through stim.Circuit.append costs up to 1 ms; a d = 9 SD6 round
+    joined so costs about 200 us, against about 12 us to run it.
+    """
+
+    def __init__(self, fragment: stim.Circuit, disk: frozenset) -> None:
+        kept_segments, raised_runs = _cut_at_disk(fragment, disk)
+        self.kept_segments = kept_segments
+        self.raised_runs = raised_runs
+
+    def raised(self, factor: float) -> stim.Circuit:
+        """The fragment with each probability on the disk times factor."""
+        first_segment = self.kept_segments[0]
+        raised = first_segment.copy()
+        later_segments = self.kept_segments[1:]
+        runs_and_segments = zip(self.raised_runs, later_segments, strict=True)
+        for run, segment in runs_and_segments:
+            run_circuit = run.circuit(factor)
+            raised += run_circuit
+            raised += segment
+        return raised
+
+
+class _NoiseSchedule:
+    """The circuit each round runs: as written, drifted, or burst.
+
+    The eras are (last round or None, fragments) in order: as written,
+    then drifted. A burst raises each era's fragments on its disk from
+    its onset on, by a factor that changes every round, so a burst
+    round's circuit is joined as it runs rather than kept.
+    """
+
+    def __init__(
+        self,
+        program: circuit_records.RepeatedStimCircuit,
+        drift: Optional[tuple],
+        burst: Optional[BurstSettings],
+    ) -> None:
+        self.eras = _fragment_eras(program, drift)
+        self.burst = burst
+        self.burst_eras = _burst_eras(program, self.eras, burst)
+
+    def fragment(self, name: str, round_index: int) -> stim.Circuit:
+        """The named fragment as round round_index runs it."""
+        era_index = self._era_index(round_index)
+        _last_round, fragments = self.eras[era_index]
+        if self.burst is None or round_index < self.burst.onset_round:
+            return fragments[name]
+        burst_fragments = self.burst_eras[era_index]
+        factor = _burst_factor(self.burst, round_index)
+        burst_fragment = burst_fragments[name]
+        return burst_fragment.raised(factor)
+
+    def _era_index(self, round_index: int) -> int:
+        for index, (last_round, _fragments) in enumerate(self.eras):
+            if last_round is None or round_index <= last_round:
+                return index
+        raise AssertionError("the last era runs every later round")
+
+
+@dataclasses.dataclass(frozen=True)
+class _RaisedRun:
+    """One run of targets inside the disk: its gate, probabilities, text."""
+
+    name: str
+    probabilities: tuple
+    targets_text: str
+
+    def circuit(self, factor: float) -> stim.Circuit:
+        """The run with its probabilities times factor, read from text."""
+        scaled = [probability * factor for probability in self.probabilities]
+        written = [repr(probability) for probability in scaled]
+        arguments = ",".join(written)
+        text = f"{self.name}({arguments}) {self.targets_text}"
+        return stim.Circuit(text)
+
+
 @dataclasses.dataclass(frozen=True)
 class _Stream:
     """One declared stream: its owner and what it has run."""
@@ -597,6 +751,165 @@ def _fragment_eras(program, drift: Optional[tuple]) -> tuple:
     for name, fragment in fragments.items():
         drifted[name] = scaled_noise(fragment, factor)
     return ((drift_round, fragments), (None, drifted))
+
+
+def _burst_eras(program, eras: tuple, burst: Optional[BurstSettings]) -> tuple:
+    """Each era's fragments cut at the burst's disk; none without a burst."""
+    if burst is None:
+        return ()
+    disk = _burst_disk(program, burst)
+    burst_eras = []
+    for _last_round, fragments in eras:
+        cut = {
+            name: BurstFragment(fragment, disk)
+            for name, fragment in fragments.items()
+        }
+        burst_eras.append(cut)
+    return tuple(burst_eras)
+
+
+def _burst_disk(program, burst: BurstSettings) -> frozenset:
+    """The burst's qubit_count qubits nearest its centre (BurstSettings).
+
+    The qubits' coordinates are the first round's, where Stim's
+    generator and Deltakit's export declare them.
+    """
+    first_round = program.first_round
+    coordinates = first_round.get_final_qubit_coordinates()
+    if not coordinates:
+        raise ValueError(
+            "flip_stream.burst finds its disk by the qubits' coordinates, "
+            "and this program's first round declares none (QUBIT_COORDS)"
+        )
+    center = burst.center
+    if center is None:
+        center = burst_shapes.coordinate_midpoint(coordinates)
+    distances = burst_shapes.planar_distances(coordinates, center)
+    ranked = sorted((distance, qubit) for qubit, distance in distances.items())
+    nearest = ranked[: burst.qubit_count]
+    return frozenset(qubit for _distance, qubit in nearest)
+
+
+def _burst_factor(burst: BurstSettings, round_index: int) -> float:
+    """1 + (peak_factor - 1) f: the disk's noise in calm units this round."""
+    share = burst_shapes.peak_share(
+        round_index, burst.onset_round, burst.rise_rounds, burst.decay_rounds
+    )
+    extra = burst.peak_factor - 1
+    raised = extra * share
+    return 1 + raised
+
+
+def _cut_at_disk(fragment: stim.Circuit, disk: frozenset) -> tuple:
+    """(kept segments, raised runs), one run between each two segments."""
+    kept_segments = [stim.Circuit()]
+    raised_runs = []
+    for instruction in fragment:
+        if not _raises_on(instruction, disk):
+            kept_segments[-1].append(instruction)
+            continue
+        runs = _target_runs(instruction, disk)
+        _place_runs(instruction, runs, kept_segments, raised_runs)
+    return kept_segments, raised_runs
+
+
+def _raises_on(instruction: stim.CircuitInstruction, disk: frozenset) -> bool:
+    """Whether the instruction has a probability on a qubit of the disk."""
+    gate = stim.gate_data(instruction.name)
+    arguments = instruction.gate_args_copy()
+    if not gate.is_noisy_gate or not arguments:
+        return False
+    targets = instruction.targets_copy()
+    return _is_inside(targets, disk)
+
+
+def _target_runs(instruction: stim.CircuitInstruction, disk: frozenset) -> list:
+    """(is inside, targets) runs of the instruction's groups, in order."""
+    groups = _target_groups(instruction)
+    runs = []
+    for group in groups:
+        is_inside = _is_inside(group, disk)
+        _extend_runs(runs, is_inside, group)
+    return runs
+
+
+def _target_groups(instruction: stim.CircuitInstruction) -> list:
+    """A one-qubit gate's targets one by one, a two-qubit gate's in pairs.
+
+    Any other noisy instruction, a correlated error or a Pauli product,
+    is one group, raised whole.
+    """
+    gate = stim.gate_data(instruction.name)
+    targets = instruction.targets_copy()
+    if gate.is_single_qubit_gate:
+        return [[target] for target in targets]
+    if not gate.is_two_qubit_gate:
+        return [targets]
+    firsts = targets[::2]
+    seconds = targets[1::2]
+    return [
+        [first, second] for first, second in zip(firsts, seconds, strict=True)
+    ]
+
+
+def _is_inside(targets: list, disk: frozenset) -> bool:
+    """Whether any of the targets is a qubit of the disk."""
+    qubits = [target.qubit_value for target in targets]
+    return not disk.isdisjoint(qubits)
+
+
+def _extend_runs(runs: list, is_inside: bool, group: list) -> None:
+    """The group joins the last run on its side of the edge, or opens one."""
+    if runs and runs[-1][0] == is_inside:
+        runs[-1][1].extend(group)
+        return
+    runs.append((is_inside, list(group)))
+
+
+def _place_runs(
+    instruction: stim.CircuitInstruction,
+    runs: list,
+    kept_segments: list,
+    raised_runs: list,
+) -> None:
+    """A run outside joins the last kept segment; one inside opens the next."""
+    name = instruction.name
+    arguments = instruction.gate_args_copy()
+    for is_inside, targets in runs:
+        if not is_inside:
+            kept_segments[-1].append(name, targets, arguments)
+            continue
+        targets_text = _targets_text(name, targets, arguments)
+        run = _RaisedRun(name, tuple(arguments), targets_text)
+        raised_runs.append(run)
+        next_segment = stim.Circuit()
+        kept_segments.append(next_segment)
+
+
+def _targets_text(name: str, targets: list, arguments: list) -> str:
+    """The targets as Stim writes them, after the gate and its probabilities."""
+    instruction = stim.CircuitInstruction(name, targets, arguments)
+    written = str(instruction)
+    _head, _parenthesis, targets_text = written.partition(") ")
+    return targets_text
+
+
+def _check_factor(name: str, value: object) -> None:
+    """A factor on the noise is a finite number of at least 0."""
+    if config.is_number(value) and 0 <= value < math.inf:
+        return
+    raise ValueError(
+        f"{name} must be a finite number of at least 0, got {value!r}"
+    )
+
+
+def _check_decay_rounds(value: object) -> None:
+    if config.is_number(value) and 0 < value < math.inf:
+        return
+    raise ValueError(
+        "flip_stream.burst.decay_rounds must be a finite number of rounds "
+        f"above 0, got {value!r}"
+    )
 
 
 def _references(program, template) -> dict:

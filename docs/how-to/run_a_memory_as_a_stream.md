@@ -60,7 +60,7 @@ warmup, the seed, and the measurement
 | `logical_failure` | whether any patch's end readout was predicted wrong |
 | `decoded_windows` | every window decoded, the warmup's too |
 | `recorded_windows` | the windows of the region of interest |
-| `values` | each latency's count, mean and maximum, in microseconds |
+| `values` | each latency's count, mean, maximum, `p50`, `p90` and `p99`, in microseconds; each percentile is within 1% of the exact one (`decsim/experiments/quantile_sketch.py`) |
 | `window_tiers` | the recorded windows by the pool that answered |
 | `weak_reaction_growth_rate` | the reaction time's growth per microsecond of the stream; above 0 the tier falls behind |
 | `deadline_missed_windows` | the windows over the reaction budget, when one is set |
@@ -70,14 +70,18 @@ warmup, the seed, and the measurement
 | `statistics` | every part's statistic rows over the region of interest |
 | `escalation_series` | every hundredth committed window: the windows committed, the escalated among them and its first committed round |
 | `checkpoints` | one row a checkpoint, when the run closes checkpoints (section 4); empty otherwise |
+| `series` | one row every K rounds, when the run asks for it (section 6); empty otherwise |
 
 A task whose threshold moves (a `RateThreshold` or `OnlineThreshold`)
 adds `online_threshold`: the source's summary and its trajectory of
 (windows, threshold in nats, event).
 
 The means are exactly those `decsim run` reports for the same windows,
-and so is every other number both compute (`escalation_series` is the
-stream's alone)
+and so is every other number both compute (`escalation_series` and
+`series` are the stream's alone). A stream keeps no samples, so its
+percentiles come from logarithmic buckets, as DDSketch keeps them
+(Masson et al., PVLDB 2019); each is within 1% of the percentile
+`decsim run` reports
 (`tests/experiments/test_stream_measures.py`).
 
 ## 4. Measure the logical error rate during the stream
@@ -231,6 +235,36 @@ of every static threshold on the same shots. The chain at the machine's
 own fixed threshold ends and escalates as the machine does. A run with
 static chains is refused when the edge's verdict row reads no
 threshold, such as `status`, `always` or `never`.
+
+## 6. Watch the waiting line over time
+
+The record's totals do not say when a waiting line grew or drained. Ask
+for one row every K rounds:
+
+```
+decsim stream run.py --rounds 20000 --seed 1 --set observation.series_every_rounds=100 --out s1.json
+```
+
+Each row of `series` (`decsim/experiments/stream_series.py`) holds:
+
+- `round_index` and `time_us`: the round just read out, and when;
+- `committed_windows` and `escalated_windows`: the windows the frame
+  committed so far, and the escalated among them;
+- `reaction_mean_us` and `reaction_max_us`: over the windows committed
+  since the row before;
+- `queued_jobs`: each pool's waiting jobs at that moment;
+- `backlog_rounds`: the rounds read out and not yet corrected, when the
+  run samples the backlog (`observation.backlog_trace`).
+
+The rows span the whole stream, the warmup too. A burst's region, the
+time a line takes to drain after it, and the escalated share before and
+after a drift are read off the rows.
+
+To judge latency by its cost in logical errors, as Micro Blossom does
+(2502.14787, Section 8.3), take the mean reaction time in rounds and
+the error rate of one logical cycle:
+`failure_statistics.latency_effective_rate(cycle_rate, mean_latency_rounds, distance)`
+gives p_L (1 + L / d) (`decsim/experiments/failure_statistics.py`).
 
 ## What a stream does not build yet
 

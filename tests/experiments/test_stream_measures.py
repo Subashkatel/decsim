@@ -7,16 +7,20 @@ run that lets each window go must measure what the whole run does, and
 leave no window, stage, frame write or round event behind.
 """
 
+import bisect
 import collections
 import dataclasses
 import math
 
 import pytest
 
+import decsim.config as config
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.experiments.collect as collect
 import decsim.experiments.measure as measure
+import decsim.experiments.quantile_sketch as quantile_sketch
+import decsim.experiments.report as report
 import decsim.experiments.stream_command as stream_command
 import decsim.experiments.stream_measures as stream_measures
 import decsim.frontends.settings as workload_settings
@@ -299,3 +303,141 @@ def test_each_streams_window_0_keeps_its_own_input_hop_when_let_go():
     assert input_hop["count"] == 2
     assert input_hop["mean"] == READ_HOP_MICROSECONDS
     assert folded == kept
+
+
+SERIES_EVERY_ROUNDS = 50
+SERIES_ROUNDS = range(SERIES_EVERY_ROUNDS, 601, SERIES_EVERY_ROUNDS)
+
+
+def _with_series(graph, every_rounds: int):
+    """The graph writing a series row every that many rounds."""
+    observation = dataclasses.replace(
+        graph.observation, series_every_rounds=every_rounds
+    )
+    return dataclasses.replace(graph, observation=observation)
+
+
+def _decoded_commits_us(machine) -> list:
+    """Each decoded window's (commit time, reaction) in us, in order."""
+    observation = machine.observation
+    windows = observation.windows.windows
+    commits = []
+    for record in observation.frame_corrections.committed:
+        window = windows[record.window_key]
+        if window.t_done is None:
+            continue
+        committed_us = config.ticks_to_microseconds(record.committed_ticks)
+        reaction_us = measure.reaction_microseconds(window, record)
+        commits.append((committed_us, reaction_us))
+    return commits
+
+
+def _rows_off_the_ledger(rows: list, commits: list) -> list:
+    """The rows whose count is not the ledger's at their time.
+
+    A commit at the row's own tick may come before or after the
+    readout, so the count lies between the commits strictly before and
+    those at or before.
+    """
+    times_us = [entry[0] for entry in commits]
+    offenders = []
+    for row in rows:
+        before = bisect.bisect_left(times_us, row["time_us"])
+        at_or_before = bisect.bisect_right(times_us, row["time_us"])
+        if not before <= row["committed_windows"] <= at_or_before:
+            offenders.append(row)
+    return offenders
+
+
+def _largest_row_reaction(rows: list) -> float:
+    """The largest reaction any row saw."""
+    maxima = [
+        row["reaction_max_us"]
+        for row in rows
+        if row["reaction_max_us"] is not None
+    ]
+    return max(maxima)
+
+
+def _waiting_jobs(row: dict) -> int:
+    """The jobs waiting over every pool at the row."""
+    queued = row["queued_jobs"].values()
+    return sum(queued)
+
+
+def _is_within_accuracy(estimate: float, exact: float) -> bool:
+    allowed = quantile_sketch.DEFAULT_RELATIVE_ACCURACY * exact
+    error = estimate - exact
+    return abs(error) <= allowed
+
+
+@pytest.mark.parametrize("run", RUNS)
+def test_a_streams_percentiles_are_within_one_percent_of_the_shots(run):
+    graph = stream_machines.stream_graph(run, folds=False)
+    machine, result, folded = _run(graph)
+    task = collect.Task("stream", graph, {})
+    shot = collect.Shot(task, SEED, machine, result, 0.0)
+
+    measured = measure.measure_shot(shot)
+
+    for name, summary in folded.values.items():
+        samples = collections.Counter(measured.samples[name])
+        for label, fraction in quantile_sketch.REPORTED_PERCENTILES:
+            exact = report.percentile_of_counts(samples, fraction)
+            assert _is_within_accuracy(summary[label], exact), name
+
+
+def test_a_series_row_counts_the_windows_committed_before_its_round():
+    graph = stream_machines.stream_graph(RUNS[3], folds=False)
+    with_series = _with_series(graph, SERIES_EVERY_ROUNDS)
+
+    machine, _result, folded = _run(with_series)
+
+    commits = _decoded_commits_us(machine)
+    rounds = [row["round_index"] for row in folded.series]
+    assert rounds == list(SERIES_ROUNDS)
+    assert _rows_off_the_ledger(folded.series, commits) == []
+    assert folded.series[-1]["escalated_windows"] > 0
+
+
+def test_the_series_sees_every_reaction_up_to_its_last_row():
+    graph = stream_machines.stream_graph(RUNS[3], folds=False)
+    with_series = _with_series(graph, SERIES_EVERY_ROUNDS)
+
+    machine, _result, folded = _run(with_series)
+
+    last_time_us = folded.series[-1]["time_us"]
+    commits = _decoded_commits_us(machine)
+    reactions = [entry[1] for entry in commits if entry[0] <= last_time_us]
+    assert _largest_row_reaction(folded.series) == max(reactions)
+
+
+def test_an_overloaded_pools_waiting_line_grows_row_by_row():
+    overloaded = stream_machines.StreamRun(600, 4.0, 1, False)
+    graph = stream_machines.stream_graph(overloaded, folds=True)
+    with_series = _with_series(graph, SERIES_EVERY_ROUNDS)
+
+    _machine, _result, folded = _run(with_series)
+
+    waiting = [_waiting_jobs(row) for row in folded.series]
+    assert waiting[-1] > waiting[0] + 10
+    assert waiting == sorted(waiting)
+
+
+def test_a_pool_that_keeps_up_keeps_its_line_short():
+    calm = stream_machines.StreamRun(600, 0.5, 1, False)
+    graph = stream_machines.stream_graph(calm, folds=True)
+    with_series = _with_series(graph, SERIES_EVERY_ROUNDS)
+
+    _machine, _result, folded = _run(with_series)
+
+    waiting = [_waiting_jobs(row) for row in folded.series]
+    assert max(waiting) <= 1
+
+
+def test_a_run_with_no_period_writes_no_series():
+    graph = stream_machines.stream_graph(RUNS[0], folds=True)
+
+    _machine, _result, folded = _run(graph)
+
+    assert folded.series == []

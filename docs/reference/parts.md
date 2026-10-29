@@ -1016,6 +1016,8 @@ record_window_outcomes keeps each window's committed answer, and its true label 
 
 checkpoint_every_rounds closes a checkpoint of each stream every that many rounds and at its last round: the logical outcome had the stream been read out there, a source copy read out without noise and decoded to the end on the machine's own path at no simulated time (Tan et al. 2209.09219 lines 1003-1037; observe/checkpoints.py). Its rows give the logical error rate of runs of every length from one run (experiments/failure_statistics.py). None, the default, closes none.
 
+series_every_rounds is a stream's: every that many rounds the stream's measures write one row, the windows committed and escalated so far, the reaction times since the row before and each pool's waiting line then (experiments/stream_series.py), so a burst's region and the time a line takes to drain can be read. A shot keeps its whole ledgers and reads none. None, the default, writes none.
+
 answer_check_paths checks each window's weak and strong answers against the truth, each at the checkpoint after the window, and keeps one chain of answers a path named: weak, strong or best_of_two (observe/answer_checks.py). One switching run then gives each decoder alone and the per-window best-of-two line on the same shots. Empty, the default, checks nothing.
 
 answer_check_thresholds keeps one more chain a threshold named, in decibels: a static chain, which keeps the weak answer unless the machine's own verdict row escalates it at that fixed threshold, and then keeps the strong one. Only its outcome and its escalated and decided windows are kept, so one switching run gives the failure rate and escalated share of every static threshold on the same shots. Empty, the default, keeps none.
@@ -1038,6 +1040,7 @@ The log and the trace are labels (compare=False) and no part of a task's id, as 
 | `warmup_rounds` | `int` | `config.added_field(0)` |
 | `folds_windows` | `bool` | `config.added_field(False)` |
 | `checkpoint_every_rounds` | `Optional[int]` | `config.added_field(None)` |
+| `series_every_rounds` | `Optional[int]` | `config.added_field(None)` |
 | `answer_check_paths` | `tuple` | `config.added_field(())` |
 | `answer_check_thresholds` | `tuple` | `config.added_field(())` |
 

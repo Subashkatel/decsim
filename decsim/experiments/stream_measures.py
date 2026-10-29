@@ -17,25 +17,32 @@ observation.folds_windows the window's records are then let go.
 What is folded is what measure_shot computes from windows, for the
 windows the region of interest records: each latency's values (count,
 mean, maximum; the mean, an exact sum rounded once, is fmean's
-number), the windows by tier and by status, the escalated windows, the
-reaction growth rates (an exact least-squares fit in ticks), the
-deadline misses, the end-of-stream reaction and the throughput. The
-per-round latencies (cwb_per_round and the stalls) are not folded.
+number; and its p50, p90 and p99, each within 1% of the shot's exact
+one, quantile_sketch.py), the windows by tier and by status, the
+escalated windows, the reaction growth rates (an exact least-squares
+fit in ticks), the deadline misses, the end-of-stream reaction and the
+throughput. The per-round latencies (cwb_per_round and the stalls) are
+not folded.
 
 Past measure_shot, it samples the escalated share as the stream goes:
 every hundredth committed window, the windows committed so far, the
 escalated among them and the window's first committed round, so a
-stream whose noise drifts shows its share before and after.
+stream whose noise drifts shows its share before and after. With
+observation.series_every_rounds it also writes a row every that many
+rounds, each pool's waiting line among it (stream_series.py).
 """
 
 import collections
 import dataclasses
 import fractions
+import functools
 from typing import Optional
 
 import decsim.build.decoders as decoders_part
 import decsim.config as config_module
 import decsim.experiments.measure as measure
+import decsim.experiments.quantile_sketch as quantile_sketch
+import decsim.experiments.stream_series as stream_series
 import decsim.experiments.transfer_index as transfer_index
 import decsim.machine as machine_module
 import decsim.records.decoding as decoding_records
@@ -58,9 +65,10 @@ ESCALATION_SAMPLED_EVERY = 100
 class StreamMeasurement:
     """What a stream measured, the region of interest's where it has one.
 
-    values holds each latency's count, mean and maximum in us, the ones
-    window_points_us reads; growth rates and the end-of-stream reaction
-    are None when nothing gives them, as in ShotMeasurement.
+    values holds each latency's count, mean, maximum, p50, p90 and p99
+    in us, the ones window_points_us reads; growth rates and the
+    end-of-stream reaction are None when nothing gives them, as in
+    ShotMeasurement.
     """
 
     rounds: int
@@ -104,6 +112,9 @@ class StreamMeasurement:
     # one row a static threshold, when the run keeps static chains
     # (observe/answer_checks.py AnswerChecks.threshold_rows)
     threshold_checks: list
+    # one row every observation.series_every_rounds rounds, when the run
+    # sets it (stream_series.py SeriesRow)
+    series: list
 
 
 class StreamMeasures:
@@ -111,7 +122,6 @@ class StreamMeasures:
 
     def __init__(self, machine: machine_module.Machine) -> None:
         self.machine = machine
-        self.lets_go = machine.graph.observation.folds_windows
         routes = machine.layout.routes()
         self.transfers = transfer_index.TransferIndex(
             routes.name_bits_by_answer_hop
@@ -122,6 +132,7 @@ class StreamMeasures:
         self.folds = _Folds(deadline_us)
         # the weak and the strong tier's pools (Layout.tier_pools)
         self.tier_pools = machine.layout.tier_pools()
+        self.series = _series_of(machine)
         self._connect(machine)
 
     def transfer_delivered(
@@ -142,6 +153,9 @@ class StreamMeasures:
         """The QPU read out one round: the generation span and the count."""
         self._readout_now()
         self.folds.count_round(readout.stream_id, readout.round_index)
+        if self.series is not None:
+            now = self.machine.engine.now
+            self.series.round_read_out(readout.round_index, now)
 
     def idle_round_read_out(
         self,
@@ -159,7 +173,8 @@ class StreamMeasures:
         self.folds.fold_window_record(window)
         if frame_record is not None:
             self._fold_committed(window, frame_record)
-        if self.lets_go:
+        observation_settings = self.machine.graph.observation
+        if observation_settings.folds_windows:
             self._let_go(window)
 
     def measurement(
@@ -244,6 +259,7 @@ class StreamMeasures:
             "checkpoints": _checkpoint_rows(observation),
             "answer_checks": _answer_check_rows(observation),
             "threshold_checks": _threshold_check_rows(observation),
+            "series": _series_rows(self.series),
         }
 
     def _connect(self, machine: machine_module.Machine) -> None:
@@ -274,12 +290,16 @@ class StreamMeasures:
         stages = self.machine.observation.stages
         decode = measure.committed_decode(stages, frame_record)
         _weak_pools, strong_pools = self.tier_pools
-        if decode.tier in strong_pools:
+        is_escalated = decode.tier in strong_pools
+        if is_escalated:
             self.folds.fold_strong(decode)
         self.folds.note_commit(frame_record)
         self.folds.sample_escalation(window)
         if window.t_done is None:
             return
+        if self.series is not None:
+            reaction_us = measure.reaction_microseconds(window, frame_record)
+            self.series.window_committed(reaction_us, is_escalated)
         send = measure.last_required_send_ticks(decode, self.transfers.qpu_send)
         self.folds.fold_decoded(frame_record, send)
         observation_settings = self.machine.graph.observation
@@ -626,30 +646,39 @@ class _Counts:
 
 
 class _Values:
-    """One latency's values in us: their count, exact sum and maximum.
+    """One latency's values in us: count, exact sum, maximum, sketch.
 
     measure_shot averages by statistics.fmean, fsum over the count, and
     fsum is the exact sum correctly rounded. The floats' exact sum, kept
     as a Fraction and rounded once (float(Fraction) rounds correctly),
-    is the same number in any order, and a stream of any length keeps
-    three numbers per latency.
+    is the same number in any order. The percentiles come off a sketch
+    of the values (quantile_sketch.py), so a stream of any length keeps
+    three numbers and a few hundred bucket counts per latency.
     """
 
     def __init__(self) -> None:
         self.count = 0
         self.total = fractions.Fraction(0)
         self.maximum: Optional[float] = None
+        self.sketch = quantile_sketch.QuantileSketch()
 
     def add(self, value: float) -> None:
         self.count += 1
         exact = fractions.Fraction(value)
         self.total += exact
         self.maximum = _higher(self.maximum, value)
+        self.sketch.add(value)
 
     def summary(self) -> dict:
         total = float(self.total)
         mean = total / self.count
-        return {"count": self.count, "mean": mean, "maximum": self.maximum}
+        percentiles = self.sketch.percentiles()
+        return {
+            "count": self.count,
+            "mean": mean,
+            "maximum": self.maximum,
+            **percentiles,
+        }
 
 
 class _Growth:
@@ -716,6 +745,36 @@ def _unread_windows(windows: dict) -> list:
         for window in windows.values()
         if window.published_request_key is None
     ]
+
+
+def _series_of(
+    machine: machine_module.Machine,
+) -> Optional[stream_series.StreamSeries]:
+    """The run's series, None when observation.series_every_rounds is."""
+    every_rounds = machine.graph.observation.series_every_rounds
+    if every_rounds is None:
+        return None
+    run_statistics = machine.observation.statistics
+    paths = machine.layout.statistics_path_by_pool()
+    queue_paths = {pool.word: f"{path}.queue" for pool, path in paths.items()}
+    queue_levels = functools.partial(_queue_levels, run_statistics, queue_paths)
+    backlog = machine.observation.decode_backlog
+    return stream_series.StreamSeries(every_rounds, queue_levels, backlog)
+
+
+def _queue_levels(run_statistics, queue_paths: dict) -> dict:
+    """Each pool's jobs waiting now, by its word."""
+    return {
+        word: run_statistics.groups[path].queued.level
+        for word, path in queue_paths.items()
+    }
+
+
+def _series_rows(series: Optional[stream_series.StreamSeries]) -> list:
+    """The series' rows; none when the run writes no series."""
+    if series is None:
+        return []
+    return series.row_dicts()
 
 
 def _checkpoint_rows(observation) -> list:

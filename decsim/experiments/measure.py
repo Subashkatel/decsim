@@ -1112,7 +1112,7 @@ def reaction_growth_rate(recorded: list, tier_pools: tuple) -> Optional[float]:
         if window_records.PoolId(frame_record.tier) not in tier_pools:
             continue
         arrival_us = _arrival_microseconds(window)
-        reaction_us = _reaction_microseconds(window, frame_record)
+        reaction_us = reaction_microseconds(window, frame_record)
         arrivals_us.append(arrival_us)
         reactions_us.append(reaction_us)
     distinct_arrivals = set(arrivals_us)
@@ -1140,7 +1140,7 @@ def deadline_misses(
         return None, None
     missed_arrivals_us = []
     for window, frame_record in recorded:
-        reaction_us = _reaction_microseconds(window, frame_record)
+        reaction_us = reaction_microseconds(window, frame_record)
         if reaction_us > deadline_microseconds:
             arrival_us = _arrival_microseconds(window)
             missed_arrivals_us.append(arrival_us)
@@ -1235,6 +1235,16 @@ def parallel_processes_needed(
     both_layers_service_us = 2 * service_us
     processes = both_layers_service_us / committed_rounds_us
     return math.ceil(processes)
+
+
+def reaction_microseconds(
+    window: window_records.Window,
+    frame_record: decoding_records.PauliFrameCommitRecord,
+) -> float:
+    """buffer0_ready_to_frame: the window's data complete to its commit."""
+    return _span_microseconds(
+        frame_record.committed_ticks, window.t_data_complete
+    )
 
 
 def _measurement(
@@ -2179,16 +2189,6 @@ def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
 def _arrival_microseconds(window: window_records.Window) -> float:
     """The shot-clock tick the window's data was complete, in us."""
     return config_module.ticks_to_microseconds(window.t_data_complete)
-
-
-def _reaction_microseconds(
-    window: window_records.Window,
-    frame_record: decoding_records.PauliFrameCommitRecord,
-) -> float:
-    """buffer0_ready_to_frame: the window's data complete to its commit."""
-    return _span_microseconds(
-        frame_record.committed_ticks, window.t_data_complete
-    )
 
 
 def _last_rounds_read(records: list) -> tuple:

@@ -175,6 +175,27 @@ def per_output_round_rate(shot_rate: float, outputs: int, rounds: int) -> float:
     return per_round_rate(output_rate, rounds)
 
 
+def latency_effective_rate(
+    cycle_rate: float, mean_latency_rounds: float, distance: int
+) -> float:
+    """A logical cycle's failure rate, the wait for its decode counted.
+
+    Micro Blossom's effective logical error rate (Wu et al. 2502.14787
+    Sec. 8.3, p.12): a feed-forward waits L rounds for its decoded
+    outcome, and the waiting qubit fails as over L / d more cycles, so a
+    cycle of rate p_L becomes p_L (1 + L / d); over a spread of
+    latencies only the mean counts. cycle_rate is the failure rate of d
+    rounds, one logical cycle, and mean_latency_rounds the mean reaction
+    time over the round period. The form is the paper's first order.
+    """
+    if mean_latency_rounds < 0:
+        raise ValueError(
+            f"a mean latency is not negative: {mean_latency_rounds} rounds"
+        )
+    waited_cycles = mean_latency_rounds / distance
+    return cycle_rate * (1 + waited_cycles)
+
+
 @dataclasses.dataclass(frozen=True)
 class DecayFit:
     """The per-round failure rate that runs of several lengths give.

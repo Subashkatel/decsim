@@ -422,3 +422,29 @@ def _plan_outcomes(probability, target, minimum, cap):
     for failures in range(target):
         weight = scipy.stats.binom.pmf(failures, cap, probability)
         yield failures, cap, StopKind.CAP, weight
+
+
+def test_the_latency_cost_is_micro_blossoms_effective_rate():
+    # Wu et al. 2502.14787 p.4: at d = 21, a decode that waits 33 cycles
+    # makes the effective rate 34 times the zero-latency one
+    cycle_rate = 1e-6
+    distance = 21
+    waited_rounds = 33 * distance
+
+    effective = failure_statistics.latency_effective_rate(
+        cycle_rate, waited_rounds, distance
+    )
+
+    expected = 34 * cycle_rate
+    assert math.isclose(effective, expected)
+
+
+def test_no_latency_costs_nothing():
+    effective = failure_statistics.latency_effective_rate(0.01, 0.0, 9)
+
+    assert effective == 0.01
+
+
+def test_a_negative_latency_is_refused():
+    with pytest.raises(ValueError, match="not negative"):
+        failure_statistics.latency_effective_rate(0.01, -1.0, 9)

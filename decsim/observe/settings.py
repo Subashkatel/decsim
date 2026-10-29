@@ -90,6 +90,14 @@ class ObservationSettings:
     run (experiments/failure_statistics.py). None, the default, closes
     none.
 
+    series_every_rounds is a stream's: every that many rounds the
+    stream's measures write one row, the windows committed and
+    escalated so far, the reaction times since the row before and each
+    pool's waiting line then (experiments/stream_series.py), so a
+    burst's region and the time a line takes to drain can be read. A
+    shot keeps its whole ledgers and reads none. None, the default,
+    writes none.
+
     answer_check_paths checks each window's weak and strong answers
     against the truth, each at the checkpoint after the window, and
     keeps one chain of answers a path named: weak, strong or best_of_two
@@ -129,6 +137,7 @@ class ObservationSettings:
     warmup_rounds: int = config.added_field(0)
     folds_windows: bool = config.added_field(False)
     checkpoint_every_rounds: Optional[int] = config.added_field(None)
+    series_every_rounds: Optional[int] = config.added_field(None)
     answer_check_paths: tuple = config.added_field(())
     answer_check_thresholds: tuple = config.added_field(())
 
@@ -173,12 +182,12 @@ class ObservationSettings:
                 "observation.reaction_deadline_microseconds",
                 self.reaction_deadline_microseconds,
             )
-        if self.checkpoint_every_rounds is not None:
-            config.check_whole_count(
-                "observation.checkpoint_every_rounds",
-                self.checkpoint_every_rounds,
-                "rounds",
-            )
+        _check_optional_rounds(
+            "observation.checkpoint_every_rounds", self.checkpoint_every_rounds
+        )
+        _check_optional_rounds(
+            "observation.series_every_rounds", self.series_every_rounds
+        )
         _check_answer_check_paths(self.answer_check_paths)
         _check_answer_check_thresholds(self.answer_check_thresholds)
 
@@ -211,6 +220,13 @@ class ObservationSettings:
         if self.trace in ("off", CHROME_TRACE):
             return None
         return self.trace
+
+
+def _check_optional_rounds(name: str, rounds: Optional[int]) -> None:
+    """A period in rounds is a whole count, when one is set."""
+    if rounds is None:
+        return
+    config.check_whole_count(name, rounds, "rounds")
 
 
 def _check_folding_keeps_no_outcomes(

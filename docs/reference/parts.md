@@ -468,13 +468,14 @@ preset_latency_microseconds prices every decode at one fixed core latency (decod
 
 ### `CorrelatedPyMatchingDecoder.Settings`
 
-`decsim/decoders/minimum_weight_perfect_matching/decoder.py`. The row as a run names it: measured, or at a preset latency.
+`decsim/decoders/minimum_weight_perfect_matching/decoder.py`. The row as a run names it: measured, preset, or a fitted law.
 
-preset_latency_microseconds is PyMatchingDecoder.Settings' own.
+preset_latency_microseconds is PyMatchingDecoder.Settings' own. timing is the fitted time a decode takes from its window's detection events (detection_event_time.DetectionEventTime), and the matching still decodes every window. With neither, the host's own time around the call holds the unit; a run names one at most.
 
 | Field | Type | Default |
 | --- | --- | --- |
 | `preset_latency_microseconds` | `Optional[float]` | `None` |
+| `timing` | `Optional[detection_event_time.DetectionEventTime]` | `None` |
 
 ## decsim/decoders/relay_belief_propagation
 

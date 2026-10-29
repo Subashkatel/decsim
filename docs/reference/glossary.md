@@ -83,7 +83,11 @@ These are not from the papers. The pages use them everywhere.
   form, named in the `formed_at` setting of `DetectionEventSettings`.
 - **card**: a set of stated numbers used in place of a measurement. A
   decoder card is a decode's stated time, such as a decoder's
-  `preset_latency_microseconds`. A link card is a latency and, if
+  `preset_latency_microseconds`, or a law that prices each decode from
+  what the decode did: union-find's `CycleCount`, belief matching's
+  `IterationTime`, and correlated matching's `DetectionEventTime`, a
+  law in the window's detection events fitted on one core and scaled
+  to a paper's average. A link card is a latency and, if
   bounded, a bandwidth for one hop. A code card is the numbers the
   machine needs from a code.
 - **hop**: one priced link between two components; the link paths below

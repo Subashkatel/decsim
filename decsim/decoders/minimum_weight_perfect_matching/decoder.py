@@ -29,6 +29,9 @@ import decsim.detector_error_model.basis_split as basis_split
 import decsim.records.decoding as decoding_records
 import decsim.records.fault_model_contracts as fault_models
 import decsim.trace_source as trace_source
+from decsim.decoders.minimum_weight_perfect_matching import (
+    detection_event_time,
+)
 
 WARM_UP_COLUMNS = 3
 
@@ -240,7 +243,8 @@ class CorrelatedPyMatchingDecoder(decoder_module.WindowDecoderBase):
     detector error model whose errors are decomposed into graphlike
     components, so the window's linked models are written as one
     (correlated_model). Measured mode times the decode alone, as
-    PyMatchingDecoder's does.
+    PyMatchingDecoder's does. With a DetectionEventTime, the fitted law
+    at the window's own detection events holds the unit instead.
     """
 
     fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
@@ -248,33 +252,56 @@ class CorrelatedPyMatchingDecoder(decoder_module.WindowDecoderBase):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The row as a run names it: measured, or at a preset latency.
+        """The row as a run names it: measured, preset, or a fitted law.
 
         preset_latency_microseconds is PyMatchingDecoder.Settings' own.
+        timing is the fitted time a decode takes from its window's
+        detection events (detection_event_time.DetectionEventTime), and
+        the matching still decodes every window. With neither, the host's
+        own time around the call holds the unit; a run names one at most.
         """
 
         preset_latency_microseconds: Optional[float] = None
+        timing: Optional[detection_event_time.DetectionEventTime] = None
         # the word the reports name this row by
         name = "correlated_pymatching"
 
         def __post_init__(self) -> None:
             _check_preset_latency(self.preset_latency_microseconds)
+            _check_one_time(self.preset_latency_microseconds, self.timing)
 
         def build(self) -> "CorrelatedPyMatchingDecoder":
             """A fresh decoder of these settings."""
             if self.preset_latency_microseconds is None:
-                return CorrelatedPyMatchingDecoder()
+                return CorrelatedPyMatchingDecoder(timing=self.timing)
             latency_model = decoders.PresetLatencyDecoder(
                 self.preset_latency_microseconds
             )
             return CorrelatedPyMatchingDecoder(latency_model)
 
     def __init__(
-        self, latency_model: Optional[decoder_module.DecoderBase] = None
+        self,
+        latency_model: Optional[decoder_module.DecoderBase] = None,
+        timing: Optional[detection_event_time.DetectionEventTime] = None,
     ):
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
+        self.timing = timing
+        # the timing prices the decode and leaves the graph alone
         row = type(self)
         self.compile_key = (row, None)
+
+    def ticks_after_decode(
+        self,
+        result: Optional[decoding_records.DecodeResult],
+        elapsed_nanoseconds: int,
+        now: int,
+    ) -> int:
+        """The fitted law at this decode's detection events, else the host's."""
+        if self.timing is None:
+            return decoder_module.WindowDecoderBase.ticks_after_decode(
+                self, result, elapsed_nanoseconds, now
+            )
+        return self.timing.decode_ticks(result.detection_events)
 
     def compile(
         self,
@@ -368,6 +395,17 @@ def _check_preset_latency(microseconds) -> None:
     raise ValueError(
         "preset_latency_microseconds must be a finite nonnegative number "
         f"of microseconds, or None (got {microseconds!r})"
+    )
+
+
+def _check_one_time(preset_latency_microseconds, timing) -> None:
+    """A preset latency and a fitted law are two times for one decode."""
+    if preset_latency_microseconds is None or timing is None:
+        return
+    raise ValueError(
+        "correlated_pymatching takes a preset latency or a fitted timing, "
+        f"not both (got preset_latency_microseconds="
+        f"{preset_latency_microseconds!r} and timing={timing!r})"
     )
 
 

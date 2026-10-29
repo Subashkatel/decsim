@@ -185,7 +185,8 @@ class StreamMeasures:
         (escalation/strong_window_shapes.py DoubleWindow).
         """
         del owner_key
-        if not self.lets_go:
+        observation_settings = self.machine.graph.observation
+        if not observation_settings.folds_windows:
             return
         observation = self.machine.observation
         observation.windows.forget(key)

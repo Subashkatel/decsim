@@ -684,7 +684,7 @@ class BurstStimDevice(StimDevice):
             _check_rise_rounds(self.burst_rise_rounds)
             _check_decay_rounds(self.burst_decay_rounds)
             _check_radius(self.burst_radius)
-            _check_center(self.burst_center)
+            check_burst_center("qpu.burst_center", self.burst_center)
             _check_burst_probability(self.burst_error_probability)
             _check_channels(self.burst_channels)
 
@@ -864,6 +864,21 @@ def validated_seed(seed: Optional[numbers.Integral]) -> Optional[int]:
             f"seed must be None or a 64-bit unsigned integer; got {seed!r}"
         )
     return root_seed
+
+
+def check_burst_center(name: str, value: object) -> None:
+    """A burst's centre is (x, y) in Stim qubit coordinates, or None.
+
+    Both bursts, the shot's and the stream's, read it so.
+    """
+    if value is None:
+        return
+    is_pair = isinstance(value, tuple) and len(value) == 2
+    if is_pair and all(_is_finite_number(number) for number in value):
+        return
+    raise ValueError(
+        f"{name} is [x, y] in Stim qubit coordinates or null; got {value!r}"
+    )
 
 
 def burst_circuit(
@@ -1152,18 +1167,6 @@ def _check_radius(value) -> None:
     raise ValueError(
         f"qpu.burst_radius is a distance of 0 or more in Stim qubit "
         f"coordinates, or null; got {value!r}"
-    )
-
-
-def _check_center(value) -> None:
-    if value is None:
-        return
-    is_pair = isinstance(value, tuple) and len(value) == 2
-    if is_pair and all(_is_finite_number(number) for number in value):
-        return
-    raise ValueError(
-        f"qpu.burst_center is [x, y] in Stim qubit coordinates or null; "
-        f"got {value!r}"
     )
 
 

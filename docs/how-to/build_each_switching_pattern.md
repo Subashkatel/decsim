@@ -91,6 +91,8 @@ to this table, when the machine is built:
 | checkpoints or answer checks beside an escalate edge past the entry pool | that edge's source pool joins its solves where no checkpoint reads them |
 | checkpoints or answer checks beside the double window | a strong region answers for rounds past its escalated window and pins its far face on the restart window's commit, so a checkpoint inside it has no answer a stream ending there would keep |
 | checkpoints or answer checks beside a decoder or a verdict that draws from the run's seed | a checkpoint decides its last windows as the machine does, and a draw there would change the run |
+| parallel windows on a stream that a segment cuts, such as a feedback stream (refused when the segment binds) | a segment's result is a sum of whole windows, and the parallel windows are laid across a stream with no segments |
+| parallel windows on a live or a finite Stim stream, not the flip stream (refused at the first B window) | those sources make each window's model after the windows before it, and a B window also waits for the window after it |
 
 Not built, because no source describes it: one window's results merged
 across separate pools (a race or a vote across pools); a router rule

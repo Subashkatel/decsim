@@ -306,6 +306,52 @@ the burst runs. This is what the burst does:
   more, so that the stream recovers before its end.
 - A peak of 1 runs the same bits as no burst, for the same seed.
 
+## 8. Decode the stream on parallel windows
+
+With sliding windows, a window waits for the window before it, so one
+patch keeps one decoder unit busy at a time. Parallel windows let
+several units decode one patch at the same time (Skoric et al.
+2209.08552, Section I.C). Set the scheme:
+
+```
+decsim stream run.py --rounds 2000 --seed 1 --set windows.scheme.type=parallel --out p1.json
+```
+
+The stream lays two kinds of window, each `d` rounds wide
+(`decsim/windows/schemes/parallel.py`):
+
+- An A window commits `d` rounds and reads `d` more rounds on each
+  side. It waits for no other window. The first A window commits the
+  first `2d` rounds.
+- A B window commits the `3d` rounds between two A windows and reads
+  nothing more. It starts only when the A windows on both sides have
+  committed, and it reads the boundary each one hands on.
+
+The stream lays each window when its first committed round arrives,
+where the shot plan for the same rounds puts it. Each `4d` rounds need
+two decodes of `3d` rounds, so the units
+keep up when there are at least `2 T / (4 d t)` of them. Here `T` is
+the decode time of one window and `t` is the round period (Skoric,
+Equation 2).
+
+At the end of the stream, the laid windows are cut to end on the last
+round, as the shot plan cuts them. There is one difference. Shots join
+a tail of `d` rounds or fewer after an A window to that A window. A
+stream lays the next B window when its first round arrives, and it does
+not take back a window it laid. Thus the stream ends on a short B
+window there instead.
+
+Checkpoints (section 4) work as before. A B window waits for the A
+window after it, so a checkpoint keeps a B window only when it also
+keeps that A window. Otherwise the B window is decided again, after
+the A window, with the boundaries of both.
+
+Switching is refused on parallel windows, on shots and on streams
+alike. Switching needs a last window that reads rounds past its
+commit, and the last parallel window reads none
+(`decsim/escalation/policies.py`). Thus answer checks (section 5) do
+not apply.
+
 ## What a stream does not build yet
 
 Each of these is refused, "not implemented yet", with its reason:

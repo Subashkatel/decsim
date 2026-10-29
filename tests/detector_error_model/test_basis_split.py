@@ -10,7 +10,9 @@ columns, merged as odd counts.
 
 import collections
 
+import numpy
 import pytest
+import scipy.sparse
 import stim
 
 import decsim.detector_error_model.basis_split as basis_split
@@ -149,6 +151,19 @@ def test_each_part_is_stims_decomposition_of_that_type(
     actual = _decsims_part(part)
     assert actual.keys() == expected.keys()
     assert actual == pytest.approx(expected, rel=1e-9)
+
+
+def test_every_column_rows_reads_each_column_as_python_ints():
+    dense = numpy.array(
+        [[1, 0, 1, 0], [0, 0, 1, 1], [1, 0, 0, 1]], dtype=numpy.uint8
+    )
+    matrix = scipy.sparse.csc_matrix(dense)
+
+    every = basis_split.every_column_rows(matrix)
+
+    assert every == [(0, 2), (), (0, 1), (1, 2)]
+    first_row = every[0][0]
+    assert type(first_row) is int
 
 
 def test_a_detector_of_neither_type_is_refused():

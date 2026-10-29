@@ -88,7 +88,25 @@ def column_rows(matrix: scipy.sparse.csc_matrix, column: int) -> tuple:
     start = matrix.indptr[column]
     end = matrix.indptr[column + 1]
     indices = matrix.indices[start:end]
-    return tuple(int(index) for index in indices)
+    rows = indices.tolist()
+    return tuple(rows)
+
+
+def every_column_rows(matrix: scipy.sparse.csc_matrix) -> list[tuple]:
+    """column_rows of every column, the indices read into Python once.
+
+    A caller that walks every column pays one conversion, not one numpy
+    slice a column: a strong window's link has thousands of columns.
+    """
+    rows = matrix.indices.tolist()
+    starts = matrix.indptr.tolist()
+    every = []
+    for column in range(matrix.shape[1]):
+        start = starts[column]
+        end = starts[column + 1]
+        rows_of_column = tuple(rows[start:end])
+        every.append(rows_of_column)
+    return every
 
 
 @dataclasses.dataclass

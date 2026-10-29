@@ -266,6 +266,46 @@ the error rate of one logical cycle:
 `failure_statistics.latency_effective_rate(cycle_rate, mean_latency_rounds, distance)`
 gives p_L (1 + L / d) (`decsim/experiments/failure_statistics.py`).
 
+## 7. Add a noise burst
+
+A noise burst is a short time in which many errors happen in one area
+of the chip, for example after a particle hits it. The flip stream
+source can put one burst in each stream. The decoders are not told:
+their models stay the calm ones.
+
+Give the source a `BurstSettings` record
+(`decsim/qpu/flip_stream_device.py`) in the run file, as a drift study
+gives its drift:
+
+```python
+import dataclasses
+
+import decsim.qpu.flip_stream_device as flip_stream_device
+
+burst = flip_stream_device.BurstSettings(onset_round=10_000, peak_factor=10.0)
+source = flip_stream_device.FlipStreamDevice.Settings(burst=burst)
+qpu = dataclasses.replace(machine.held("qpu"), source=source)
+machine = machine.with_held("qpu", qpu)
+```
+
+`decsim stream` keeps the flip stream source that the task gives, so
+the burst runs. This is what the burst does:
+
+- From round `onset_round` on, each noise probability on a qubit inside
+  the disk is multiplied by 1 + (peak_factor - 1) f. The share f rises
+  to 1 over `rise_rounds` rounds. Then it decays as exp(-t /
+  `decay_rounds`), where t counts the rounds after the peak.
+- The disk is the `qubit_count` qubits nearest to `center`, data and
+  measure qubits together. The default center is the middle of the
+  patch. A noise instruction on two qubits is raised when one of its
+  qubits is inside the disk.
+- The defaults are the large burst that Google measured on Willow
+  (2408.13687): 30 qubits, a decay of 550 rounds (0.6 ms) and a rise of
+  3 rounds. The peak has no default, because a study sweeps it.
+- Set `onset_round` after the warmup. Then run about ten decay times
+  more, so that the stream recovers before its end.
+- A peak of 1 runs the same bits as no burst, for the same seed.
+
 ## What a stream does not build yet
 
 Each of these is refused, "not implemented yet", with its reason:

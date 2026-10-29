@@ -13,8 +13,13 @@ and PyMatching's from_check_matrix read.
 import dataclasses
 import enum
 import types
+import weakref
 from collections.abc import Mapping
 from typing import Optional
+
+# the matrices frozen_sparse_columns made, by id, held weakly so a dead
+# one leaves before its id can be reused
+_FROZEN_BY_ID = weakref.WeakValueDictionary()
 
 
 class FaultRepresentation(enum.Enum):
@@ -69,11 +74,17 @@ def frozen_sparse_columns(value: object) -> object:
     """`value` as a read-only uint8 csc_matrix with sorted indices.
 
     A dense matrix is converted once; a sparse one is copied so the
-    caller's object is never frozen behind its back.
+    caller's object is never frozen behind its back. A matrix this
+    made is handed back as it is: nothing can write to it, and a window
+    moved along a stream passes its matrices on this way.
     """
     # Imported here so that reading the contract never loads scipy.
     import scipy.sparse
 
+    identity = id(value)
+    made = _FROZEN_BY_ID.get(identity)
+    if made is value:
+        return value
     if scipy.sparse.issparse(value):
         column_matrix = value.tocsc()
         matrix = column_matrix.copy()
@@ -84,6 +95,7 @@ def frozen_sparse_columns(value: object) -> object:
     matrix.sort_indices()
     for array in (matrix.data, matrix.indices, matrix.indptr):
         array.flags.writeable = False
+    _FROZEN_BY_ID[id(matrix)] = matrix
     return matrix
 
 

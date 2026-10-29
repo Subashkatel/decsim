@@ -83,6 +83,30 @@ def test_frozen_sparse_columns_never_freezes_the_callers_matrix():
     assert dense.tolist() == [[1, 0], [0, 1]]
 
 
+def test_a_frozen_matrix_is_handed_back_and_a_dense_one_is_frozen_once():
+    dense = numpy.array([[1, 0], [1, 1]], dtype=numpy.int64)
+    frozen = fault_model_contracts.frozen_sparse_columns(dense)
+
+    again = fault_model_contracts.frozen_sparse_columns(frozen)
+
+    assert again is frozen
+
+
+def test_a_read_only_matrix_made_elsewhere_is_still_copied():
+    original = scipy.sparse.csc_matrix([[1, 0], [0, 1]], dtype=numpy.uint8)
+    data_view = original.data[:]
+    data_view.flags.writeable = False
+    shared = (data_view, original.indices, original.indptr)
+    viewed = scipy.sparse.csc_matrix(shared, shape=original.shape)
+
+    frozen = fault_model_contracts.frozen_sparse_columns(viewed)
+    original.data[0] = 0
+
+    assert frozen is not viewed
+    dense = frozen.toarray()
+    assert dense.tolist() == [[1, 0], [0, 1]]
+
+
 def test_a_placed_model_is_frozen_for_every_reader():
     placed = placed_model()
     assert placed.priors.flags.writeable is False

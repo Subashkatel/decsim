@@ -6,6 +6,7 @@
               strong_unit_count=2)
     recording_gap(alone("weak_alone", 9, 0.003))
     streaming(alone("weak_alone", 9, 0.003))
+    fitted_strong_time(alone("strong_alone", 9, 0.003), 9, "sliding")
 
 The basic case's machine (experiments/basic_case/config.py) with the
 values of specs/adaptive-switching/values.md where they differ: rounds of
@@ -13,7 +14,9 @@ values of specs/adaptive-switching/values.md where they differ: rounds of
 way, and the strong decoder correlated matching on one core of a CPU
 host, over Backline's RoCE v2 link, at the paper's average time per
 round. A fixed time has no tail and does not slow down in a burst, so it
-serves the pilots at steady noise only (experiments.md, decision D4).
+serves the pilots at steady noise only (experiments.md, decision D4);
+fitted_strong_time prices each strong decode by a law in its window's
+detection events instead, whose calm mean is that average (B1 stage 2).
 """
 
 import dataclasses
@@ -27,6 +30,12 @@ import decsim.presets.machines as machines
 import decsim.qpu.flip_stream_device as flip_stream_device
 import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.topology.graph as graph
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
+from decsim.decoders.minimum_weight_perfect_matching import (
+    detection_event_time,
+)
 
 basic_case = sweeps.load_beside(__file__, "../basic_case/config.py")
 # values.md section 1, round period: Willow (2408.13687 p.1)
@@ -55,6 +64,61 @@ STRONG_DECODE_DISTANCES_BY_SCHEME = {
     "sliding": 2,
     "speculation": 2,
     "double": 3,
+}
+# B1 stage 2 (experiments.md, decision D4): correlated matching's time
+# as a law in each window's detection events, fitted to decsim's own
+# decodes on one core of an AMD EPYC 9654 at p = 0.003 times 1, 2, 4
+# and 10, and scaled so its mean over calm full windows is the average
+# above; keyed by distance and the rounds a decode reads, in distances.
+# The law with the least held-out error: intercept and power at d = 5,
+# power at d = 9 and 13 (experiments/correlated_matching_timing)
+FITTED_SOURCE = (
+    "results/correlated_matching_timing/2026-10-29, timing_genoa_d5_9 "
+    "and timing_genoa_d13 fit.json"
+)
+FITTED_CORRELATED_MATCHING_TIMES = {
+    (5, 2): detection_event_time.DetectionEventTime(
+        intercept_microseconds=5.3707,
+        coefficient_microseconds=0.078224,
+        exponent=1.4832,
+        scale=1.1092,
+        source=FITTED_SOURCE,
+    ),
+    (5, 3): detection_event_time.DetectionEventTime(
+        intercept_microseconds=11.9653,
+        coefficient_microseconds=0.005502,
+        exponent=2.0209,
+        scale=1.0986,
+        source=FITTED_SOURCE,
+    ),
+    (9, 2): detection_event_time.DetectionEventTime(
+        intercept_microseconds=0.0,
+        coefficient_microseconds=0.006981,
+        exponent=1.9456,
+        scale=1.1000,
+        source=FITTED_SOURCE,
+    ),
+    (9, 3): detection_event_time.DetectionEventTime(
+        intercept_microseconds=0.0,
+        coefficient_microseconds=0.007211,
+        exponent=1.9014,
+        scale=0.9058,
+        source=FITTED_SOURCE,
+    ),
+    (13, 2): detection_event_time.DetectionEventTime(
+        intercept_microseconds=0.0,
+        coefficient_microseconds=0.009304,
+        exponent=1.8236,
+        scale=0.7339,
+        source=FITTED_SOURCE,
+    ),
+    (13, 3): detection_event_time.DetectionEventTime(
+        intercept_microseconds=0.0,
+        coefficient_microseconds=0.006731,
+        exponent=1.8480,
+        scale=0.6230,
+        source=FITTED_SOURCE,
+    ),
 }
 # the saved datasets' seeds (experiments.md, How we run them): the
 # calibration seeds, 0 to 9,999, set the thresholds, and every result
@@ -131,6 +195,24 @@ def correlated_matching_pool(
     decode_round_count = STRONG_DECODE_DISTANCES_BY_SCHEME[scheme] * distance
     decode_microseconds = round_microseconds * decode_round_count
     return basic_case.correlated_matching_pool(f"{decode_microseconds:g}us")
+
+
+def fitted_strong_time(
+    machine: graph.Machine, distance: int, scheme: str
+) -> graph.Machine:
+    """The machine's correlated matching priced by its fitted time.
+
+    Each decode takes the law at its window's own detection events, so a
+    window in a burst is slow; over calm windows at p = 0.003 the law's
+    mean is the average correlated_matching_pool charges (experiments.md,
+    B1 stage 2). The answer is still correlated matching's own.
+    """
+    read_distances = STRONG_DECODE_DISTANCES_BY_SCHEME[scheme]
+    key = (distance, read_distances)
+    timing = FITTED_CORRELATED_MATCHING_TIMES[key]
+    row = minimum_weight_perfect_matching.CorrelatedPyMatchingDecoder
+    algorithm = row.Settings(timing=timing)
+    return machine.with_settings(machines.STRONG_POOL, algorithm=algorithm)
 
 
 def on_paper_values(machine: graph.Machine, distance: int) -> graph.Machine:

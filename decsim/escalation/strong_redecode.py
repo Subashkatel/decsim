@@ -431,12 +431,13 @@ class StrongRedecode:
         """Ask each released row for its job; submit the ones it builds.
 
         A row with no job yet lacks rounds on the strong side, so the
-        ones the chip has and has not sent go up now.
+        ones the chip has and has not sent go up now, unless it now waits
+        on something else (_hold_again).
         """
         for held in released:
             job = self.shape.held_job(held.assignment)
             if job is None:
-                self._carry_missing_rounds(held.assignment)
+                self._wait_for_the_job(held)
                 continue
             self.pending.take(held)
             self.trace.strong_window_left.fire(
@@ -451,6 +452,33 @@ class StrongRedecode:
                 f"{job.label}: {held.conditions.released_description} -> "
                 "strong window submitted",
             )
+
+    def _wait_for_the_job(self, held) -> None:
+        """Carry the rounds the row lacks, or hold it on its new conditions."""
+        conditions = self.shape.release_conditions(held.assignment)
+        if conditions != held.conditions:
+            self._hold_again(held, conditions)
+            return
+        self._carry_missing_rounds(held.assignment)
+
+    def _hold_again(
+        self,
+        held: pending_strong_windows.PendingStrongWindow,
+        conditions: pending_strong_windows.ReleaseConditions,
+    ) -> None:
+        """The row's region was laid out late: it waits on what it declares.
+
+        A double window on a stream lays its region out once the stream
+        has the windows it needs (strong_window_shapes.DoubleWindow), and
+        only then knows what releases its job. A wait on no commit is
+        met at once, as a fresh hold's is at the escalation.
+        """
+        moved = dataclasses.replace(held, conditions=conditions)
+        self.pending.take(held)
+        self.pending.register(moved)
+        if conditions.committed_windows:
+            return
+        self._submit_released((moved,))
 
     # ---- private: carrying the strong window's rounds up
 

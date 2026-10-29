@@ -8,7 +8,9 @@ escalated commit, absorbs the windows it covers, and is decoded once
 both of its boundaries are weak-determined: the restart window's commit, or the
 terminal data (Sec. III C, Fig. 12). A d=3 sliding window commits 3
 rounds and buffers 3, so r_strong = r_com + 2 r_buf is 9 rounds
-(Sec. III C, lines 1250-1251).
+(Sec. III C, lines 1250-1251). A stream lays its windows as its rounds
+arrive, so it lays a region out once it has laid the windows the region
+needs, and every window commits on the tier it does in a shot.
 
 The restart window's weak decode re-reads
 escalation.restart_reread_buffer_regions buffer regions of the strong
@@ -40,6 +42,7 @@ import decsim.ports as ports
 import decsim.presets.clocks as clocks
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
+import decsim.qpu.flip_stream_device as flip_stream_device
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.records.decoding as decoding_records
@@ -53,6 +56,8 @@ import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.window_boundaries as window_boundaries
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
+import tests.qpu.memory_programs as memory_programs
+import tests.stream_machines as stream_machines
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -279,6 +284,80 @@ def _recorded_waits(machine) -> dict:
     redecode = machine.windows.window_manager.edges.edges[0]
     redecode.trace.strong_window_held.connect(held)
     return waits
+
+
+# ---- the double window on a stream
+
+# the windows the declared stream escalates: window 1's region absorbs
+# windows 2 and 3 and restarts on window 4; window 7's absorbs 8 and 9
+STREAM_ESCALATED_WINDOWS = {1, 7}
+# (rounds, us a round, what window 1's region first waits on). At 20 us
+# a round window 1's verdict comes before the stream lays window 4, and
+# window 7's before the stream ends inside its region, so both regions
+# are laid out late. At 1 us a round the stream has laid window 4 with
+# its rounds when window 1's verdict comes, and is sealed by window 7's.
+STREAM_CASES = [
+    (30, 20.0, "stored rounds of stream 100"),
+    (60, 1.0, "commit of window (100, 4), stored rounds of stream 100"),
+]
+
+
+def _declared_shot_graph(rounds: int, round_microseconds: float):
+    """The declared card's double window, windows 1 and 7 escalated."""
+    return fabric.switching_graph(
+        rounds=rounds,
+        escalated_windows=STREAM_ESCALATED_WINDOWS,
+        strong_window=declared_run.DOUBLE_WINDOW,
+        round_microseconds=round_microseconds,
+    )
+
+
+def _declared_stream_graph(rounds: int, round_microseconds: float):
+    """The same card streaming a d=3 memory for the rounds.
+
+    The memory is a flip stream (tests/stream_machines.py), whose
+    windows are laid as its rounds arrive.
+    """
+    shot = _declared_shot_graph(rounds, round_microseconds)
+    program = memory_programs.memory_program(3, "Z", 0.01)
+    workload = stream_machines.stream_workload(program, rounds)
+    qpu = shot.held(machines.QPU)
+    source = flip_stream_device.FlipStreamDevice.Settings()
+    stream_qpu = dataclasses.replace(qpu, source=source)
+    streamed = shot.with_held("workload", workload)
+    return streamed.with_held(machines.QPU, stream_qpu)
+
+
+def _tiers_by_index(machine) -> list:
+    """(window index, tier) of each frame record, in index order."""
+    tiers = []
+    for key, tier in declared_run.frame_tiers(machine):
+        tiers.append((key[1], tier))
+    return sorted(tiers)
+
+
+@pytest.mark.parametrize("rounds, round_microseconds, first_wait", STREAM_CASES)
+def test_a_double_window_on_a_stream_commits_what_a_shot_commits(
+    rounds, round_microseconds, first_wait
+):
+    """A stream lays a region out once it has laid the windows it needs.
+
+    Each region absorbs the windows the shot's absorbs, and the weak
+    chain restarts where the shot's does (Toshio et al. 2510.25222
+    Sec. III C), so every window commits on the tier it does in the
+    shot, whether the region is laid out at its verdict or later.
+    """
+    shot_graph = _declared_shot_graph(rounds, round_microseconds)
+    shot = declared_run.run_machine(shot_graph)
+    stream_graph = _declared_stream_graph(rounds, round_microseconds)
+    stream = machine_module.Machine.build(stream_graph, 0)
+    waits = _recorded_waits(stream)
+
+    stream.run()
+
+    assert _tiers_by_index(stream) == _tiers_by_index(shot)
+    assert waits[(stream_machines.STREAM_ID, 1)] == first_wait
+    assert not stream.windows.window_manager.edges.edges[0].has_pending()
 
 
 @pytest.mark.parametrize("commit_rounds, buffer_rounds", [(3, 4), (4, 3)])

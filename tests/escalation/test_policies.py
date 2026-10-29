@@ -33,6 +33,7 @@ import decsim.machine as machine_module
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
 import decsim.presets.machines as machines
+import decsim.qpu.flip_stream_device as flip_stream_device
 import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
@@ -46,6 +47,8 @@ import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
 import tests.escalation.declared_fabric as fabric
+import tests.qpu.memory_programs as memory_programs
+import tests.stream_machines as stream_machines
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -510,6 +513,34 @@ def test_the_double_window_refuses_held_boundaries_at_build():
     double = double.with_held(machines.WINDOWS, windows)
     with pytest.raises(ValueError, match="deadlock the strong window"):
         machine_module.Machine.build(double, 0)
+
+
+def test_the_double_window_refuses_a_segment_inside_a_stream():
+    """A stream's segment ends its windows where no strong region ends.
+
+    A memory stream's own operations emit no detector data, so its
+    windows are laid on its commit regions alone and the double window
+    streams; an operation that emits detector data inside the stream is
+    a segment the stream's windows end at (windows/window_manager.py).
+    """
+    shot = fabric.switching_graph(
+        rounds=30,
+        escalated_windows={1},
+        strong_window=declared_run.DOUBLE_WINDOW,
+    )
+    program = memory_programs.memory_program(3, "Z", 0.01)
+    workload = stream_machines.stream_workload(program, 30)
+    protect, readout = workload.operations
+    segment = dataclasses.replace(protect, emits_detector_data=True)
+    segmented = dataclasses.replace(workload, operations=(segment, readout))
+    qpu = shot.held(machines.QPU)
+    source = flip_stream_device.FlipStreamDevice.Settings()
+    stream_qpu = dataclasses.replace(qpu, source=source)
+    streamed = shot.with_held("workload", segmented)
+    streamed = streamed.with_held(machines.QPU, stream_qpu)
+
+    with pytest.raises(NotImplementedError, match="emits detector data"):
+        machine_module.Machine.build(streamed, 0)
 
 
 class DelegatingWindowScheme:

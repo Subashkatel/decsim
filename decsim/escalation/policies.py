@@ -248,17 +248,22 @@ def _refuse_absorbing_window_scheme(
 
 
 def _refuse_absorbing_window_run(plan: decoding_records.RunShape) -> None:
-    """An absorbing window needs static, explicit, single-patch operations."""
+    """An absorbing window needs single-patch operations it can lay out.
+
+    A memory stream lays its windows as its rounds arrive, and a region
+    escalated there waits for the windows it needs
+    (strong_window_shapes.DoubleWindow), so a stream is served unless
+    a segment inside it ends its windows.
+    """
     row_name = plan.strong_window
-    if plan.has_dynamic_streams or plan.has_static_decode_plan:
+    if plan.has_static_decode_plan:
         raise ValueError(
             f"switching.strong_window {row_name} skips statically planned "
-            "windows when a "
-            "strong window is assigned; stream windows created or "
-            "folded at runtime (dynamic_streams/decode_ops) are not "
-            "supported yet"
+            "windows when a strong window is assigned; windows folded at "
+            "runtime (decode_ops) are not supported yet"
         )
     for operation in plan.operations:
+        _refuse_a_segment_inside_a_stream(plan, operation)
         if operation.decoder_boundary_predecessors:
             raise ValueError(
                 f"switching.strong_window {row_name} supports one "
@@ -267,3 +272,28 @@ def _refuse_absorbing_window_run(plan: decoding_records.RunShape) -> None:
                 "window cross an operation seam before its far "
                 "boundary exists"
             )
+
+
+def _refuse_a_segment_inside_a_stream(
+    plan: decoding_records.RunShape, operation
+) -> None:
+    """A stream's operation cuts its windows where no strong region ends.
+
+    A memory stream's own operations emit no detector data, so its
+    windows are laid on its commit regions alone; an operation that
+    emits detector data is a segment the stream's windows end at
+    (windows/window_manager.py).
+    """
+    if not plan.dynamic_stream_ids:
+        return
+    if operation.id in plan.dynamic_stream_ids:
+        return
+    if not operation.emits_detector_data:
+        return
+    raise NotImplementedError(
+        f"switching.strong_window {plan.strong_window} over a stream "
+        f"whose operation {operation.name} emits detector data is not "
+        "implemented yet: the stream's windows end at each such "
+        "operation, and a strong region does not; "
+        f"{refusals.REFUSALS}"
+    )

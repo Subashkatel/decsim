@@ -18,9 +18,13 @@ The restart window's weak decode may re-read the strong region's last
 buffer regions from the weak syndrome buffer, so those rounds must still
 be stored when the plan lands. Every window an earlier window bounds
 claims the rounds its restart decode would read at planning
-(PotentialRestart, frontends/planner.py); the plan withdraws the stale
-weak requests of the windows it rewrites, re-slices the restart window,
-requests its weak decode afresh, and only then ends the claim.
+(PotentialRestart, frontends/planner.py), or when a stream lays it
+(windows/round_retention.py); the plan withdraws the stale weak
+requests of the windows it rewrites, re-slices the restart window,
+requests its weak decode afresh, and only then ends the claim. A stream
+lays its windows as its rounds arrive, so a region escalated there is
+laid out once the stream has laid the windows it needs, and the
+windows it covers are set aside until then.
 """
 
 import dataclasses
@@ -290,32 +294,107 @@ class DoubleWindow(StrongWindowPorts):
 
         The job waits for the restart window's weak commit or, at the
         operation's end, for every round it reads to be stored;
-        release_conditions says which.
+        release_conditions says which. A stream escalates a window
+        before it has laid the windows past the region, so there the
+        region is laid out once the stream has them
+        (StrongRegions.is_double_window_laid_out). Until then the windows
+        it covers are set aside: the weak chain skips them from the
+        escalation on, as it skips the windows a region absorbs.
         """
         key = (weak_job.stream_id, weak_job.window_id)
         target = self.edge.target
         strong_request_key = self.builder.new_request_key(
             weak_job.stream_id, weak_job.window_id, target
         )
-        strong_request_created_ticks = self.engine.now
+        escalation = _Escalation(
+            key=key,
+            weak_job=weak_job,
+            strong_request_key=strong_request_key,
+            strong_request_created_ticks=self.engine.now,
+        )
+        hold = _DoubleWindowHold(escalation)
+        if self.regions.is_double_window_laid_out(key):
+            self._lay_out(hold)
+        else:
+            self._set_aside_what_it_covers(key)
+        return _double_window_assignment(hold)
+
+    def release_conditions(
+        self, assignment: pending_strong_windows.StrongAssignment
+    ) -> pending_strong_windows.ReleaseConditions:
+        """The far boundary, and its own weak commit when it pins on it.
+
+        A region at a back-to-back seam reads its near boundary off the
+        escalated window's own weak commit, so it waits for that commit
+        too. A region not laid out yet waits for each round the stream
+        stores, since any of them may lay it out.
+        """
+        hold = assignment.held_plan
+        if hold.laid_out is None:
+            return _waiting_for_its_windows(hold.escalation.key)
+        return hold.conditions
+
+    def held_job(
+        self, assignment: pending_strong_windows.StrongAssignment
+    ) -> Optional[decoding_records.DecodeJob]:
+        """The held job, once every round it reads is stored.
+
+        A terminal window's tail is still being measured, so the store
+        must also be filled through the extent's last round. A region
+        not laid out yet sets aside the windows it now covers and is
+        laid out once it can be; its job then waits on what the region
+        waits on.
+        """
+        hold = assignment.held_plan
+        if hold.laid_out is None:
+            self._lay_out_once_it_can(hold)
+            return None
+        held = hold.laid_out
+        crossing = self._rounds_not_stored(held)
+        if crossing:
+            return None
+        stored_through = self.retention.landed_through(held.key[0])
+        if stored_through < held.resolved_region.plan.context_hi:
+            return None
+        return self._build_strong_job(held)
+
+    def rounds_to_carry(
+        self, assignment: pending_strong_windows.StrongAssignment
+    ) -> tuple:
+        """The rounds of its extent that the strong syndrome buffer lacks.
+
+        A region not laid out yet reads none yet.
+        """
+        hold = assignment.held_plan
+        if hold.laid_out is None:
+            return ()
+        return self._rounds_not_stored(hold.laid_out)
+
+    # ---- private: laying the region out
+
+    def _lay_out_once_it_can(self, hold: "_DoubleWindowHold") -> None:
+        """Set aside the windows laid since; lay out once all are laid."""
+        key = hold.escalation.key
+        self._set_aside_what_it_covers(key)
+        if not self.regions.is_double_window_laid_out(key):
+            return
+        self._lay_out(hold)
+
+    def _set_aside_what_it_covers(self, key: tuple) -> None:
+        """The weak chain skips every window laid so far in the region."""
+        for covered_key in self.regions.covered_window_keys(key):
+            self.planner.set_aside_window(covered_key)
+
+    def _lay_out(self, hold: "_DoubleWindowHold") -> None:
+        """Resolve the region on the windows laid, land it, fix its wait."""
+        escalation = hold.escalation
+        key = escalation.key
         near_source_key = self.regions.double_window_near_face(key)
         resolved_region = self.regions.double_window_region(
             key, near_source_key=near_source_key
         )
         folded_boundaries = _pinned_faces(near_source_key, resolved_region)
-        plan = resolved_region.plan
-        restart_key = resolved_region.restart_window_key
-        strong_window = resolved_region.strong_window
-        strong_model = resolved_region.strong_model
-        restart_model = resolved_region.restart_model
-        guard = self.retention.guard_restart_reads(
-            key,
-            restart_key,
-            resolved_region.proposed_restart_window,
-            strong_request_key,
-            resolved_region.context_round_keys,
-            resolved_region.restart_read_keys,
-        )
+        weak_job = escalation.weak_job
         operation = self.regions.operation(weak_job.stream_id)
         label = escalated_label(self, weak_job)
         held = _HeldDoubleWindow(
@@ -323,12 +402,34 @@ class DoubleWindow(StrongWindowPorts):
             weak_job=weak_job,
             label=label,
             resolved_region=resolved_region,
-            strong_window=strong_window,
-            strong_model=strong_model,
+            strong_window=resolved_region.strong_window,
+            strong_model=resolved_region.strong_model,
             operation=operation,
-            strong_request_key=strong_request_key,
-            strong_request_created_ticks=strong_request_created_ticks,
+            strong_request_key=escalation.strong_request_key,
+            strong_request_created_ticks=(
+                escalation.strong_request_created_ticks
+            ),
             folded_boundaries=folded_boundaries,
+        )
+        self._land(held)
+        conditions = self._conditions_of(held)
+        hold.laid_out = held
+        hold.conditions = conditions
+
+    def _land(self, held: "_HeldDoubleWindow") -> None:
+        """Rewrite the plan around the region: absorb, restart, and log."""
+        resolved_region = held.resolved_region
+        key = held.key
+        plan = resolved_region.plan
+        restart_key = resolved_region.restart_window_key
+        strong_request_key = held.strong_request_key
+        guard = self.retention.guard_restart_reads(
+            key,
+            restart_key,
+            resolved_region.proposed_restart_window,
+            strong_request_key,
+            resolved_region.context_round_keys,
+            resolved_region.restart_read_keys,
         )
         try:
             self.ledger.replace_contributions(
@@ -350,66 +451,40 @@ class DoubleWindow(StrongWindowPorts):
                 self.window_absorbed.fire(absorbed_key, key)
             self._log_assignment(held, resolved_region)
             if restart_key is not None:
+                restart_model = resolved_region.restart_model
                 self._restart_weak_chain(restart_key, plan, restart_model)
-            return pending_strong_windows.StrongAssignment(
-                strong_request_key,
-                None,
-                held_plan=held,
-                round_count=strong_window.round_count,
-                folded_boundaries=folded_boundaries,
-                first_round=strong_window.start_round,
-            )
         finally:
             if guard is not None:
                 self.retention.release_strong_hold_if_live(
                     guard, strong_request_key.stream_id
                 )
 
-    def release_conditions(
-        self, assignment: pending_strong_windows.StrongAssignment
-    ) -> pending_strong_windows.ReleaseConditions:
-        """The far boundary, and its own weak commit when it pins on it.
-
-        A region at a back-to-back seam reads its near boundary off the
-        escalated window's own weak commit, so it waits for that commit
-        too.
-        """
-        conditions = self._far_face_conditions(assignment.held_plan)
-        key = assignment.held_plan.key
-        if key not in assignment.folded_boundaries:
-            return conditions
-        committed_windows = conditions.committed_windows + (key,)
-        return dataclasses.replace(
-            conditions, committed_windows=committed_windows
-        )
-
-    def held_job(
-        self, assignment: pending_strong_windows.StrongAssignment
-    ) -> Optional[decoding_records.DecodeJob]:
-        """The held job, once every round it reads is stored.
-
-        A terminal window's tail is still being measured, so the store
-        must also be filled through the extent's last round.
-        """
-        held = assignment.held_plan
-        crossing = self.rounds_to_carry(assignment)
-        if crossing:
-            return None
-        stored_through = self.retention.landed_through(held.key[0])
-        if stored_through < held.resolved_region.plan.context_hi:
-            return None
-        return self._build_strong_job(held)
-
-    def rounds_to_carry(
-        self, assignment: pending_strong_windows.StrongAssignment
-    ) -> tuple:
-        """The rounds of its extent that the strong syndrome buffer lacks."""
-        held = assignment.held_plan
-        return self.retention.context_rounds_in_flight(
-            held.key, held.resolved_region.context_round_keys
-        )
-
     # ---- private: what releases the job
+
+    def _conditions_of(
+        self, held: "_HeldDoubleWindow"
+    ) -> pending_strong_windows.ReleaseConditions:
+        """The far face's conditions, and the near face's own commit.
+
+        A commit already made is not waited for: a region a stream lays
+        out late pins its near face on the escalated window's own weak
+        commit, which has handed its boundary on by then.
+        """
+        conditions = self._far_face_conditions(held)
+        committed_windows = conditions.committed_windows
+        if held.key in held.folded_boundaries:
+            committed_windows += (held.key,)
+        waiting = self._not_committed(committed_windows)
+        return dataclasses.replace(conditions, committed_windows=waiting)
+
+    def _not_committed(self, window_keys: tuple) -> tuple:
+        """The windows of these that have not committed yet."""
+        waiting = []
+        for window_key in window_keys:
+            window = self.planner.window_at(window_key)
+            if not window.committed:
+                waiting.append(window_key)
+        return tuple(waiting)
 
     def _far_face_conditions(
         self, held: "_HeldDoubleWindow"
@@ -431,6 +506,12 @@ class DoubleWindow(StrongWindowPorts):
             stored_data_of_stream=held.key[0],
             name="far_boundary",
             released_description="far-side weak boundary determined",
+        )
+
+    def _rounds_not_stored(self, held: "_HeldDoubleWindow") -> tuple:
+        """The rounds of the region's extent the landing store lacks."""
+        return self.retention.context_rounds_in_flight(
+            held.key, held.resolved_region.context_round_keys
         )
 
     # ---- private: landing the plan
@@ -919,6 +1000,70 @@ class _HeldDoubleWindow:
     strong_request_key: window_records.DecoderRequestKey
     strong_request_created_ticks: int
     folded_boundaries: tuple
+
+
+@dataclasses.dataclass(frozen=True)
+class _Escalation:
+    """What the double window keeps of an escalation until it lays it out."""
+
+    key: tuple
+    weak_job: decoding_records.DecodeJob
+    strong_request_key: window_records.DecoderRequestKey
+    strong_request_created_ticks: int
+
+
+@dataclasses.dataclass
+class _DoubleWindowHold:
+    """One double window, from its escalation to its job.
+
+    laid_out is the region once it is laid out, and None while a stream
+    has not laid every window it needs; conditions are then what
+    releases its job (DoubleWindow._conditions_of).
+    """
+
+    escalation: _Escalation
+    laid_out: Optional[_HeldDoubleWindow] = None
+    conditions: Optional[pending_strong_windows.ReleaseConditions] = None
+
+
+def _double_window_assignment(
+    hold: _DoubleWindowHold,
+) -> pending_strong_windows.StrongAssignment:
+    """The assignment the double window holds, laid out or not yet.
+
+    A region not laid out yet has no rounds to count, and it starts at
+    the escalated window's commit, as a laid-out one does.
+    """
+    escalation = hold.escalation
+    held = hold.laid_out
+    if held is None:
+        weak_window = escalation.weak_job.window
+        return pending_strong_windows.StrongAssignment(
+            escalation.strong_request_key,
+            None,
+            held_plan=hold,
+            first_round=weak_window.commit_lo,
+        )
+    strong_window = held.strong_window
+    return pending_strong_windows.StrongAssignment(
+        escalation.strong_request_key,
+        None,
+        held_plan=hold,
+        round_count=strong_window.round_count,
+        folded_boundaries=held.folded_boundaries,
+        first_round=strong_window.start_round,
+    )
+
+
+def _waiting_for_its_windows(
+    key: tuple,
+) -> pending_strong_windows.ReleaseConditions:
+    """A region the stream has not laid out: each stored round may."""
+    return pending_strong_windows.ReleaseConditions(
+        stored_data_of_stream=key[0],
+        name="region_windows",
+        released_description="the stream laid the region's windows",
+    )
 
 
 def _check_restart_reread(regions) -> None:

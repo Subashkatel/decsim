@@ -197,14 +197,57 @@ class StrongRegions:
         pinned = dataclasses.replace(proposal, plan=pinned_plan)
         return self._resolved_double_window_region(key, pinned, near_source_key)
 
+    def is_double_window_laid_out(self, key: tuple) -> bool:
+        """Whether the stream has laid every window the region needs.
+
+        A planned operation and a sealed stream have all their windows.
+        A stream still growing has them once the window restarting the
+        weak chain past the region is laid and has its rounds: the region
+        absorbs every window before it, and its weak commit is the far
+        boundary (Toshio et al. 2510.25222 lines 1253-1259). A stream
+        sealed before then ends the region at its last round instead.
+        The restart window's own reads may hold the stream's last round,
+        so it is not laid out before they are known.
+        """
+        if self.tracker.is_sealed(key[0]):
+            return True
+        proposal = self._proposed_double_window_region(key)
+        restart_key = _restart_window_key(proposal.later_windows, proposal.plan)
+        if restart_key is None:
+            return False
+        restart = self.planner.window_at(restart_key)
+        return self.tracker.is_data_complete(restart)
+
+    def covered_window_keys(self, key: tuple) -> tuple:
+        """The later windows laid so far whose commit begins in the region.
+
+        On a stream still growing, the region reaches the last round its
+        laid windows read until its restart window is laid.
+        """
+        proposal = self._proposed_double_window_region(key)
+        plan = proposal.plan
+        covered = []
+        for window in proposal.later_windows:
+            if window.commit_lo <= plan.commit_hi:
+                covered.append(window.key)
+        return tuple(covered)
+
     def _proposed_double_window_region(
         self, key: tuple
     ) -> "_DoubleWindowProposal":
-        """The extent the interaction proposes, with what it was read on."""
+        """The extent the interaction proposes, with what it was read on.
+
+        The stream's rounds are counted as its last laid window reads
+        them: its length once known, and on a stream still growing the
+        furthest round a laid window reads.
+        """
         stream_id, escalated_index = key
         weak_window = self.planner.window_at(key)
-        round_count = self.round_count_for(stream_id, weak_window)
         later_windows = self.planner.later_windows(stream_id, escalated_index)
+        last_window = weak_window
+        if later_windows:
+            last_window = later_windows[-1]
+        round_count = self.round_count_for(stream_id, last_window)
         plan = self._plan_region(weak_window, later_windows, round_count)
         return _DoubleWindowProposal(
             round_count=round_count,

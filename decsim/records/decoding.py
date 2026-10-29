@@ -889,6 +889,8 @@ class RunShape:
     boundary policy ships. is_bulk_strong says decoder_manager.bulk_strong
     batches the strong re-decodes timing-only; batches_each_member that a
     pool's batching row batches them and decodes each member.
+    dynamic_stream_ids are the streams whose windows are laid as their
+    rounds arrive, each named by its owner operation's id.
     """
 
     # the ports.WindowingScheme and ports.BoundaryPolicy, opaque to the
@@ -901,7 +903,7 @@ class RunShape:
     strong_window: str
     is_absorbing_strong_window: bool
     is_bulk_strong: bool
-    has_dynamic_streams: bool
+    dynamic_stream_ids: tuple
     has_static_decode_plan: bool
     leaves_an_entry_pool: bool = True
     batches_each_member: bool = False

@@ -126,6 +126,7 @@ def build_plan(
             "dynamic streams require a windowing scheme that supports them"
         )
     has_static_decode_plan = workload.decode_operations is not None
+    dynamic_stream_ids = _ids_of(dynamic_streams)
     commit_round_count = code.commit_rounds()
     buffer_round_count = code.buffer_rounds()
     run_shape = decoding_records.RunShape(
@@ -137,7 +138,7 @@ def build_plan(
         strong_window=strong_window_name,
         is_absorbing_strong_window=absorbs_weak_windows,
         is_bulk_strong=is_bulk_strong,
-        has_dynamic_streams=bool(dynamic_streams),
+        dynamic_stream_ids=dynamic_stream_ids,
         has_static_decode_plan=has_static_decode_plan,
         batches_each_member=batches_each_member,
     )
@@ -422,6 +423,14 @@ def _standalone_emitters(operations, dynamic_streams) -> tuple:
             continue
         planned.append(operation)
     return tuple(planned)
+
+
+def _ids_of(operations: tuple) -> tuple:
+    """Each operation's id, in order."""
+    ids = []
+    for operation in operations:
+        ids.append(operation.id)
+    return tuple(ids)
 
 
 def _strong_window_settings(

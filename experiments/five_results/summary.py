@@ -172,11 +172,11 @@ def _design_line(selection: dict, row: dict, pair) -> str:
         f"{selection['share']}"
     )
     rate = _rate_text(row)
-    escalated = _number(row["escalated_fraction"])
+    escalated = _fixed(row["escalated_fraction"], 3)
     reaction = _reaction_text(row)
     effect = f"{pair.repaired} / {pair.broken} / {pair.missed}"
     return (
-        f"| {name} | {row['logical_failures']} | {rate} | {escalated:.3f} | "
+        f"| {name} | {row['logical_failures']} | {rate} | {escalated} | "
         f"{reaction} | {effect} |"
     )
 
@@ -203,16 +203,17 @@ def _pair_sentence(pair) -> str:
 
 
 def _rate_text(row: dict) -> str:
-    rate = _number(row["logical_error_rate_per_round"])
-    low = _number(row["logical_error_rate_per_round_low"])
-    high = _number(row["logical_error_rate_per_round_high"])
-    return f"{rate:.2e} ({low:.2e} to {high:.2e})"
+    """The rate and its limits; with no failure the fold writes no rate."""
+    rate = _scientific(row["logical_error_rate_per_round"])
+    low = _scientific(row["logical_error_rate_per_round_low"])
+    high = _scientific(row["logical_error_rate_per_round_high"])
+    return f"{rate} ({low} to {high})"
 
 
 def _reaction_text(row: dict) -> str:
-    mean = _number(row["buffer0_ready_to_frame_mean_us"])
-    tail = _number(row["buffer0_ready_to_frame_p99_us"])
-    return f"{mean:.1f} / {tail:.1f}"
+    mean = _fixed(row["buffer0_ready_to_frame_mean_us"], 1)
+    tail = _fixed(row["buffer0_ready_to_frame_p99_us"], 1)
+    return f"{mean} / {tail}"
 
 
 def _past_cycle_text(row: dict) -> str:
@@ -220,8 +221,7 @@ def _past_cycle_text(row: dict) -> str:
     fraction = row.get("deadline_missed_fraction", "")
     if fraction == "":
         return "not set"
-    share = _number(fraction)
-    return f"{share:.3f}"
+    return _fixed(fraction, 3)
 
 
 def _stream_past_cycle_text(measurement: dict) -> str:
@@ -245,8 +245,20 @@ def _growth_text(measurement: dict) -> str:
     return " / ".join(written)
 
 
-def _number(written: str) -> float:
-    return float(written)
+def _scientific(written: str) -> str:
+    """A csv number in scientific form, or "none" when the cell is blank."""
+    if written == "":
+        return "none"
+    number = float(written)
+    return f"{number:.2e}"
+
+
+def _fixed(written: str, digits: int) -> str:
+    """A csv number with digits after the point, or "none" when blank."""
+    if written == "":
+        return "none"
+    number = float(written)
+    return f"{number:.{digits}f}"
 
 
 def _is_folded(folder: pathlib.Path) -> bool:

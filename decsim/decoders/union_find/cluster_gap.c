@@ -10,8 +10,11 @@
  *
  * Each source is a Dijkstra with a binary heap over those states,
  * cut off at the best walk found so far. A minimum over sources does
- * not depend on the order the sources are visited nor on the cutoff,
- * so the nodes are walked in index order.
+ * not depend on the order the sources are visited nor on the cutoff.
+ * An odd closed walk crosses a segment of odd parity, and a closed walk
+ * may start at any node it passes, so the minimum over every node is
+ * the minimum over the node each odd segment leaves from: the sources
+ * are those nodes alone, each walked once, in edge order.
  *
  * Nothing here recurses and nothing allocates once the quotient graph
  * stands: one workspace is taken at the top and released on every path
@@ -51,7 +54,8 @@ struct gap_inputs {
  * detector_count, and an edge's interior splits are the nodes from
  * edge_split_base upward, one per coordinate between the first and the
  * last. A segment holds two adjacency slots, one at each of its ends.
- * A search state is 2 * node + parity.
+ * A search state is 2 * node + parity. source_walked marks the nodes a
+ * search has already started from.
  */
 struct workspace {
   int64_t *edge_coordinates;
@@ -66,6 +70,7 @@ struct workspace {
   int32_t *distance_stamp;
   int64_t *heap_distance;
   int32_t *heap_state;
+  uint8_t *source_walked;
 };
 
 /* One source's search over the workspace's arrays. */
@@ -92,6 +97,7 @@ static void release_workspace(struct workspace *workspace) {
   free(workspace->distance_stamp);
   free(workspace->heap_distance);
   free(workspace->heap_state);
+  free(workspace->source_walked);
   memset(workspace, 0, sizeof(*workspace));
 }
 
@@ -142,6 +148,8 @@ static int32_t take_quotient_graph(struct workspace *workspace,
       allocate_array(heap_capacity, sizeof(int64_t), &taken);
   workspace->heap_state =
       allocate_array(heap_capacity, sizeof(int32_t), &taken);
+  workspace->source_walked =
+      allocate_array(node_count, sizeof(uint8_t), &taken);
   return taken;
 }
 
@@ -444,14 +452,23 @@ static int64_t shortest_odd_walk_from(struct search *search,
   return shortest;
 }
 
-/* A node the growth left with no segment at all reaches nothing, so
- * walking every node costs the same minimum as walking the ones the
- * segments touch. */
-static int64_t walk_every_node(struct search *search,
-                               const struct workspace *workspace,
-                               int32_t node_count) {
+/* The odd parity rides an edge's first segment (place_edge_segments),
+ * which leaves from the edge's endpoint_a, so those endpoints of the
+ * odd edges are the only sources the minimum needs. */
+static int64_t walk_from_odd_segments(struct search *search,
+                                      const struct gap_inputs *inputs,
+                                      struct workspace *workspace) {
   int64_t shortest = unreachable_distance;
-  for (int32_t node = 0; node < node_count; ++node) {
+  for (int32_t edge = 0; edge < inputs->edge_count; ++edge) {
+    if (!inputs->logical_parity[edge]) {
+      continue;
+    }
+    int32_t detector = inputs->endpoint_a[edge];
+    int32_t node = endpoint_node(detector, inputs->detector_count);
+    if (workspace->source_walked[node]) {
+      continue;
+    }
+    workspace->source_walked[node] = 1;
     shortest = shortest_odd_walk_from(search, workspace, node, shortest);
   }
   return shortest;
@@ -490,7 +507,7 @@ int32_t union_find_cluster_gap(
   place_segments(&inputs, &workspace, node_count);
   struct search search;
   search_over(&search, &workspace, slot_count);
-  int64_t shortest = walk_every_node(&search, &workspace, node_count);
+  int64_t shortest = walk_from_odd_segments(&search, &inputs, &workspace);
   release_workspace(&workspace);
   if (shortest != unreachable_distance) {
     *gap_half_ticks = shortest;

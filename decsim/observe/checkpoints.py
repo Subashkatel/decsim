@@ -10,16 +10,19 @@ ends the decoding there, at zero simulated time, by one law:
 - The windows that read only rounds before the checkpoint's are the
   same as in a stream that ends there, so their final answers stand:
   their observables, XORed, and the boundary the last of them hands on
-  (windows/window_commits.py).
+  (windows/window_commits.py). A closed window, a parallel B block,
+  also takes the boundary of the A block after it, so it stands only
+  when that block does too.
 - The windows laid after them that commit a round up to the
   checkpoint's are the stream's last windows had it ended there, each
   clipped to end on it, as a growing stream's tail closes
-  (windows/region_streams.py RegionStream.close_tail). In order, each
-  folds in the boundary the one before hands on, reads the copy's
-  readout as its last detectors, and has the model it would have had
-  ending there (observe/closing_windows.py). The machine's own decoders
-  decide each as they decide a final window, at zero time and learning
-  nothing (observe/closing_decisions.py).
+  (windows/region_streams.py RegionStream.close_tail). Each folds in
+  the boundaries it takes, from the window before it, or for a B block
+  from both sides, reads the copy's readout as its last detectors, and
+  has the model it would have had ending there
+  (observe/closing_windows.py). The machine's own decoders decide each
+  as they decide a final window, at zero time and learning nothing
+  (observe/closing_decisions.py).
 
 The checkpoint fails when that prediction is not the copy's truth, and
 it records the threshold the stream's edge read then. No component
@@ -278,20 +281,21 @@ class _WindowChain:
     def closing_at(self, round_index: int) -> Optional[tuple]:
         """(the kept windows, the tail) of a stream ending on round_index.
 
-        The kept windows are the final ones that read only earlier
-        rounds; the tail is each laid window after them that commits a
-        round up to round_index. None while the window committing the
-        round is not laid, so the tail is not known, or while a kept
-        window is not final.
+        The kept windows are the final ones whose answers rest on
+        earlier rounds only; the tail is each laid window after them
+        that commits a round up to round_index. None while the window
+        committing the round is not laid, so the tail is not known, or
+        while a kept window is not final.
         """
         if not self._holds(round_index):
             return None
         before = self._reading_before(round_index)
-        if not all(self._is_final(window) for window in before):
+        kept_windows = _standing(before)
+        if not all(self._is_final(window) for window in kept_windows):
             return None
-        for window in before:
+        for window in kept_windows:
             self._fold(window)
-        self.windows = self.windows[len(before) :]
+        self.windows = self.windows[len(kept_windows) :]
         tail = self._committing_up_to(round_index)
         kept = dataclasses.replace(self.kept)
         return kept, tail
@@ -329,6 +333,22 @@ class _WindowChain:
             kept.observables, result.logical_observables
         )
         kept.boundary_ids = closing_windows.boundary_ids_of(result)
+
+
+def _standing(reading_before: list) -> list:
+    """The windows whose answers rest only on rounds before a checkpoint.
+
+    reading_before are the windows that read only earlier rounds, a
+    prefix in index order. A last one that is closed, a parallel B
+    block, also takes the boundary of the A block after it, which reads
+    further, so the B is decided again in the tail.
+    """
+    if not reading_before:
+        return reading_before
+    last_window = reading_before[-1]
+    if last_window.closed_temporal_boundaries:
+        return reading_before[:-1]
+    return reading_before
 
 
 def _row(round_index: int, outcomes: list) -> dict:

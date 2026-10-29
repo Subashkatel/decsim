@@ -7,11 +7,15 @@ the ones it keeps are its last windows, each clipped to end on the
 round, as a growing stream's tail closes
 (windows/region_streams.py RegionStream.close_tail). This module builds
 those windows' jobs from the raw rounds and the copy's readout, each
-with the boundary the window before hands on folded in, as the next
-window reads it (windows/decode_requests.py), and decides them on the
-machine's own path (observe/closing_decisions.py). The checkpoints
-(observe/checkpoints.py) and the answer checks (observe/answer_checks.py)
-close their streams with it.
+with the boundaries it takes folded in, as the window side folds them
+(windows/decode_requests.py), and decides them on the machine's own
+path (observe/closing_decisions.py). A window takes the boundary of the
+window before it, as the window side links it (window_manager.py),
+unless it reads rounds before its commit, a parallel A block, which
+decodes them itself; a closed window, a parallel B block, also takes
+the boundary of the window after it (Skoric et al. 2209.08552 lines
+421-426). The checkpoints (observe/checkpoints.py) and the answer
+checks (observe/answer_checks.py) close their streams with it.
 """
 
 from typing import Any, Optional
@@ -46,22 +50,27 @@ class ClosingWindows:
         boundary_ids: tuple,
         tail: list,
     ) -> Optional[tuple]:
-        """The tail's observables, each window folding the last's boundary.
+        """The tail's observables, each window folding the boundaries it takes.
 
-        Each tail window is clipped to end on the snapshot's round and
-        decided on the machine's path; None when one answers nothing.
+        boundary_ids is what the last kept window hands on. Each tail
+        window is clipped to end on the snapshot's round and decided on
+        the machine's path, a closed window after the window after it;
+        None when one answers nothing.
         """
         last_round = snapshot.round_index
+        endings = [ending_on(window, last_round) for window in tail]
+        handed: dict = {}
         observables = ()
-        for window in tail:
-            ending = ending_on(window, last_round)
-            job = self.job(snapshot, ending, events, boundary_ids)
+        for position in _decision_order(endings):
+            ending = endings[position]
+            taken = _boundary_taken(endings, position, handed, boundary_ids)
+            job = self.job(snapshot, ending, events, taken)
             result = self.closer.decide(job)
             if result is None:
                 return None
             answer = result.logical_observables
             observables = xor_or_none(observables, answer)
-            boundary_ids = boundary_ids_of(result)
+            handed[position] = boundary_ids_of(result)
         return observables
 
     def job(
@@ -153,6 +162,7 @@ def ending_on(
         buffer_hi,
         round_count,
         buffer_lo=window.buffer_lo,
+        closed_temporal_boundaries=window.closed_temporal_boundaries,
     )
 
 
@@ -184,6 +194,43 @@ def boundary_ids_of(result: decoding_records.DecodeResult) -> tuple:
     if boundary is None:
         return ()
     return tuple(boundary.detector_ids)
+
+
+def _decision_order(endings: list) -> list:
+    """The tail's positions, a closed window after every open one.
+
+    A closed window takes the boundary of the window after it, and no
+    open window takes a closed one's.
+    """
+    open_positions = []
+    closed_positions = []
+    for position, window in enumerate(endings):
+        if window.closed_temporal_boundaries:
+            closed_positions.append(position)
+            continue
+        open_positions.append(position)
+    return open_positions + closed_positions
+
+
+def _boundary_taken(
+    endings: list, position: int, handed: dict, kept_boundary_ids: tuple
+) -> tuple:
+    """The detectors flipped by the boundaries a tail window takes.
+
+    The first window takes the last kept window's boundary in place of
+    a window before it.
+    """
+    window = endings[position]
+    taken = []
+    if window.start_round == window.commit_lo:
+        before = kept_boundary_ids
+        if position > 0:
+            before = handed[position - 1]
+        taken.extend(before)
+    after = position + 1
+    if window.closed_temporal_boundaries and after < len(endings):
+        taken.extend(handed[after])
+    return tuple(taken)
 
 
 def _formed(recipe: Any, packets: dict) -> int:

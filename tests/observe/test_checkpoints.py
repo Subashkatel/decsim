@@ -3,14 +3,15 @@
 The referents are the stream's own end and separate streams of each
 checkpoint's rounds, on the same seed. A checkpoint is the machine's
 own answer had the run ended there (Tan et al. 2209.09219 lines
-1003-1037), so the outcomes must be the same, seed by seed, on two
-machines: PyMatching alone, and union-find escalating weak windows to
-belief matching at a fixed or a moving threshold. A checkpoint keeps
-the windows that read only rounds before it, each tail window reads the
-boundary the one before hands on, as the next window would
-(windows/decode_requests.py), and a listener only listens: the stream's
-numbers, its threshold's among them, are the same with checkpoints and
-without.
+1003-1037), so the outcomes must be the same, seed by seed, on three
+machines: PyMatching alone on sliding windows and on parallel blocks,
+and union-find escalating weak windows to belief matching at a fixed or
+a moving threshold. A checkpoint keeps the windows that read only
+rounds before it, but a parallel B block whose later A reads further,
+each tail window reads the boundaries it takes, as the next window
+would (windows/decode_requests.py), and a listener only listens: the
+stream's numbers, its threshold's among them, are the same with
+checkpoints and without.
 """
 
 import dataclasses
@@ -36,6 +37,7 @@ import decsim.records.checkpoints as checkpoint_records
 import decsim.records.decoding as decoding_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import decsim.windows.schemes.parallel as parallel
 import tests.qpu.memory_programs as memory_programs
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -56,6 +58,12 @@ RATE = threshold_sources.RateThreshold.Settings(10.0, 0.3)
 # seeds whose outcome a closing escalation (20 and 35) or the tail's two
 # windows (11) changes, beside ones that fail throughout or never
 SWITCHING_SEEDS = (0, 4, 11, 20, 35)
+# the parallel blocks at d = 3 (schemes/parallel.py): checkpoints every 5
+# rounds of 40 close on the first A alone (5), a B alone (10, 15, 25,
+# 35), a B again beside the A after it (30), and a B, an A and a short
+# B (20)
+PARALLEL_EVERY = 5
+PARALLEL_CHECKPOINTS = (5, 10, 15, 20, 25, 30, 35)
 # union-find priced by its cycle count and belief matching by its
 # iterations, at the basic case's stated times, so two runs price alike
 CYCLE_COUNT = cycle_count.CycleCount(clock=clocks.FRIDGE_CLOCK)
@@ -108,6 +116,23 @@ def _checkpointed(machine, buffer_rounds: int, every_rounds) -> decsim.Task:
     machine = machine.with_held("workload", clean)
     machine = dataclasses.replace(machine, observation=observation)
     return decsim.Task("memory", machine)
+
+
+def _parallel_task(every_rounds) -> decsim.Task:
+    """PyMatching alone on Skoric's parallel blocks, read out cleanly."""
+    machine = machines.weak_baseline(3, PROBABILITY, 1.0)
+    windows = machine.held("windows")
+    scheme = parallel.ParallelWindowScheme.Settings()
+    on_blocks = dataclasses.replace(windows, scheme=scheme)
+    machine = machine.with_held("windows", on_blocks)
+    return _checkpointed(machine, 3, every_rounds)
+
+
+def _parallel_separate_failures(task: decsim.Task, seed: int) -> list:
+    """The outcomes of separate parallel streams of the checkpoints' rounds."""
+    return [
+        _stream_failed(task, rounds, seed) for rounds in PARALLEL_CHECKPOINTS
+    ]
 
 
 def _measurement(task: decsim.Task, seed: int) -> dict:
@@ -199,6 +224,21 @@ def test_a_switching_checkpoint_is_a_separate_stream_of_its_rounds_seed_by_seed(
     assert [False, False] in separate
     assert [True, True] in separate
     assert sum(escalated) > 0
+
+
+def test_a_parallel_checkpoint_is_a_separate_stream_seed_by_seed():
+    """Its tail holds the A and B blocks a stream ending there lays."""
+    checkpointed_task = _parallel_task(PARALLEL_EVERY)
+    plain_task = _parallel_task(None)
+    seeds = range(8)
+
+    measurements = [_measurement(checkpointed_task, seed) for seed in seeds]
+    separate = [_parallel_separate_failures(plain_task, seed) for seed in seeds]
+
+    early = [_early_failures(measurement) for measurement in measurements]
+    assert early == separate
+    assert [False] * len(PARALLEL_CHECKPOINTS) in separate
+    assert any(True in failures for failures in separate)
 
 
 def test_checkpoints_teach_a_moving_threshold_nothing():
@@ -309,21 +349,12 @@ def test_the_closing_window_reads_the_boundary_the_last_kept_one_hands_on():
     kept = window_records.Window(100, 0, 1, 3, 6, 6)
     reading = window_records.Window(100, 1, 4, 6, 9, 6)
     holding = window_records.Window(100, 2, 7, 9, 12, 6)
-    pool = window_records.PoolId("weak")
-    key = window_records.DecoderRequestKey(100, 0, pool, 1)
-    kept.published_request_key = key
-    boundary = window_records.DependencyResidual(detector_ids=(5, 21))
-    result = decoding_records.DecodeResult(
-        100, 0, logical_observables=(0,), boundary_data=boundary
-    )
-    job = decoding_records.DecodeJob(100, 0, 6, request_key=key)
 
     listener.window_planned(kept)
     listener.window_planned(reading)
     listener.window_planned(holding)
     _emit_noiseless_rounds(listener, 9)
-    listener.request_ended(job, result, None, None)
-    listener.window_final(kept)
+    _decided(listener, kept, (5, 21))
     snapshot = _noiseless_snapshot(9)
     listener.checkpoint_reached(snapshot)
 
@@ -332,6 +363,42 @@ def test_the_closing_window_reads_the_boundary_the_last_kept_one_hands_on():
     assert flipped == [21]
     assert min(syndrome) == 20
     assert len(closer.syndromes) == 2
+    assert listener.outcomes[0].windows == 1
+
+
+def test_a_b_block_whose_later_a_reads_past_the_checkpoint_closes_again():
+    """Noiseless rounds at d = 3; the first A hands detector 45 on.
+
+    The parallel blocks: the first A commits 1 to 6 and reads to 9, the B
+    commits 7 to 15, the second A commits 16 to 18 reading 13 to 21. At
+    17 the B reads only earlier rounds but takes the second A's boundary,
+    which reads round 17, so the first A alone is kept. The second A is
+    decided first, on its own rounds 13 to 17 (rounds 13 start at
+    detector 100), then the B (round 7 starts at 44) with the boundary.
+    """
+    closer = _RecordingCloser()
+    listener = checkpoints_module.Checkpoints(17, closer)
+    first_a = window_records.Window(100, 0, 1, 6, 9, 9)
+    b_block = window_records.Window(
+        100, 1, 7, 15, 15, 9, closed_temporal_boundaries=True
+    )
+    second_a = window_records.Window(100, 2, 16, 18, 21, 9, buffer_lo=13)
+
+    listener.window_planned(first_a)
+    listener.window_planned(b_block)
+    listener.window_planned(second_a)
+    _emit_noiseless_rounds(listener, 17)
+    _decided(listener, first_a, (45,))
+    snapshot = _noiseless_snapshot(17)
+    listener.checkpoint_reached(snapshot)
+
+    second_a_syndrome, b_syndrome = closer.syndromes
+    second_a_bits = second_a_syndrome.values()
+    flipped = [detector for detector, bit in b_syndrome.items() if bit]
+    assert min(second_a_syndrome) == 100
+    assert not any(second_a_bits)
+    assert min(b_syndrome) == 44
+    assert flipped == [45]
     assert listener.outcomes[0].windows == 1
 
 
@@ -384,3 +451,26 @@ def _noiseless_snapshot(round_index: int):
     return checkpoint_records.CheckpointSnapshot(
         100, round_index, (0, 0, 0, 0), (0,), False, program
     )
+
+
+def _decided(listener, window, boundary_detector_ids: tuple) -> None:
+    """The window decoded, handing these detectors on, and final."""
+    stream_id = window.stream_id
+    window_index = window.window_index
+    pool = window_records.PoolId("weak")
+    key = window_records.DecoderRequestKey(stream_id, window_index, pool, 1)
+    window.published_request_key = key
+    boundary = window_records.DependencyResidual(
+        detector_ids=boundary_detector_ids
+    )
+    result = decoding_records.DecodeResult(
+        stream_id,
+        window_index,
+        logical_observables=(0,),
+        boundary_data=boundary,
+    )
+    job = decoding_records.DecodeJob(
+        stream_id, window_index, window.round_count, request_key=key
+    )
+    listener.request_ended(job, result, None, None)
+    listener.window_final(window)

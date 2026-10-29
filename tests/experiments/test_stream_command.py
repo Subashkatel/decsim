@@ -23,6 +23,7 @@ import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.target_steps as target_steps
 import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.command as command
+import decsim.experiments.experiment as experiment
 import decsim.experiments.refusal as refusal
 import decsim.experiments.stream_command as stream_command
 import decsim.machine as machine_module
@@ -38,6 +39,24 @@ import decsim
 import decsim.presets.machines as machines
 
 memory = decsim.Task("memory", machines.weak_baseline(3, 0.002, 1.0))
+stop = decsim.CollectionSettings(max_shots=1)
+experiment = decsim.Experiment("stream", [memory], stop)
+"""
+# the same memory, its source bursting on 8 of the patch's 17 qubits
+BURST_RUN_FILE = """
+import dataclasses
+
+import decsim
+import decsim.presets.machines as machines
+import decsim.qpu.flip_stream_device as flip_stream_device
+
+machine = machines.weak_baseline(3, 0.002, 1.0)
+burst = flip_stream_device.BurstSettings(
+    onset_round=50, peak_factor=10.0, decay_rounds=30.0, qubit_count=8
+)
+source = flip_stream_device.FlipStreamDevice.Settings(burst=burst)
+qpu = dataclasses.replace(machine.held("qpu"), source=source)
+memory = decsim.Task("memory", machine.with_held("qpu", qpu))
 stop = decsim.CollectionSettings(max_shots=1)
 experiment = decsim.Experiment("stream", [memory], stop)
 """
@@ -78,6 +97,27 @@ def test_a_memory_task_streams_and_writes_one_record(tmp_path):
         5,
     )
     assert record["warmup_rounds"] == 30
+    assert measurement["decoded_windows"] > 40
+    assert measurement["logical_failure"] in (True, False)
+
+
+def test_a_memory_task_whose_source_bursts_streams_to_its_readout(tmp_path):
+    run_file = tmp_path / "burst.py"
+    run_file.write_text(BURST_RUN_FILE)
+    out = tmp_path / "burst.json"
+
+    arguments = ["stream", str(run_file), "--rounds", "150"]
+    arguments += ["--warmup", "30", "--seed", "5", "--out", str(out)]
+    command.main(arguments)
+
+    text = out.read_text()
+    record = json.loads(text)
+    measurement = record["measurement"]
+    study = experiment.load_one_task(str(run_file), None)
+    machine = stream_command.stream_machine(study.tasks[0], 150, 30)
+    qpu = machine.held("qpu")
+    assert qpu.source.burst.onset_round == 50
+    assert record["rounds"] == 150
     assert measurement["decoded_windows"] > 40
     assert measurement["logical_failure"] in (True, False)
 

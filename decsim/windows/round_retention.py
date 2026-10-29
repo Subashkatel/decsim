@@ -653,16 +653,19 @@ class RoundRetention:
         window's own strong window would have read is the request's or
         the restart window's. A round behind that first round is behind
         the strong window too, and the absorbed window is never decoded,
-        so no reader of it is left.
+        so no reader of it is left; nor of a round past a sealed stream's
+        last, which a window laid before the seal may name and which
+        never arrives.
         """
         entry_edge = self._edge_into(key[0])
         landed_in = entry_edge.landed_in
         absorbed = decoding_records.PotentialStrong(key, entry_edge.target)
         absorbed_identities = landed_in.hold_round_identities(absorbed)
         replacement_identities = landed_in.hold_round_identities(replacement)
-        needed = _from_the_first_round_on(
+        from_the_first = _from_the_first_round_on(
             absorbed_identities, replacement_identities
         )
+        needed = self._rounds_that_arrive(key[0], from_the_first)
         replacements = set(replacement_identities)
         if restart_key is not None:
             restart_potential = decoding_records.PotentialStrong(
@@ -811,6 +814,23 @@ class RoundRetention:
         )
         restart = decoding_records.PotentialRestart(key)
         store.register_hold(restart, round_keys)
+
+    def _rounds_that_arrive(
+        self,
+        stream_id: Any,  # an opaque identity
+        identities: set,
+    ) -> set:
+        """The identities less the stream's rounds past its sealed end."""
+        if not self.tracker.is_sealed(stream_id):
+            return identities
+        last_round = self.tracker.round_count_for_window(stream_id)
+        arriving = set()
+        for identity in identities:
+            is_past_the_end = identity[1] > last_round
+            if identity[0] == stream_id and is_past_the_end:
+                continue
+            arriving.add(identity)
+        return arriving
 
     def _hold_later_stream_reads(self, window: window_records.Window) -> None:
         """Keep what the stream's windows after this one read before it.

@@ -390,7 +390,7 @@ class DecodeRequester:
 
     def request_if_ready(self, window: window_records.Window) -> None:
         """If the window has its data, submit it through the policy."""
-        if window.queued or window.committed:
+        if _is_left_alone(window):
             return
         if window.t_first_round is None and self.tracker.has_first_round(
             window
@@ -676,6 +676,13 @@ class _DecidingWindow:
 
     job: decoding_records.DecodeJob
     primary_submissions: list
+
+
+def _is_left_alone(window: window_records.Window) -> bool:
+    """Queued, committed, or covered by a strong region (window_planner.py)."""
+    if window.is_absorbed:
+        return True
+    return window.queued or window.committed
 
 
 def _speculative_submissions(speculative) -> list:

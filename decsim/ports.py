@@ -617,8 +617,9 @@ class WindowPlan(Protocol):
     """The window plan, as the escalation side reshapes it.
 
     A strong window covers rounds several weak windows were going to
-    commit, so the escalation side may absorb a window or move another's
-    read start; the rest of the plan stays the window side's.
+    commit, so the escalation side may absorb a window, set one aside for
+    a region it lays out later, or move another's read start; the rest of
+    the plan stays the window side's.
     """
 
     def window_at(self, key: tuple) -> window_records.Window:
@@ -636,6 +637,9 @@ class WindowPlan(Protocol):
         model: Optional[fault_models.WindowErrorModel],
     ) -> window_records.Window:
         """Move a window's read start and install the model it reads with."""
+
+    def set_aside_window(self, key: tuple) -> None:
+        """A strong region laid out later covers the window: skip it now."""
 
     def later_windows(
         self,
@@ -851,6 +855,12 @@ class WindowRounds(Protocol):
         store: "SyndromeBuffer",
     ) -> int:
         """The stream's highest round stored in that store."""
+
+    def is_sealed(self, stream_id: Any) -> bool:  # an opaque identity
+        """True for a planned operation and a sealed stream."""
+
+    def is_data_complete(self, window: window_records.Window) -> bool:
+        """Whether the window has every round it reads."""
 
 
 @runtime_checkable

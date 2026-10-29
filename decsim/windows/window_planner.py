@@ -272,6 +272,18 @@ class WindowPlanner:
             self.models.model_by_window[key] = model
         return window
 
+    def set_aside_window(self, key: tuple) -> None:
+        """A strong region laid out later covers the window: skip it now.
+
+        A stream escalates a window before it has laid every window the
+        region covers, so the region is laid out later
+        (escalation/strong_window_shapes.py DoubleWindow). Until then the
+        requester and the courier leave the window alone, as they leave
+        an absorbed one, and the region absorbs it when it lands.
+        """
+        window = self.plan.windows[key]
+        window.is_absorbed = True
+
     def check_absorbable(self, window_keys: tuple) -> None:
         """Every listed window is still undecoded and uncommitted."""
         for key in window_keys:

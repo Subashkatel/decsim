@@ -216,7 +216,12 @@ class WindowManager:
         stream_id: Any,  # an opaque identity
         stream_round_count: int,
     ) -> None:
-        """Close a dynamic stream once its full length has arrived."""
+        """Close a dynamic stream once its full length has arrived.
+
+        The strong tier hears the seal before any window is requested: a
+        strong region that waits for the stream's windows is laid out on
+        its known end (escalation/strong_window_shapes.py DoubleWindow).
+        """
         if self.tracker.is_sealed(stream_id):
             return
         stream_operation = self.tracker.operation(stream_id)
@@ -229,6 +234,7 @@ class WindowManager:
             self.planner.refresh_stream_models(stream_id)
         self.tracker.seal(stream_id, stream_round_count)
         self.retention.release_later_stream_reads(stream_id)
+        self._wake_strong_tier(stream_id)
         self.check_windows_of_stream(stream_id)
         self.results.finish_workload_if_ready()
 

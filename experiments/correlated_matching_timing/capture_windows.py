@@ -193,19 +193,29 @@ def main() -> None:
     out = pathlib.Path(arguments.out)
     models = out / "models"
     models.mkdir(parents=True, exist_ok=True)
-    distance_names = [str(distance) for distance in arguments.distances]
-    distance_text = "_".join(distance_names)
-    path = out / f"windows_d{distance_text}.csv"
+    file_name = _windows_file_name(arguments)
+    path = out / file_name
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, COLUMNS)
         writer.writeheader()
-        _capture_every_cell(out, writer, arguments)
+        _capture_every_cell(out, handle, writer, arguments)
     print(f"wrote {path}")
 
 
+def _windows_file_name(arguments) -> str:
+    """The cells the run keeps, so runs of other cells write other files."""
+    distance_names = [str(distance) for distance in arguments.distances]
+    factor_names = [f"{factor:g}" for factor in arguments.factors]
+    distance_text = "_".join(distance_names)
+    scheme_text = "_".join(arguments.schemes)
+    factor_text = "_".join(factor_names)
+    return f"windows_d{distance_text}_{scheme_text}_f{factor_text}.csv"
+
+
 def _capture_every_cell(
-    out: pathlib.Path, writer: csv.DictWriter, arguments
+    out: pathlib.Path, handle, writer: csv.DictWriter, arguments
 ) -> None:
+    """Every distance and scheme, each written out as it ends."""
     for distance in arguments.distances:
         for scheme in arguments.schemes:
             capture_cell(
@@ -216,6 +226,7 @@ def _capture_every_cell(
                 arguments.factors,
                 arguments.windows,
             )
+            handle.flush()
 
 
 def _drifted_source(factor: float):

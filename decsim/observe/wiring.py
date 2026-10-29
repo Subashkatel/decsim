@@ -696,12 +696,34 @@ def _closing_decisions(
 
 def _refuse_a_closing_edge(router, edge: ports.EscalateEdge, setting) -> None:
     """An edge past the entry pool joins its solves where no closer reads."""
+    _refuse_a_closing_region(edge, setting)
     if router.is_entry(edge.source):
         return
     raise NotImplementedError(
         f"{setting} beside an escalate edge "
         f"past the entry pool ({edge.source.word} to {edge.target.word}) "
         f"is not implemented yet; {refusals.REFUSALS}"
+    )
+
+
+def _refuse_a_closing_region(edge: ports.EscalateEdge, setting) -> None:
+    """A strong region's answer reads past the windows a checkpoint keeps.
+
+    A checkpoint keeps the final answers of the windows that read only
+    earlier rounds, as a stream ending there would (checkpoints.py); a
+    double window's answer covers its absorbed windows' rounds and pins
+    its far face on the restart window's commit, and a stream ending
+    inside the region would have a terminal region instead.
+    """
+    if not edge.shape.absorbs_weak_windows:
+        return
+    raise NotImplementedError(
+        f"{setting} beside a strong window that absorbs weak ones "
+        "(double_window) is not implemented yet: a strong region answers "
+        "for rounds past its escalated window and pins its far face on "
+        "the restart window's commit, so a checkpoint inside the region "
+        "has no answer a stream ending there would keep; "
+        f"{refusals.REFUSALS}"
     )
 
 

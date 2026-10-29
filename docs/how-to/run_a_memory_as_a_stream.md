@@ -278,13 +278,14 @@ Each of these is refused, "not implemented yet", with its reason:
   which grow with every round;
 - batched or bulk strong decoding, whose merged batch the per-window
   measures do not read;
-- the double window on a stream, which absorbs windows a stream has not
-  laid yet;
+- a double window over a stream whose operations emit detector data
+  (a lattice-surgery segment, say), since the stream's windows end at
+  each such operation and a strong region does not;
 - a logical failure counted inside the stream other than at a
   checkpoint (section 4);
 - checkpoints or answer checks beside an escalate edge past the entry
-  pool, or beside a decoder or a verdict that draws from the run's
-  seed;
+  pool, beside the double window, or beside a decoder or a verdict
+  that draws from the run's seed;
 - answer checks on a machine whose entry pool has no escalate edge to
   a pool that decodes.
 

@@ -86,9 +86,10 @@ to this table, when the machine is built:
 | `decsim stream` with a source other than the Stim device | the flip stream samples the circuit as the Stim device does |
 | `decsim stream` with the trace, the log, or the data movement or window outcome records | each keeps something for every round or window, and a stream keeps nothing that grows with its length |
 | `decsim stream` with a pool's batching or `bulk_strong` | a merged batch files its stages under its own key, which the per-window measures do not read |
-| `decsim stream` with the double window | it absorbs windows the plan lays up front, and a stream lays its windows as its rounds arrive |
+| `double_window` over a stream whose operations emit detector data | the stream's windows end at each such operation, and a strong region does not |
 | a logical failure counted inside a stream, other than at a checkpoint | no source defines one inside an unbounded stream; a checkpoint is the outcome had the stream ended there |
 | checkpoints or answer checks beside an escalate edge past the entry pool | that edge's source pool joins its solves where no checkpoint reads them |
+| checkpoints or answer checks beside the double window | a strong region answers for rounds past its escalated window and pins its far face on the restart window's commit, so a checkpoint inside it has no answer a stream ending there would keep |
 | checkpoints or answer checks beside a decoder or a verdict that draws from the run's seed | a checkpoint decides its last windows as the machine does, and a draw there would change the run |
 
 Not built, because no source describes it: one window's results merged

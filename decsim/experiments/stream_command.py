@@ -29,10 +29,13 @@ observe/checkpoints.py): the outcome had the stream been read out there.
 A shape a stream does not build yet is refused, each "not implemented
 yet" with its reason: a workload other than decoded Stim memory
 patches, a source other than Stim's, the trace, the log, the data
-movement and window outcome ledgers, a strong window that absorbs weak ones
-(the double window), and batched or bulk strong decoding. Any graph of
-pools streams: several patches routed to a pool each, a shared strong
-pool, a chain, as a shot runs them.
+movement and window outcome ledgers, and batched or bulk strong
+decoding; checkpoints and answer checks are refused beside a strong
+window that absorbs weak ones (observe/wiring.py). Any graph of pools
+streams: several patches routed to a pool each, a shared strong pool, a
+chain, as a shot runs them. The double window streams too: a region
+escalated before the stream has laid its windows is laid out once it
+has them (escalation/strong_window_shapes.py DoubleWindow).
 """
 
 import argparse
@@ -158,10 +161,9 @@ def _refuse_what_a_stream_does_not_build(
 ) -> None:
     """The first shape a stream does not build yet, refused."""
     reasons = [check(machine) for check in _STREAM_CHECKS]
-    absorbing_reason = _an_absorbing_strong_window(layout)
     bulk_reason = _bulk_strong_decoding(machine)
     batching_reason = _batching(layout)
-    reasons.extend((absorbing_reason, bulk_reason, batching_reason))
+    reasons.extend((bulk_reason, batching_reason))
     for reason in reasons:
         if reason is None:
             continue
@@ -203,21 +205,6 @@ def _a_window_outcome_ledger(machine) -> Optional[str]:
     if not machine.observation.record_window_outcomes:
         return None
     return "a stream keeps no window outcomes, which keep every window"
-
-
-def _an_absorbing_strong_window(
-    layout: layout_module.Layout,
-) -> Optional[str]:
-    switching = layout.entry_switching()
-    if switching is None:
-        return None
-    strong_window = switching.strong_window
-    if not strong_window.absorbs_weak_windows:
-        return None
-    return (
-        f"the {strong_window.name} absorbs windows the plan lays up front, "
-        "and a stream lays its windows as its rounds arrive"
-    )
 
 
 def _bulk_strong_decoding(machine) -> Optional[str]:

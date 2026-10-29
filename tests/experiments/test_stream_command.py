@@ -5,7 +5,9 @@ threshold's when it has one; each shape a stream does not build yet is
 refused by name, "not implemented yet". Patches streamed on a pool each,
 or sharing a strong pool, answer every window as one pool does
 (tests/patch_pools.py: a router decides where a window decodes, never
-what it reads).
+what it reads). The double window streams: with nothing escalated it
+answers as union-find alone does, each window it escalates absorbs the
+windows its region covers, and checkpoints beside it are refused.
 """
 
 import dataclasses
@@ -14,7 +16,8 @@ import json
 import pytest
 
 import decsim
-import decsim.confidence.complementary as complementary
+import decsim.confidence.cluster as cluster
+import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.target_steps as target_steps
@@ -22,7 +25,9 @@ import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.command as command
 import decsim.experiments.refusal as refusal
 import decsim.experiments.stream_command as stream_command
+import decsim.machine as machine_module
 import decsim.parameters.assignments as assignments
+import decsim.presets.experiment_one as experiment_one
 import decsim.presets.machines as machines
 import decsim.qpu.syndrome_devices as syndrome_devices
 import tests.experiments.run_files as run_files
@@ -165,19 +170,6 @@ def _source(machine):
     return machine.with_held("qpu", timing_qpu)
 
 
-def _double_window(machine):
-    strong_window = strong_window_shapes.DoubleWindow.Settings()
-    confidence = complementary.ComplementaryGap.Settings()
-    threshold = threshold_sources.FixedThreshold.Settings(
-        threshold_decibels=12.0
-    )
-    switching = escalation_settings.SwitchingSettings(
-        confidence=confidence, threshold=threshold, strong_window=strong_window
-    )
-    strong = machines.STRONG_BASELINE_POOL
-    return machines.with_strong_tier(machine, strong, switching)
-
-
 def _bulk_strong(machine):
     manager = machine.held("decoder_manager")
     bulk_manager = dataclasses.replace(manager, bulk_strong=True)
@@ -193,7 +185,6 @@ REFUSED = [
         "no data movement ledger",
     ),
     (_source, "this task's source is timing_only"),
-    (_double_window, "the double_window absorbs windows"),
     (_bulk_strong, "(bulk_strong)"),
 ]
 
@@ -219,3 +210,125 @@ def test_a_warmup_past_the_rounds_is_refused(tmp_path):
         command.main(
             ["stream", str(run_file), "--rounds", "50", "--warmup", "50"]
         )
+
+
+# Experiment 1's union-find memory at d = 3 and p = 0.01, where a cluster
+# gap under 20 dB escalates many windows
+UNION_FIND_ERROR_RATE = 0.01
+# its stream's rounds: fifty windows of three
+UNION_FIND_ROUNDS = 150
+_DOUBLE_WINDOW = strong_window_shapes.DoubleWindow.Settings()
+_REDO_WINDOW = strong_window_shapes.RedoWindow.Settings()
+_STATED_TIMES = belief_matching.IterationTime(
+    iteration_microseconds=0.5, matching_microseconds=10.0
+)
+_STATED_BELIEF_MATCHING = belief_matching.BeliefMatchingDecoder.Settings(
+    max_iterations=30, timing=_STATED_TIMES
+)
+
+
+def _switching(machine, strong_window, decibels: float):
+    """The machine escalating a window whose cluster gap is under decibels.
+
+    The strong pool is belief matching on stated times, which draws
+    nothing, so a run answers alike each time (tests/patch_pools.py).
+    """
+    confidence = cluster.ClusterGap.Settings(walk_microseconds=0.2)
+    threshold = threshold_sources.FixedThreshold.Settings(
+        threshold_decibels=decibels
+    )
+    switching = escalation_settings.SwitchingSettings(
+        confidence=confidence, threshold=threshold, strong_window=strong_window
+    )
+    strong = dataclasses.replace(
+        machines.STRONG_BASELINE_POOL, algorithm=_STATED_BELIEF_MATCHING
+    )
+    return machines.with_strong_tier(machine, strong, switching)
+
+
+def test_a_double_window_stream_that_never_escalates_answers_as_union_find():
+    """At 0 dB no window escalates, so each keeps union-find's answer.
+
+    The double window's stream answers every window and the outcome as
+    union-find's alone does, and as the redo window's stream does, at
+    the same seed and rounds.
+    """
+    union_find = experiment_one.weak_alone(3, UNION_FIND_ERROR_RATE)
+    double = _switching(union_find, _DOUBLE_WINDOW, 0.0)
+    redo = _switching(union_find, _REDO_WINDOW, 0.0)
+
+    alone, alone_pools = patch_pools.streamed(union_find, UNION_FIND_ROUNDS)
+    doubled, double_pools = patch_pools.streamed(double, UNION_FIND_ROUNDS)
+    redone, redo_pools = patch_pools.streamed(redo, UNION_FIND_ROUNDS)
+
+    assert doubled == alone
+    assert redone == alone
+    assert alone_pools == double_pools == redo_pools == {"weak"}
+
+
+def test_a_double_window_stream_commits_or_absorbs_each_window_once():
+    """Each window commits once, or a strong region absorbs it undecoded.
+
+    The stream lays its windows as its rounds arrive; a region is laid
+    out once the stream has the windows it covers, and absorbs them
+    (escalation/strong_window_shapes.py DoubleWindow).
+    """
+    union_find = experiment_one.weak_alone(3, UNION_FIND_ERROR_RATE)
+    double = _switching(union_find, _DOUBLE_WINDOW, 20.0)
+    task = decsim.Task("double", double)
+    graph = stream_command.stream_machine(task, UNION_FIND_ROUNDS, 0)
+    machine = machine_module.Machine.build(graph, patch_pools.SEED)
+    windows = _WindowFates()
+    windows.attach(machine)
+
+    machine.run()
+
+    assert windows.absorbed
+    assert "strong" in windows.committed.values()
+    ended = sorted([*windows.committed, *windows.absorbed])
+    assert ended == sorted(windows.planned)
+
+
+def test_checkpoints_beside_a_double_window_are_refused_with_the_reason():
+    union_find = experiment_one.weak_alone(3, UNION_FIND_ERROR_RATE)
+    double = _switching(union_find, _DOUBLE_WINDOW, 20.0)
+    checkpointed = _observation(double, checkpoint_every_rounds=30)
+    task = decsim.Task("double", checkpointed)
+    graph = stream_command.stream_machine(task, UNION_FIND_ROUNDS, 0)
+
+    with pytest.raises(NotImplementedError) as refused:
+        machine_module.Machine.build(graph, patch_pools.SEED)
+
+    sentence = str(refused.value)
+    assert "absorbs weak ones (double_window)" in sentence
+    assert "is not implemented yet" in sentence
+
+
+class _WindowFates:
+    """Each laid window's key, and how it ended: committed or absorbed.
+
+    committed maps a key to the tier that committed it.
+    """
+
+    def __init__(self) -> None:
+        self.planned: list = []
+        self.committed: dict = {}
+        self.absorbed: list = []
+
+    def attach(self, machine) -> None:
+        sources = machine.windows.window_manager.window_sources()
+        sources.window_planned.connect(self.window_planned)
+        sources.window_absorbed.connect(self.window_absorbed)
+        frame = machine.control.pauli_frame
+        frame.trace.correction_committed.connect(self.correction_committed)
+
+    def window_planned(self, window) -> None:
+        self.planned.append(window.key)
+
+    def window_absorbed(self, key: tuple, owner_key: tuple) -> None:
+        del owner_key
+        self.absorbed.append(key)
+
+    def correction_committed(self, record) -> None:
+        assert record.window_key not in self.committed, record.window_key
+        self.committed[record.window_key] = record.tier

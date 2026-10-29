@@ -7,8 +7,8 @@ multiples of 0.5 nats, so each threshold sits half-way between two
 levels and is one distinct policy. The levels are the capacity study's
 (about 3% to 30% escalated) and three more above them, since
 speculation is expected to carry a larger share. The double window is
-not run: a stream grows its windows as it goes, which the double window
-refuses (experiments/stream_command.py). Task names:
+not in this run file, though a stream runs it too
+(escalation/strong_window_shapes.py DoubleWindow). Task names:
 {scheme}_d{distance}_p{probability}_{nats}.
 
 Usage

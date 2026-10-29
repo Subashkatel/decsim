@@ -177,6 +177,21 @@ class StreamMeasures:
         if observation_settings.folds_windows:
             self._let_go(window)
 
+    def window_absorbed(self, key: tuple, owner_key: tuple) -> None:
+        """A strong region took the window over; its records go.
+
+        An absorbed window is never decoded and never final on its own:
+        its strong region's window answers for its rounds
+        (escalation/strong_window_shapes.py DoubleWindow).
+        """
+        del owner_key
+        if not self.lets_go:
+            return
+        observation = self.machine.observation
+        observation.windows.forget(key)
+        observation.stages.forget_window(key)
+        self.transfers.forget_window(key)
+
     def measurement(
         self, result: result_records.RunResult
     ) -> StreamMeasurement:
@@ -266,6 +281,7 @@ class StreamMeasures:
         window_manager = machine.windows.window_manager
         sources = window_manager.window_sources()
         sources.window_final.connect(self.window_final)
+        sources.window_absorbed.connect(self.window_absorbed)
         machine.links.trace.transfer_delivered.connect(self.transfer_delivered)
         run_statistics = machine.observation.statistics
         run_statistics.on_reset(self.folds.restart_pool_commits)

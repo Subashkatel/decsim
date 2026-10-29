@@ -34,6 +34,7 @@ import decsim.records.formation as formation_records
 import decsim.records.program as program_records
 import decsim.records.rounds as round_records
 import decsim.records.windows as window_records
+import decsim.refusals as refusals
 import decsim.seeding as seeding
 import decsim.trace_source as trace_source
 
@@ -350,11 +351,20 @@ class StimDevice(seeding.AtomicRunSeedConsumer):
         """The detector error model of one dynamic stream window.
 
         The window whose commit region reaches the stream's last round is
-        the terminal one.
+        the terminal one. The windows are sliced in order, each owning
+        what the windows before it left, so a closed window, a parallel B
+        block, which also waits for the window after it, is refused.
         """
         stream_model = self._shots.stream_model_by_id.get(stream_id)
         if stream_model is None:
             return None
+        if window.closed_temporal_boundaries:
+            raise ValueError(
+                "not implemented yet: a finite Stim stream slices each window "
+                "after the windows before it, and a closed window, a parallel "
+                "B block, also waits for the window after it; stream parallel "
+                f"windows from the flip stream source; {refusals.REFUSALS}"
+            )
         is_last = window.commit_hi == stream_model.round_count
         return stream_model.slicer.slice_window(
             window.start_round,

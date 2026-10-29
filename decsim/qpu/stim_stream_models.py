@@ -13,6 +13,7 @@ import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.records.circuits as circuit_records
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.windows as window_records
+import decsim.refusals as refusals
 
 
 class GrowingStimModels:
@@ -85,7 +86,10 @@ class GrowingStimModels:
     def _build_slicer(self, window):
         if window.closed_temporal_boundaries:
             raise ValueError(
-                "live Stim streams require trailing-buffer feedback"
+                "not implemented yet: a live Stim stream slices each window "
+                "after the windows before it, and a closed window, a parallel "
+                "B block, also waits for the window after it; stream parallel "
+                f"windows from the flip stream source; {refusals.REFUSALS}"
             )
         round_count = self.final_round_count
         if round_count is None:

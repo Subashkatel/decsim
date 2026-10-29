@@ -6,13 +6,17 @@ R rounds costs R squared. Two facts make a window's model a short
 circuit's, moved in time.
 
 - Ownership follows the geometry. A window owns the faults touching its
-  commit rounds that no earlier window committed (qLDPC's
+  commit rounds that no window it waits for committed (qLDPC's
   SlidingWindowDecoder; window_placement.py), and a stream's commit
-  regions tile its rounds in window order (window_planner.py,
-  arithmetic_geometries_begun and _clip), so a fault belongs to the
-  window whose commit region holds its earliest round. A window's prior
-  faults are then every fault touching a round before its commit
-  region, read off its own circuit, with no earlier window sliced.
+  regions tile its rounds in window order (window_planner.py), so a
+  sliding window's prior faults are every fault touching a round before
+  its commit region, read off its own circuit, with no earlier window
+  sliced. Parallel blocks (windows/schemes/parallel.py) wait otherwise:
+  an A block, which reads rounds before its commit, waits for no
+  window, and a closed B block waits for the A blocks on both sides,
+  so its prior faults are every fault touching a round outside it.
+  window_ownership_dag.py gives a planned operation's blocks the same
+  owners, and a test holds the two to each other.
 - A repeated round's faults are the round before's, moved one round
   (periodic_formation.py; IBM's sliding-window decoder decodes every
   window with one fixed check matrix, 2510.21600, Algorithm 2). A window
@@ -146,10 +150,6 @@ class MovedStimModels:
     def _geometry_of(
         self, window: window_records.Window, final: Optional[int]
     ) -> "_Geometry":
-        if window.closed_temporal_boundaries:
-            raise ValueError(
-                "live Stim streams require trailing-buffer feedback"
-            )
         last_buffer_round = window.buffer_hi
         if final is not None:
             last_buffer_round = min(last_buffer_round, final)
@@ -160,6 +160,7 @@ class MovedStimModels:
             last_commit_round=window.commit_hi,
             last_buffer_round=last_buffer_round,
             is_last=is_last,
+            is_closed=window.closed_temporal_boundaries,
         )
 
     def _placement_of(
@@ -190,9 +191,15 @@ class MovedStimModels:
     def _sliced_alone(
         self, round_count: int, local: "_Geometry"
     ) -> fault_models.WindowErrorModel:
-        """A weak window on its short circuit, named; its priors before it."""
+        """A weak window on its short circuit, named, without its priors.
+
+        The last window owns every fault it reads, qLDPC's tail, but a
+        window that reads rounds before its commit leaves the faults
+        there to the window before it.
+        """
         frame = self.frames.frame(round_count)
-        priors = frame.faults_before(local.first_commit_round)
+        priors = _prior_faults(frame, local)
+        is_last = local.is_last and local.waits_for_the_window_before
         model = frame.slicer.slice_window_alone(
             local.start_round,
             local.first_commit_round,
@@ -200,7 +207,7 @@ class MovedStimModels:
             local.last_buffer_round,
             fault_exclusion_ranges=(),
             explicitly_prior_faults=priors,
-            is_last=local.is_last,
+            is_last=is_last,
         )
         return frame.named(model)
 
@@ -217,13 +224,23 @@ class MovedStimModels:
 
 @dataclasses.dataclass(frozen=True)
 class _Geometry:
-    """A window's rounds as the slicer reads them."""
+    """A window's rounds as the slicer reads them, and whether it is closed.
+
+    A closed window, a parallel B block, also waits for the window after
+    it.
+    """
 
     start_round: int
     first_commit_round: int
     last_commit_round: int
     last_buffer_round: int
     is_last: bool
+    is_closed: bool
+
+    @property
+    def waits_for_the_window_before(self) -> bool:
+        """Whether it starts where it commits, as all but an A block do."""
+        return self.start_round == self.first_commit_round
 
     def moved(self, rounds: int) -> "_Geometry":
         """The same window, rounds later."""
@@ -289,6 +306,14 @@ class _Frame:
         fault_index = self.slicer.fault_index
         return {
             representation: _touching_before(by_round, round_index)
+            for representation, by_round in fault_index.faults_by_round.items()
+        }
+
+    def faults_outside(self, first_round: int, last_round: int) -> dict:
+        """Every fault touching a round outside these, by representation."""
+        fault_index = self.slicer.fault_index
+        return {
+            representation: _touching_outside(by_round, first_round, last_round)
             for representation, by_round in fault_index.faults_by_round.items()
         }
 
@@ -531,6 +556,32 @@ def _moved_ranges(ranges: tuple, rounds: int) -> tuple:
         moved_last = last + rounds
         moved.append((moved_first, moved_last))
     return tuple(moved)
+
+
+def _prior_faults(frame: _Frame, local: _Geometry) -> Optional[dict]:
+    """The faults the windows it waits for own, which are no columns of it.
+
+    A window that starts where it commits waits for the windows before
+    it, which own every fault touching a round before its commit. A
+    closed window, a parallel B block, waits for the A blocks on both
+    sides, which own every fault touching a round outside it; an A
+    block waits for none, None (Skoric et al. 2209.08552 lines 388-405).
+    """
+    if local.is_closed:
+        return frame.faults_outside(local.start_round, local.last_buffer_round)
+    if local.waits_for_the_window_before:
+        return frame.faults_before(local.first_commit_round)
+    return None
+
+
+def _touching_outside(by_round: dict, first_round: int, last_round: int) -> set:
+    """The faults touching any round before first_round or after last_round."""
+    faults = set()
+    for touched_round, touching in by_round.items():
+        if first_round <= touched_round <= last_round:
+            continue
+        faults.update(touching)
+    return faults
 
 
 def _touching_before(by_round: dict, round_index: int) -> set:

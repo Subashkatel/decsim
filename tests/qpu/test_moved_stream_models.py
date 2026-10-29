@@ -5,18 +5,23 @@ WindowSlicer, the way GrowingStimModels slices it: every window's rows,
 columns, priors, observables, owned mask, handoffs, positions,
 coordinates and bases must be the same, and a fault must keep one name
 across every window that holds it (probe p1, Adroit config_proto/
-probes8d, at d=3, 5 and 11). The streams of one program share its short
-circuits, as sinter compiles a decoder once per task (circuit_builds).
+probes8d, at d=3, 5 and 11). Parallel blocks are held to a planned
+operation's models instead, whose owners the dependency graph decides
+(window_model_builders.py, window_ownership_dag.py). The streams of one
+program share its short circuits, as sinter compiles a decoder once per
+task (circuit_builds).
 """
 
 import numpy
 import pytest
 
 import decsim.detector_error_model.detector_formation as detector_formation
+import decsim.detector_error_model.window_model_builders as window_models
 import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.qpu.moved_stream_models as moved_stream_models
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.windows as window_records
+import decsim.windows.schemes.parallel as parallel_scheme
 import tests.qpu.memory_programs as memory_programs
 
 GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
@@ -269,20 +274,84 @@ def test_the_streams_of_one_program_share_its_short_circuits():
     assert other.frames is not first.frames
 
 
-def test_a_closed_boundary_and_a_second_finish_are_refused():
+def test_a_second_finish_is_refused():
     program = _program()
     models = moved_stream_models.MovedStimModels(program, REQUIREMENT)
-    window = window_records.Window(
-        stream_id=100,
-        window_index=0,
-        commit_lo=1,
-        commit_hi=3,
-        buffer_hi=3,
-        round_count=3,
-        closed_temporal_boundaries=True,
-    )
-    with pytest.raises(ValueError, match="trailing-buffer feedback"):
-        models.for_window(window)
     models.finish(ROUNDS)
     with pytest.raises(RuntimeError, match="only finish once"):
         models.finish(ROUNDS)
+
+
+# (block width, rounds): a terminal B at width 3 and at width 2, and a
+# tail the last A absorbs at width 2
+PARALLEL_PLANS = [(3, 23), (2, 23), (2, 21)]
+
+
+@pytest.mark.parametrize("width, round_count", PARALLEL_PLANS)
+def test_every_parallel_blocks_model_is_the_planned_operations(
+    width: int, round_count: int
+):
+    """An A block owns what touches its commit; a B the rest between."""
+    program = _program()
+    row = parallel_scheme.ParallelWindowScheme()
+    plan = row.plan_operation(
+        100, round_count, commit_round_count=width, buffer_round_count=width
+    )
+    windows = _blocks(plan)
+    whole = _planned_models(program, plan, round_count)
+    models = moved_stream_models.MovedStimModels(program, REQUIREMENT)
+    models.finish(round_count)
+    names = _Names()
+
+    for window, whole_model in zip(windows, whole, strict=True):
+        moved = models.for_window(window)
+        _assert_same(moved, whole_model, names)
+
+
+def _blocks(plan) -> list:
+    """The plan's blocks as the windows a stream lays."""
+    windows = []
+    for geometry in plan.windows:
+        window = window_records.Window(
+            stream_id=100,
+            window_index=len(windows),
+            commit_lo=geometry.commit_lo,
+            commit_hi=geometry.commit_hi,
+            buffer_hi=geometry.buffer_hi,
+            round_count=geometry.round_count,
+            buffer_lo=geometry.buffer_lo,
+            closed_temporal_boundaries=geometry.closed_temporal_boundaries,
+        )
+        windows.append(window)
+    return windows
+
+
+def _planned_models(program, plan, round_count: int) -> list:
+    """The whole circuit's models with the plan's dependency graph."""
+    circuit, measurement_rounds = program.assemble(round_count)
+    table = detector_formation.build_formation_table(
+        circuit, round_count, measurement_rounds=measurement_rounds
+    )
+    detector_rounds = table.detector_rounds()
+    entries = []
+    closed = []
+    for index, geometry in enumerate(plan.windows):
+        entry = (
+            geometry.buffer_lo,
+            geometry.commit_lo,
+            geometry.commit_hi,
+            geometry.buffer_hi,
+        )
+        entries.append(entry)
+        if geometry.closed_temporal_boundaries:
+            closed.append(index)
+    return window_models.build_window_error_models(
+        circuit,
+        entries,
+        round_count=round_count,
+        detector_rounds=detector_rounds,
+        fault_model_requirement=REQUIREMENT,
+        fault_exclusion_ranges=(),
+        dependency_edges=plan.internal_dependencies,
+        closed_temporal_boundary_windows=tuple(closed),
+    )

@@ -541,6 +541,17 @@ def test_the_terminal_stream_window_reads_to_the_last_round():
     assert model.detector_ids == tuple(range(12, 32))
 
 
+def test_a_closed_window_of_a_finite_stream_is_refused():
+    """Its windows are sliced in order; a parallel B waits for a later A."""
+    circuit = memory_circuit(3, 4)
+    stream = memory_operation(circuit, 5)
+    device = stim_device.StimDevice(seed=1)
+    device.register_dynamic_stream(stream, 4, fault_model_requirement=GRAPHLIKE)
+    b_block = window(2, 3, 3, closed_temporal_boundaries=True)
+    with pytest.raises(ValueError, match="finite Stim stream slices each"):
+        device.window_model_for_stream(5, b_block)
+
+
 def test_an_unregistered_stream_has_no_window_model():
     device = stim_device.StimDevice(seed=1)
     leading = window(1, 2, 3)

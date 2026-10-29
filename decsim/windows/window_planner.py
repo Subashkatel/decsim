@@ -641,6 +641,7 @@ class WindowPlanner:
             buffer_hi=geometry.buffer_hi,
             round_count=geometry.round_count,
             buffer_lo=geometry.buffer_lo,
+            closed_temporal_boundaries=geometry.closed_temporal_boundaries,
             spatial_reads=geometry.spatial_reads,
         )
         self.plan.windows[window.key] = window

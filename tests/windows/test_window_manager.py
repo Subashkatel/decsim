@@ -1,9 +1,9 @@
 """The windows facade's laws through its public surface.
 
 A modelled window never reads the next operation's rounds, a stream's
-later window waits on the one before it, a Tan seam waits in its input
-slot rather than on the only unit, and a round past the plan stops the
-run.
+later window waits on the one before it, a parallel stream's B block on
+the A blocks on both sides, a Tan seam waits in its input slot rather
+than on the only unit, and a round past the plan stops the run.
 """
 
 import types
@@ -27,6 +27,7 @@ import decsim.topology.graph_layout as graph_layout
 import decsim.windows.boundary_payloads as boundary_payloads
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.routers as routers
+import decsim.windows.schemes.parallel as parallel_scheme
 import decsim.windows.schemes.sandwich as sandwich_scheme
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
@@ -123,22 +124,8 @@ def test_a_modelled_window_never_reads_the_next_streams_rounds():
 
 def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     """Each later overlapping stream window depends on its predecessor."""
-    manager = object.__new__(window_manager_module.WindowManager)
-    boundary_payload = boundary_payloads.DenseSeamMask()
-    manager.window_interaction = window_interactions.DefaultWindowInteraction(
-        0, boundary_payload
-    )
-    manager.planner = _stream_planner()
-    manager.tracker = types.SimpleNamespace(is_sealed=lambda _stream_id: False)
-    courier = window_boundaries.BoundaryCourier(_ROUTES)
-    courier.planner = manager.planner
-    courier.interaction = manager.window_interaction
-    manager.courier = courier
-    manager.retention = types.SimpleNamespace(
-        register_window=lambda _key, _window: None
-    )
-    stream = program_records.Operation("stream", "stream", (0,))
-    manager.planner.register_stream(stream, None)
+    scheme = sliding_scheme.SlidingWindowScheme()
+    manager = _stream_manager(scheme, buffer_round_count=2)
 
     manager._grow_stream("stream", 4, None)
 
@@ -150,7 +137,46 @@ def test_a_streams_later_window_waits_on_the_previous_ones_boundary():
     assert first.dependents == [("stream", 1)]
 
 
-def _stream_planner() -> window_planner.WindowPlanner:
+def test_a_parallel_b_block_waits_for_the_a_blocks_on_both_sides():
+    """An A block waits for none (Skoric et al. 2209.08552 lines 421-426)."""
+    scheme = parallel_scheme.ParallelWindowScheme()
+    manager = _stream_manager(scheme, buffer_round_count=3)
+
+    manager._grow_stream("stream", 16, None)
+
+    first_a, b_block, second_a = manager.planner.windows_of("stream")
+    assert b_block.deps == [("stream", 0), ("stream", 2)]
+    assert b_block.deps_remaining == 2
+    assert first_a.deps == []
+    assert second_a.deps == []
+    assert first_a.dependents == [("stream", 1)]
+    assert second_a.dependents == [("stream", 1)]
+
+
+def _stream_manager(scheme, buffer_round_count: int):
+    """A window side growing one stream of three-round commits."""
+    manager = object.__new__(window_manager_module.WindowManager)
+    boundary_payload = boundary_payloads.DenseSeamMask()
+    manager.window_interaction = window_interactions.DefaultWindowInteraction(
+        0, boundary_payload
+    )
+    manager.planner = _stream_planner(scheme, buffer_round_count)
+    manager.tracker = types.SimpleNamespace(is_sealed=lambda _stream_id: False)
+    courier = window_boundaries.BoundaryCourier(_ROUTES)
+    courier.planner = manager.planner
+    courier.interaction = manager.window_interaction
+    manager.courier = courier
+    manager.retention = types.SimpleNamespace(
+        register_window=lambda _key, _window: None
+    )
+    stream = program_records.Operation("stream", "stream", (0,))
+    manager.planner.register_stream(stream, None)
+    return manager
+
+
+def _stream_planner(
+    scheme, buffer_round_count: int
+) -> window_planner.WindowPlanner:
     plan = window_records.WindowPlan(
         windows={},
         window_count_by_stream={},
@@ -161,7 +187,9 @@ def _stream_planner() -> window_planner.WindowPlanner:
         windowed_by_stream={},
         batch_preceding_idle_rounds_by_stream={},
     )
-    geometry = types.SimpleNamespace(commit_round_count=3, buffer_round_count=2)
+    geometry = types.SimpleNamespace(
+        commit_round_count=3, buffer_round_count=buffer_round_count
+    )
     resolved = types.SimpleNamespace(
         operation_id="stream",
         code_geometry=geometry,
@@ -170,7 +198,6 @@ def _stream_planner() -> window_planner.WindowPlanner:
     cache = built_window_models.BuiltWindowModels()
     built = window_planner.WindowModels(cache)
     built.decoder = _Decoder()
-    scheme = sliding_scheme.SlidingWindowScheme()
     planner = window_planner.WindowPlanner([resolved], plan, ())
     planner.scheme = scheme
     planner.layouts = scheme.stream_layouts()

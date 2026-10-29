@@ -5,17 +5,27 @@ and B blocks reconcile the seams between them, so the commit graph is
 depth two rather than a chain, and the published construction fixes
 ncom = nbuf = d. The two ways a stream can end are the row's own rules:
 a tail of at most d rounds is absorbed into the preceding A commit, and
-a tail of at most 3d is a terminal B with only its left A behind it.
+a tail of at most 3d is a terminal B with only its left A behind it. A
+growing stream lays the plan's blocks as their commits begin, Skoric's
+online decoder (lines 1042-1055), and its end clips them as the plan's
+tail does, but for a tail of at most d rounds past an A, where it keeps
+the B it laid.
 """
 
 import pytest
 
+import decsim.records.windows as window_records
 import decsim.windows.schemes.parallel as parallel_scheme
 
 
 def _geometries(plan) -> list:
+    return _spans(plan.windows)
+
+
+def _spans(windows) -> list:
+    """Each window as (buffer_lo, commit_lo, commit_hi, buffer_hi)."""
     laid_out = []
-    for window in plan.windows:
+    for window in windows:
         laid_out.append(
             (
                 window.buffer_lo,
@@ -87,3 +97,103 @@ def test_unequal_commit_and_buffer_widths_are_refused():
 
     with pytest.raises(ValueError, match="parallel A/B decoding requires"):
         row.plan_operation(1, 40, commit_round_count=3, buffer_round_count=4)
+
+
+def _laid(stream, highest_known_round: int) -> list:
+    """The stream's blocks laid through the round, as the planner lays them."""
+    windows = []
+    for geometry in stream.begun(highest_known_round, None):
+        window = window_records.Window(
+            stream_id=1,
+            window_index=len(windows),
+            commit_lo=geometry.commit_lo,
+            commit_hi=geometry.commit_hi,
+            buffer_hi=geometry.buffer_hi,
+            round_count=geometry.round_count,
+            buffer_lo=geometry.buffer_lo,
+            closed_temporal_boundaries=geometry.closed_temporal_boundaries,
+        )
+        windows.append(window)
+    return windows
+
+
+def _stream():
+    layouts = parallel_scheme.ParallelStreamLayouts()
+    return layouts.open_stream(
+        1, None, commit_round_count=3, buffer_round_count=3
+    )
+
+
+def test_a_growing_stream_lays_the_plans_blocks_as_their_commits_begin():
+    """Skoric's online decoder hands each block its rounds as they come."""
+    stream = _stream()
+    row = parallel_scheme.ParallelWindowScheme()
+
+    first = _laid(stream, 15)
+    later = stream.begun(16, None)
+
+    plan = row.plan_operation(1, 40, commit_round_count=3, buffer_round_count=3)
+    planned = _geometries(plan)
+    assert _spans(first) == planned[:2]
+    assert later == [plan.windows[2]]
+
+
+def test_a_streams_end_clips_its_blocks_as_the_plans_tail_does():
+    """A tail of more than d rounds past an A is the plan's terminal B."""
+    stream = _stream()
+    windows = _laid(stream, 22)
+    row = parallel_scheme.ParallelWindowScheme()
+
+    change = stream.close_tail(windows, 22)
+
+    plan = row.plan_operation(1, 22, commit_round_count=3, buffer_round_count=3)
+    assert _spans(windows) == _geometries(plan)
+    assert change.released == (windows[3],)
+
+
+def test_a_tail_of_at_most_d_rounds_past_an_a_is_a_short_terminal_b():
+    """The plan absorbs it into the A; a stream keeps the B it laid."""
+    stream = _stream()
+    windows = _laid(stream, 20)
+
+    change = stream.close_tail(windows, 20)
+
+    assert _spans(windows) == [
+        (1, 1, 6, 9),
+        (7, 7, 15, 15),
+        (13, 16, 18, 20),
+        (19, 19, 20, 20),
+    ]
+    assert change.relaid == (windows[2], windows[3])
+    assert change.released == (windows[3],)
+
+
+def test_a_stream_ending_in_an_a_commit_ends_that_a_there():
+    stream = _stream()
+    windows = _laid(stream, 17)
+
+    change = stream.close_tail(windows, 17)
+
+    spans = _spans(windows)
+    assert spans[-1] == (13, 16, 17, 17)
+    assert change.released == ()
+
+
+def test_a_b_block_counts_the_a_after_it_and_that_a_links_itself():
+    """The B waits for both A blocks; an A waits for none."""
+    stream = _stream()
+    first_a, b_block, second_a = _laid(stream, 16)
+
+    assert stream.readers_of(b_block) == (None,)
+    assert stream.reads_of(second_a) == ((1, 1),)
+    assert stream.readers_of(first_a) == ()
+    assert stream.reads_of(first_a) == ()
+    assert stream.reads_of(b_block) == ()
+
+
+def test_a_segment_edge_on_a_parallel_stream_is_refused():
+    stream = _stream()
+    windows = _laid(stream, 10)
+
+    with pytest.raises(ValueError, match="not implemented yet: parallel"):
+        stream.cut_after(windows, 8)

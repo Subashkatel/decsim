@@ -165,10 +165,10 @@ class WindowManager:
         window.boundary_in = self.window_interaction.initial_boundary_state(
             window_info
         )
-        if window.window_index > 0:
+        if _takes_the_boundary_before(window):
             previous_key = (window.stream_id, window.window_index - 1)
             self._link_to_previous_window(previous_key, window.key, window)
-        self._link_across_couplings(window)
+        self._link_to_readers(window)
         self.planner.attach_stream_model(window)
         self.retention.register_window(window.key, window)
 
@@ -185,15 +185,17 @@ class WindowManager:
         previous = self.planner.windows_by_key[previous_key]
         previous.dependents.append(key)
 
-    def _link_across_couplings(self, window: window_records.Window) -> None:
-        """The window waits for each region reading it, and is waited for.
+    def _link_to_readers(self, window: window_records.Window) -> None:
+        """The window waits for each window reading it, and is waited for.
 
-        The window laid second makes the link: a window counts every
-        reader it waits for when it is laid, laid or not, and a reader
-        laid later links itself to each window it reads that is laid. A
-        reader needs every round of the region it reads, and the window
-        on that region is laid at its first, so no reader has committed
-        when the window it reads is laid.
+        A reader is a coupled block's window reading its region
+        (region_layout.py), or the A block after a parallel B, which
+        reads the B's last rounds (schemes/parallel.py). The window laid
+        second makes the link: a window counts every reader it waits for
+        when it is laid, laid or not, and a reader laid later links
+        itself to each window it reads that is laid. A reader needs
+        rounds of the window it reads, which is laid by then, so no
+        reader has committed when the window it reads is laid.
         """
         for reader_key in self.planner.reader_keys_of(window):
             window.deps_remaining += 1
@@ -248,6 +250,14 @@ class WindowManager:
         for window in change.clipped:
             self.retention.reset_clipped_window_reads(window)
         self._replace_reads_of(change.relaid)
+        for window in change.released:
+            self._stop_waiting_for_one(window)
+
+    def _stop_waiting_for_one(self, window: window_records.Window) -> None:
+        """The window waits for one window fewer; its decode may start."""
+        window.deps_remaining -= 1
+        if window.queued and window.deps_remaining == 0:
+            self.requester.release_window(window.key)
 
     def _replace_reads_of(self, windows) -> None:
         """Re-point the retained reads of each window laid again."""
@@ -649,6 +659,18 @@ class WindowManager:
             position = indices.index(key[1])
             first_open = min(first_open, position)
         return first_open
+
+
+def _takes_the_boundary_before(window: window_records.Window) -> bool:
+    """Whether a stream window waits for the window before it.
+
+    Every one does but the first, and but one that reads rounds before
+    its commit: a Skoric A block decodes those rounds itself, and the B
+    block before it waits for it instead (schemes/parallel.py).
+    """
+    if window.window_index == 0:
+        return False
+    return window.start_round == window.commit_lo
 
 
 def _representative_patch(operation: program_records.Operation):

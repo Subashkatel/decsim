@@ -261,11 +261,14 @@ class TailChange:
 
     clipped windows were cut short at the tail and read nothing past
     their commit; relaid windows were laid again and read their whole
-    new extent.
+    new extent. released windows counted a window after them that the
+    tail ends before it is laid, a parallel B block's second A, and wait
+    for it no longer.
     """
 
     clipped: tuple = ()
     relaid: tuple = ()
+    released: tuple = ()
 
 
 @dataclass(frozen=True)

@@ -580,6 +580,19 @@ def test_sd6_noise_puts_idle_depolarising_at_the_rows_p():
 
 
 @needs_explorer
+def test_sd6_noise_hands_each_caller_its_own_copy_of_one_circuit():
+    noise = deltakit.SD6Noise()
+
+    first = workload_settings.memory_circuit(Z_MEMORY, 3, 3, 0.001, noise)
+    second = workload_settings.memory_circuit(Z_MEMORY, 3, 3, 0.001, noise)
+    first.append("TICK")
+    third = workload_settings.memory_circuit(Z_MEMORY, 3, 3, 0.001, noise)
+
+    assert first != second
+    assert second == third
+
+
+@needs_explorer
 def test_sd6_time_boundaries_lose_the_data_flip_and_readout_flip():
     noise = deltakit.SD6Noise()
 

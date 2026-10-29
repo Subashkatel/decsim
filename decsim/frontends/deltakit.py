@@ -5,6 +5,7 @@ history and measurement order. Deltakit is imported only here.
 """
 
 import dataclasses
+import functools
 import itertools
 import math
 from typing import TYPE_CHECKING, Optional
@@ -27,6 +28,9 @@ TEMPLATE_REPEAT_COUNT = TEMPLATE_ROUND_COUNT - 2
 ORDER_FREE_INSTRUCTIONS = frozenset(
     {"R", "RX", "RY", "X_ERROR", "Y_ERROR", "Z_ERROR", "DEPOLARIZE1"}
 )
+# the SD6 circuits a process keeps, by circuit text and p; a sweep's
+# tasks read one or two memories
+NOISY_CIRCUIT_LIMIT = 8
 
 if TYPE_CHECKING:
     import deltakit_circuit as circuit_api
@@ -177,38 +181,17 @@ class SD6Noise:
     def noisy(self, circuit: stim.Circuit, probability: float) -> stim.Circuit:
         """The noiseless circuit with SD6 at this row's p or the memory's.
 
-        Explorer parses Stim's text in its own fork of Stim; handed
-        stim's own circuit, it reads no instruction at all.
+        The noisy circuit is a function of the circuit's text and p
+        alone, and Explorer reads the circuit in Python, seconds at
+        d = 9, so a process makes each once and hands out copies: a
+        sweep's tasks share one memory.
         """
-        import deltakit_circuit as circuit_api
-        import deltakit_explorer.qpu as qpu
-        import deltakit_stim
-
         rate = probability
         if self.probability is not None:
             rate = self.probability
-        qubit_by_index = _deltakit_qubits(circuit)
         text = str(circuit)
-        forked = deltakit_stim.Circuit(text)
-        parsed = circuit_api.Circuit.from_stim_circuit(
-            forked, qubit_mapping=qubit_by_index
-        )
-        noise = qpu.SD6Noise(p=rate)
-        native_gates = qpu.ExhaustiveGateSet()
-        device = qpu.QPU(
-            parsed.qubits,
-            native_gates_and_times=native_gates,
-            noise_model=noise,
-            maximise_parallelism=False,
-        )
-        with_noise = device.add_noise_to_circuit(parsed)
-        index_by_qubit = {
-            qubit: index for index, qubit in qubit_by_index.items()
-        }
-        exported = with_noise.as_stim_circuit(qubit_mapping=index_by_qubit)
-        exported_text = str(exported)
-        noisy_circuit = stim.Circuit(exported_text)
-        return _sorted_order_free_targets(noisy_circuit)
+        made = _sd6_noisy(text, rate)
+        return made.copy()
 
 
 def _memory_code(
@@ -543,6 +526,39 @@ def _check_fragment_measurements(
         raise ValueError(
             "Deltakit final and single-round measurement widths must match"
         )
+
+
+@functools.lru_cache(maxsize=NOISY_CIRCUIT_LIMIT)
+def _sd6_noisy(text: str, rate: float) -> stim.Circuit:
+    """Explorer's SD6 at rate on the circuit of this text, kept, never lent.
+
+    Explorer parses Stim's text in its own fork of Stim; handed
+    stim's own circuit, it reads no instruction at all.
+    """
+    import deltakit_circuit as circuit_api
+    import deltakit_explorer.qpu as qpu
+    import deltakit_stim
+
+    circuit = stim.Circuit(text)
+    qubit_by_index = _deltakit_qubits(circuit)
+    forked = deltakit_stim.Circuit(text)
+    parsed = circuit_api.Circuit.from_stim_circuit(
+        forked, qubit_mapping=qubit_by_index
+    )
+    noise = qpu.SD6Noise(p=rate)
+    native_gates = qpu.ExhaustiveGateSet()
+    device = qpu.QPU(
+        parsed.qubits,
+        native_gates_and_times=native_gates,
+        noise_model=noise,
+        maximise_parallelism=False,
+    )
+    with_noise = device.add_noise_to_circuit(parsed)
+    index_by_qubit = {qubit: index for index, qubit in qubit_by_index.items()}
+    exported = with_noise.as_stim_circuit(qubit_mapping=index_by_qubit)
+    exported_text = str(exported)
+    noisy_circuit = stim.Circuit(exported_text)
+    return _sorted_order_free_targets(noisy_circuit)
 
 
 def _deltakit_qubits(circuit: stim.Circuit) -> dict:

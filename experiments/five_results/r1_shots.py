@@ -31,12 +31,9 @@ config = sweeps.load_beside(__file__, "config.py")
 DECODINGS = ("weak_alone", "strong_alone")
 DISTANCES = (9,)
 PHYSICAL_ERROR_PROBABILITIES = (0.003,)
-SHOTS = 10_000
-# the first evaluation seed; the calibration reads the seeds below it
-EVALUATION_FIRST_SEED = 10_000
 
 stop = decsim.CollectionSettings(
-    max_shots=SHOTS, first_seed=EVALUATION_FIRST_SEED
+    max_shots=config.EVALUATION_SHOTS, first_seed=config.EVALUATION_FIRST_SEED
 )
 sweep = decsim.Sweep(
     "five_results_r1_shots",

@@ -33,7 +33,6 @@ import decsim.topology.graph as graph
 config = sweeps.load_beside(__file__, "config.py")
 DISTANCES = (9,)
 PHYSICAL_ERROR_PROBABILITIES = (0.003,)
-CALIBRATION_SHOTS = 10_000
 
 
 def machine(distance: int, physical_error_probability: float) -> graph.Machine:
@@ -42,7 +41,7 @@ def machine(distance: int, physical_error_probability: float) -> graph.Machine:
     return config.recording_gap(weak)
 
 
-stop = decsim.CollectionSettings(max_shots=CALIBRATION_SHOTS)
+stop = decsim.CollectionSettings(max_shots=config.CALIBRATION_SHOTS)
 sweep = decsim.Sweep(
     "five_results_gap_calibration",
     machine,

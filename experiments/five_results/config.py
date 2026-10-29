@@ -9,7 +9,8 @@
 
 The basic case's machine (experiments/basic_case/config.py) with the
 values of specs/adaptive-switching/values.md where they differ: rounds of
-1.1 us, and the strong decoder correlated matching on one core of a CPU
+1.1 us, the chip's syndrome buffer moving a 32-bit word a cycle each
+way, and the strong decoder correlated matching on one core of a CPU
 host, over Backline's RoCE v2 link, at the paper's average time per
 round. A fixed time has no tail and does not slow down in a burst, so it
 serves the pilots at steady noise only (experiments.md, decision D4).
@@ -24,6 +25,7 @@ import decsim.escalation.threshold_sources as threshold_sources
 import decsim.experiments.sweeps as sweeps
 import decsim.presets.machines as machines
 import decsim.qpu.flip_stream_device as flip_stream_device
+import decsim.syndrome_buffer.ported_syndrome_buffer as ported_syndrome_buffer
 import decsim.topology.graph as graph
 
 basic_case = sweeps.load_beside(__file__, "../basic_case/config.py")
@@ -40,6 +42,11 @@ CORRELATED_MATCHING_ROUND_MICROSECONDS_BY_DISTANCE = {
 # values.md section 2: Backline's RoCE v2 echo to a CPU, 2.305 us a round
 # trip (2609.09270 p.13)
 STRONG_LINK = "roce_cpu"
+# values.md section 2, syndrome buffer: the bus to the decoder moves
+# 32-bit words (Caune et al. 2410.05202 p.10, a 32-bit WISHBONE bus), one
+# a cycle in and one a cycle out (the meeting's rule)
+BUFFER_WORD = "32 bits"
+BUFFER_ACCESS = "1 cycle"
 # the rounds one strong decode reads, in code distances: a sliding
 # window's d committed and d looked ahead (values.md section 6), also
 # the window speculation redoes; the double window's r_com + 2 r_buf
@@ -49,6 +56,12 @@ STRONG_DECODE_DISTANCES_BY_SCHEME = {
     "speculation": 2,
     "double": 3,
 }
+# the saved datasets' seeds (experiments.md, How we run them): the
+# calibration seeds, 0 to 9,999, set the thresholds, and every result
+# reads the evaluation seeds from 10,000, so the two never meet
+CALIBRATION_SHOTS = 10_000
+EVALUATION_FIRST_SEED = CALIBRATION_SHOTS
+EVALUATION_SHOTS = 10_000
 # the cells metadata() writes under the names the reports read
 POINT_CELLS = ("distance", "physical_error_probability")
 
@@ -68,7 +81,7 @@ def alone(
         strong_link=STRONG_LINK,
         strong_pool=strong_pool,
     )
-    return with_paper_rounds(basic, distance)
+    return on_paper_values(basic, distance)
 
 
 def switching(
@@ -100,7 +113,7 @@ def switching(
     schemed = basic_case.with_scheme(basic, sized_rule)
     threshold = threshold_sources.FixedThreshold.Settings(threshold_decibels)
     thresholded = schemed.with_settings(machines.SWITCHING, threshold=threshold)
-    return with_paper_rounds(thresholded, distance)
+    return on_paper_values(thresholded, distance)
 
 
 def correlated_matching_pool(
@@ -118,6 +131,12 @@ def correlated_matching_pool(
     decode_round_count = STRONG_DECODE_DISTANCES_BY_SCHEME[scheme] * distance
     decode_microseconds = round_microseconds * decode_round_count
     return basic_case.correlated_matching_pool(f"{decode_microseconds:g}us")
+
+
+def on_paper_values(machine: graph.Machine, distance: int) -> graph.Machine:
+    """The basic case's machine on the paper's rounds and buffer."""
+    with_rounds = with_paper_rounds(machine, distance)
+    return with_chip_buffer(with_rounds)
 
 
 def with_paper_rounds(machine: graph.Machine, distance: int) -> graph.Machine:
@@ -138,6 +157,28 @@ def with_paper_rounds(machine: graph.Machine, distance: int) -> graph.Machine:
         reaction_deadline_microseconds=logical_cycle_microseconds,
     )
     return dataclasses.replace(with_rounds, observation=observation)
+
+
+def with_chip_buffer(machine: graph.Machine) -> graph.Machine:
+    """The weak pool's syndrome buffer on the paper's bus, if it has one.
+
+    One write port and one read port, on the chip's clock, each moving
+    a BUFFER_WORD word every BUFFER_ACCESS, so a round of a few words is
+    written in as many cycles. It is unbounded and its peak use is logged, from
+    which the pilot sets its size (values.md section 2). The strong
+    pool's store is the host's memory, landed by the link whose measured
+    round trip holds the loading.
+    """
+    part_names = [part.name for part in machine.parts]
+    if machines.WEAK_STORE not in part_names:
+        return machine
+    chip_buffer = basic_case.record(
+        ported_syndrome_buffer.PortedSyndromeBufferSettings,
+        clock=basic_case.constants.clocks.chip,
+        word=BUFFER_WORD,
+        per_access=BUFFER_ACCESS,
+    )
+    return machine.with_record(machines.WEAK_STORE, chip_buffer)
 
 
 def recording_gap(machine: graph.Machine) -> graph.Machine:

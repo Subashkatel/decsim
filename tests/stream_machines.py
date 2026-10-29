@@ -23,6 +23,7 @@ import decsim.qpu.flip_stream_device as flip_stream_device
 import decsim.qpu.settings as qpu_settings
 import decsim.records.program as program_records
 import decsim.topology.graph as graph
+import decsim.windows.schemes.parallel as parallel_scheme
 import tests.qpu.memory_programs as memory_programs
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
@@ -67,6 +68,14 @@ def stream_graph(run: StreamRun, folds: bool) -> graph.Machine:
     if not run.escalates:
         return with_weak
     return switching(with_weak)
+
+
+def on_parallel_windows(machine: graph.Machine) -> graph.Machine:
+    """The machine on Skoric's parallel blocks (schemes/parallel.py)."""
+    windows = machine.held("windows")
+    scheme = parallel_scheme.ParallelWindowScheme.Settings()
+    parallel_windows = dataclasses.replace(windows, scheme=scheme)
+    return machine.with_held("windows", parallel_windows)
 
 
 def stream_workload(program, rounds: int) -> workload_settings.WorkloadSettings:

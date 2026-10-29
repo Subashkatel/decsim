@@ -7,7 +7,9 @@ or sharing a strong pool, answer every window as one pool does
 (tests/patch_pools.py: a router decides where a window decodes, never
 what it reads). The double window streams: with nothing escalated it
 answers as union-find alone does, each window it escalates absorbs the
-windows its region covers, and checkpoints beside it are refused.
+windows its region covers, and checkpoints beside it are refused. On
+parallel windows a seed gives one record, and the queue keeps bounded
+from the unit count Skoric et al. give (2209.08552, Eq. 2).
 """
 
 import dataclasses
@@ -31,8 +33,12 @@ import decsim.parameters.assignments as assignments
 import decsim.presets.experiment_one as experiment_one
 import decsim.presets.machines as machines
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.windows.schemes.parallel as parallel_scheme
 import tests.experiments.run_files as run_files
 import tests.patch_pools as patch_pools
+from decsim.decoders.minimum_weight_perfect_matching import (
+    decoder as minimum_weight_perfect_matching,
+)
 
 RUN_FILE = """
 import decsim
@@ -196,6 +202,53 @@ def test_patches_streamed_beside_a_shared_strong_pool_answer_as_one_pair():
     assert shared_answers == pair_answers
     assert stores_answers == pair_answers
     assert shared_pools == {"weak", "w1", "w2", "strong"}
+
+
+def _parallel(machine):
+    """The machine on Skoric's parallel windows (schemes/parallel.py)."""
+    scheme = parallel_scheme.ParallelWindowScheme.Settings()
+    return machine.with_settings(machines.WINDOWS, scheme=scheme)
+
+
+def test_a_stream_on_parallel_windows_gives_one_record_for_a_seed():
+    task = _task()
+    task = _with(task, _parallel)
+
+    first = stream_command.stream_record(task, 200, 20, 7)
+    second = stream_command.stream_record(task, 200, 20, 7)
+
+    assert first == second
+    assert first["measurement"]["decoded_windows"] > 30
+
+
+# A unit decodes a window in this time. With 1 us rounds at d = 3, the
+# units keep up from 2 T / (4 d t) = 2.5 of them (Skoric 2209.08552,
+# Eq. 2): each 12 rounds bring two windows to decode. Then 300 rounds
+# bring 50 windows, and two units decode 40 of them.
+LAW_LATENCY_MICROSECONDS = 15.0
+
+
+def _queue_peak(unit_count: int, rounds: int) -> int:
+    """The most windows queued on a parallel stream of the rounds."""
+    algorithm = minimum_weight_perfect_matching.PyMatchingDecoder.Settings(
+        preset_latency_microseconds=LAW_LATENCY_MICROSECONDS
+    )
+    task = _task()
+    task = _with(task, _parallel)
+    machine = task.machine.with_settings(
+        machines.WEAK_POOL, algorithm=algorithm, unit_count=unit_count
+    )
+    task = decsim.Task("memory", machine)
+    record = stream_command.stream_record(task, rounds, 0, 0)
+    return record["measurement"]["max_queued_windows"]
+
+
+def test_parallel_windows_keep_up_from_the_unit_count_skoric_gives():
+    too_few = [_queue_peak(2, rounds) for rounds in (300, 600)]
+    enough = [_queue_peak(3, rounds) for rounds in (300, 600)]
+
+    assert too_few[1] - too_few[0] == 10
+    assert enough[1] == enough[0]
 
 
 def _observation(machine, **changes):

@@ -69,6 +69,38 @@ def test_a_long_stream_keeps_a_bounded_number_of_windows():
     assert len(machine.windows.ledger.contributions) <= kept_bound
 
 
+# about 300 parallel blocks, decoded alone: switching refuses the row
+PARALLEL_RUN = stream_machines.StreamRun(900, 0.5, 1, False)
+
+
+def _parallel_built_and_run(folds: bool):
+    graph = stream_machines.stream_graph(PARALLEL_RUN, folds)
+    parallel_graph = stream_machines.on_parallel_windows(graph)
+    machine = machine_module.Machine.build(parallel_graph, SEED)
+    result = machine.run()
+    return machine, result
+
+
+def test_a_parallel_stream_that_lets_blocks_go_decides_as_one_that_keeps():
+    """A B block finishes after the A after it, so the final prefix lags."""
+    whole_machine, whole = _parallel_built_and_run(folds=False)
+
+    machine, lean = _parallel_built_and_run(folds=True)
+
+    stream_id = stream_machines.STREAM_ID
+    whole_frame = whole_machine.control.pauli_frame
+    frame = machine.control.pauli_frame
+    planner = machine.windows.planner
+    kept_bound = window_release.KEPT_FINAL_WINDOWS + window_release.LET_GO_EVERY
+    assert lean.operation_results == whole.operation_results
+    assert lean.fully_done_ticks == whole.fully_done_ticks
+    assert frame.frame_for_stream(stream_id) == (
+        whole_frame.frame_for_stream(stream_id)
+    )
+    assert planner.window_count_of(stream_id) > 4 * kept_bound
+    assert len(planner.windows_by_key) <= kept_bound
+
+
 def test_reading_a_window_let_go_says_it_was_let_go():
     machine, _result = _built_and_run(folds=True)
 

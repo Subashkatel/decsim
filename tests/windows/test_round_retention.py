@@ -96,18 +96,27 @@ def _all_to_weak(_stream_id) -> window_records.PoolId:
 
 
 def _strong_retention(
-    strong_store, rounds_arrived: int, entry_of=_all_to_weak, other_entries=()
+    strong_store,
+    rounds_arrived: int,
+    entry_of=_all_to_weak,
+    other_entries=(),
+    sealed_round_count=None,
 ):
     """A retention whose strong syndrome buffer is the one under test.
 
     entry_of names each stream's entry pool, the router's answer;
     other_entries are (pool, store) pairs of entry pools past weak.
+    sealed_round_count is the stream's last round once it is sealed;
+    None leaves it growing.
     """
     planner = types.SimpleNamespace(successors_by_stream={1: []})
+    is_sealed = sealed_round_count is not None
     tracker = types.SimpleNamespace(
         effective_round_count_for_window=lambda _stream_id, _window: 9,
         rounds_arrived=lambda _stream_id: rounds_arrived,
         strong_rounds_arrived=lambda _stream_id, _store: 0,
+        is_sealed=lambda _stream_id: is_sealed,
+        round_count_for_window=lambda _stream_id: sealed_round_count,
     )
     weak_store = _store()
     retention = round_retention.RoundRetention(
@@ -456,10 +465,14 @@ def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
     assert store.retained_fragments((1, 9)) is None
 
 
-def _absorbing_retention(absorbed_rounds, request_rounds, restart_rounds):
+def _absorbing_retention(
+    absorbed_rounds, request_rounds, restart_rounds, sealed_round_count=None
+):
     """Both stores holding one absorbed window, a request and a restart."""
     store = _store()
-    retention = _strong_retention(store, rounds_arrived=0)
+    retention = _strong_retention(
+        store, rounds_arrived=0, sealed_round_count=sealed_round_count
+    )
     absorbed = decoding_records.PotentialStrong((1, 1))
     request = decoding_records.PendingStrong("request")
     restart = decoding_records.PotentialStrong((1, 2))
@@ -510,6 +523,24 @@ def test_an_absorbed_read_past_the_first_round_that_nobody_holds_is_refused():
     )
     with pytest.raises(RuntimeError, match="are held by neither the strong"):
         retention.release_absorbed_strong_hold((1, 1), (1, 2), request)
+
+
+def test_an_absorbed_read_past_a_sealed_streams_end_needs_no_holder():
+    """A stream window laid before the seal may name rounds never run.
+
+    The absorbed window would have read rounds 7 to 12, but the stream
+    was sealed at round 10, so rounds 11 and 12 never arrive and need
+    no reader: the strong window reads 7 to 9, the restart window 10.
+    """
+    absorbed_rounds = range(7, 13)
+    request_rounds = range(7, 10)
+    restart_rounds = range(10, 11)
+    retention, store, request = _absorbing_retention(
+        absorbed_rounds, request_rounds, restart_rounds, sealed_round_count=10
+    )
+    retention.release_absorbed_strong_hold((1, 1), (1, 2), request)
+    absorbed = decoding_records.PotentialStrong((1, 1))
+    assert not store.has_hold(absorbed)
 
 
 DEEP_POOL = window_records.PoolId("deep")

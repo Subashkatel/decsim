@@ -373,8 +373,8 @@ def test_a_b_block_whose_later_a_reads_past_the_checkpoint_closes_again():
     commits 7 to 15, the second A commits 16 to 18 reading 13 to 21. At
     17 the B reads only earlier rounds but takes the second A's boundary,
     which reads round 17, so the first A alone is kept. The second A is
-    decided first, on its own rounds 13 to 17 (rounds 13 start at
-    detector 100), then the B (round 7 starts at 44) with the boundary.
+    decided first, on its own rounds 13 to 17 (round 13 starts at
+    detector 92), then the B (round 7 starts at 44) with the boundary.
     """
     closer = _RecordingCloser()
     listener = checkpoints_module.Checkpoints(17, closer)
@@ -395,7 +395,7 @@ def test_a_b_block_whose_later_a_reads_past_the_checkpoint_closes_again():
     second_a_syndrome, b_syndrome = closer.syndromes
     second_a_bits = second_a_syndrome.values()
     flipped = [detector for detector, bit in b_syndrome.items() if bit]
-    assert min(second_a_syndrome) == 100
+    assert min(second_a_syndrome) == 92
     assert not any(second_a_bits)
     assert min(b_syndrome) == 44
     assert flipped == [45]

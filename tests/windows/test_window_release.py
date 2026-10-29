@@ -69,8 +69,9 @@ def test_a_long_stream_keeps_a_bounded_number_of_windows():
     assert len(machine.windows.ledger.contributions) <= kept_bound
 
 
-# about 300 parallel blocks, decoded alone: switching refuses the row
-PARALLEL_RUN = stream_machines.StreamRun(900, 0.5, 1, False)
+# 400 parallel blocks at d = 3, an A and a B every 12 rounds, past four
+# times the kept bound; decoded alone: switching refuses the row
+PARALLEL_RUN = stream_machines.StreamRun(2400, 0.5, 1, False)
 
 
 def _parallel_built_and_run(folds: bool):

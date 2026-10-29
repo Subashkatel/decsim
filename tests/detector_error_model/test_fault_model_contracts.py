@@ -107,6 +107,30 @@ def test_a_read_only_matrix_made_elsewhere_is_still_copied():
     assert dense.tolist() == [[1, 0], [0, 1]]
 
 
+def test_a_moved_model_reads_its_names_and_flips_later_and_shares_the_rest():
+    placed = placed_model()
+
+    moved = placed.moved(100, 10)
+
+    assert moved.source_fault_ids == (104, 109)
+    assert moved.boundary_flips == {0: (10, 11, 17)}
+    assert moved.boundary_flips.get(1, ()) == ()
+    assert moved.check is placed.check
+    assert moved.priors is placed.priors
+    assert placed.source_fault_ids == (4, 9)
+
+
+def test_moved_ids_equal_and_hash_as_the_tuple_they_stand_for():
+    moved = fault_model_contracts.MovedIds((4, 9), 100)
+
+    assert moved == (104, 109)
+    assert (104, 109) == moved
+    assert hash(moved) == hash((104, 109))
+    assert list(moved) == [104, 109]
+    assert moved[1] == 109
+    assert len(moved) == 2
+
+
 def test_a_placed_model_is_frozen_for_every_reader():
     placed = placed_model()
     assert placed.priors.flags.writeable is False

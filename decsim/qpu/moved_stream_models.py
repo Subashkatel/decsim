@@ -42,7 +42,6 @@ faults for every reader.
 
 import collections
 import dataclasses
-import itertools
 from collections.abc import Callable, Hashable, Mapping
 from typing import Optional
 
@@ -653,30 +652,7 @@ def _moved_faults(
     if faults is None:
         return None
     name_shift = move.rounds * NAME_STRIDE
-    names = _plus(faults.source_fault_ids, name_shift)
-    boundary_flips = _moved_flips(faults.boundary_flips, move.detectors)
-    return dataclasses.replace(
-        faults, source_fault_ids=names, boundary_flips=boundary_flips
-    )
-
-
-def _moved_flips(boundary_flips: Mapping, detectors: int) -> dict:
-    """Each owned column's detectors, moved in one array operation.
-
-    A window hands off thousands of short tuples, so they are moved as
-    one flat array and cut back into tuples.
-    """
-    every_flips = boundary_flips.values()
-    flat = itertools.chain.from_iterable(every_flips)
-    flat_flips = tuple(flat)
-    moved = _plus(flat_flips, detectors)
-    moved_flips = {}
-    start = 0
-    for column, flips in boundary_flips.items():
-        end = start + len(flips)
-        moved_flips[column] = moved[start:end]
-        start = end
-    return moved_flips
+    return faults.moved(name_shift, move.detectors)
 
 
 def _moved_coordinate_rows(

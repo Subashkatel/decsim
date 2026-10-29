@@ -10,11 +10,12 @@ are one uint8 csc column per fault, what qLDPC's DetectorErrorModelArrays
 and PyMatching's from_check_matrix read.
 """
 
+import copy
 import dataclasses
 import enum
 import types
 import weakref
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Optional
 
 # the matrices frozen_sparse_columns made, by id, held weakly so a dead
@@ -112,6 +113,8 @@ class PlacedFaultModel:
     handoff alike. `source_fault_ids` maps every column to its stable identity
     in the source's fault catalog. Finite sources use catalog positions;
     growing sources preserve identities when their catalog order changes.
+    A moved model (moved) holds both as MovedIds and MovedFlips, which
+    read as the tuple and the mapping they stand for.
     """
 
     representation: FaultRepresentation
@@ -119,8 +122,8 @@ class PlacedFaultModel:
     priors: object
     observables: object
     owned: object
-    source_fault_ids: tuple[int, ...]
-    boundary_flips: dict[int, tuple[int, ...]]
+    source_fault_ids: Sequence[int]
+    boundary_flips: Mapping[int, tuple[int, ...]]
 
     def __post_init__(self) -> None:
         frozen_priors = _frozen_array(self.priors)
@@ -135,14 +138,93 @@ class PlacedFaultModel:
         object.__setattr__(self, "source_fault_ids", source_fault_ids)
         flips_by_column = {}
         for column, detector_ids in self.boundary_flips.items():
-            # map(int, ...) is the same ints, a third of the time a
-            # generator takes over a moved stream window's handoffs
+            # map(int, ...) is the same ints, in a third of the time a
+            # generator takes over a window's handoffs
             ints = map(int, detector_ids)
             flips = tuple(ints)
             flips_by_column[int(column)] = flips
         frozen_flips = types.MappingProxyType(flips_by_column)
         object.__setattr__(self, "boundary_flips", frozen_flips)
         _check_column_counts(self)
+
+    def moved(self, name_shift: int, detector_shift: int) -> "PlacedFaultModel":
+        """The same columns, each name and handed-off detector later.
+
+        A stream window's model is a short circuit's moved in time
+        (qpu/moved_stream_models.py). A move changes labels alone, so
+        every check above still holds: the frozen arrays are shared, and
+        the names and detectors are added when read. Written out, they
+        were 6 MB a distance 9 window, kept by every waiting window.
+        """
+        moved = copy.copy(self)
+        names = MovedIds(self.source_fault_ids, name_shift)
+        flips = MovedFlips(self.boundary_flips, detector_shift)
+        object.__setattr__(moved, "source_fault_ids", names)
+        object.__setattr__(moved, "boundary_flips", flips)
+        return moved
+
+
+class MovedIds(Sequence):
+    """A tuple of ints, each later by one amount, added when read.
+
+    It equals and hashes as the tuple it stands for. An index is one
+    position; a slice is refused, as no reader takes one.
+    """
+
+    __slots__ = ("_ids", "_amount")
+
+    def __init__(self, ids: Sequence[int], amount: int) -> None:
+        self._ids = ids
+        self._amount = amount
+
+    def __getitem__(self, index: int) -> int:
+        return self._ids[index] + self._amount
+
+    def __len__(self) -> int:
+        return len(self._ids)
+
+    def __iter__(self) -> Iterator[int]:
+        return map(self._amount.__add__, self._ids)
+
+    def __eq__(self, other: object) -> bool:
+        written = tuple(self)
+        return written == other
+
+    def __hash__(self) -> int:
+        written = tuple(self)
+        return hash(written)
+
+    def __repr__(self) -> str:
+        return f"MovedIds({self._ids!r}, {self._amount})"
+
+
+class MovedFlips(Mapping):
+    """Each owned column's detectors, each later by one amount when read.
+
+    It equals the mapping it stands for (Mapping's own equality).
+    """
+
+    __slots__ = ("_flips", "_amount")
+
+    def __init__(
+        self, flips: Mapping[int, tuple[int, ...]], amount: int
+    ) -> None:
+        self._flips = flips
+        self._amount = amount
+
+    def __getitem__(self, column: int) -> tuple[int, ...]:
+        detectors = self._flips[column]
+        moved = map(self._amount.__add__, detectors)
+        return tuple(moved)
+
+    def __len__(self) -> int:
+        return len(self._flips)
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self._flips)
+
+    def __repr__(self) -> str:
+        return f"MovedFlips({self._flips!r}, {self._amount})"
 
 
 @dataclasses.dataclass(frozen=True)

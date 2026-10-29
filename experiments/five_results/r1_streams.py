@@ -15,12 +15,18 @@ Usage
 -----
 
 From this folder, with this checkout first on the path (STYLE.md), one
-stream of 100,000 rounds each, on the evaluation seed 1:
+stream each on the evaluation seed 1: union-find on 100,000 rounds, and
+correlated matching on 10,000. Each window waiting in a growing line
+keeps its rounds, so correlated matching's memory grows with its line:
+100,000 rounds passed 32 GB at d = 9. Its growth rate is a slope, which
+10,000 rounds measure as well.
 
 ```
 export PYTHONPATH=$PWD/../..
 python -m decsim stream r1_streams.py --only weak_alone_d9_p0.003 \
   --rounds 100000 --warmup 1000 --seed 1 --out weak_alone_s1.json
+python -m decsim stream r1_streams.py --only strong_alone_d9_p0.003 \
+  --rounds 10000 --warmup 1000 --seed 1 --out strong_alone_s1.json
 ```
 """
 

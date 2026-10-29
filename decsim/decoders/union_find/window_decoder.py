@@ -14,6 +14,7 @@ The growth, the forest and the peeling run in the compiled decoder
 are records in decsim/records/decoder_evidence.py.
 """
 
+import collections
 import math
 from typing import Optional
 
@@ -28,6 +29,36 @@ import decsim.records.fault_model_contracts as fault_models
 BOUNDARY = -1
 # the compiled decoder counts lengths, ticks and walk distances in int64
 _LARGEST_HALF_TICK_COUNT = 2**63 - 1
+# shared_graph's graphs by their models' content, the least recently
+# used dropped past this many
+_SHARED_GRAPH_LIMIT = 64
+_SHARED_GRAPHS: collections.OrderedDict = collections.OrderedDict()
+
+
+def shared_graph(
+    faults: fault_models.PlacedFaultModel,
+    *,
+    location: str,
+    weight_step: float,
+) -> evidence_records.UnionFindGraph:
+    """graph_from_model's graph, built once for every model of one content.
+
+    A stream moves one window's model along its rounds
+    (qpu/moved_stream_models.py): a moved model renames its faults and
+    detectors but keeps the window's columns, priors and ownership,
+    which are all graph_from_model reads, so its windows share one
+    graph. The key is those arrays' bytes, compared in full.
+    """
+    key = _content_key(faults, weight_step)
+    graph = _SHARED_GRAPHS.get(key)
+    if graph is not None:
+        _SHARED_GRAPHS.move_to_end(key)
+        return graph
+    graph = graph_from_model(faults, location=location, weight_step=weight_step)
+    _SHARED_GRAPHS[key] = graph
+    if len(_SHARED_GRAPHS) > _SHARED_GRAPH_LIMIT:
+        _SHARED_GRAPHS.popitem(last=False)
+    return graph
 
 
 def graph_from_model(
@@ -298,3 +329,30 @@ def _logical_observables(
         for logical_index, flips in enumerate(column):
             parities[logical_index] ^= flips
     return tuple(parities)
+
+
+def _content_key(faults: fault_models.PlacedFaultModel, weight_step) -> tuple:
+    """Everything graph_from_model reads, as hashable bytes.
+
+    A placed model's matrices are uint8 csc with sorted indices and no
+    repeats (fault_model_contracts.frozen_sparse_columns), so equal
+    bytes are equal matrices.
+    """
+    check = _sparse_key(faults.check)
+    observables = _sparse_key(faults.observables)
+    priors = _array_key(faults.priors)
+    owned = _array_key(faults.owned)
+    return (weight_step, check, observables, priors, owned)
+
+
+def _sparse_key(matrix) -> tuple:
+    data = matrix.data.tobytes()
+    indices = matrix.indices.tobytes()
+    indptr = matrix.indptr.tobytes()
+    return (matrix.shape, data, indices, indptr)
+
+
+def _array_key(values) -> tuple:
+    array = numpy.asarray(values)
+    raw = array.tobytes()
+    return (array.dtype.str, array.shape, raw)

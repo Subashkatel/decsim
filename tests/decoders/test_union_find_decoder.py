@@ -317,3 +317,46 @@ def test_a_weight_step_whose_sums_would_wrap_the_compiled_counters_is_refused():
         ring_at(1e-18)
 
     assert len(fine_enough.edges) == 3
+
+
+def _placed_ring(priors, source_fault_ids) -> fault_models.PlacedFaultModel:
+    check = numpy.asarray(((1, 0, 1), (1, 1, 0), (0, 1, 1)), numpy.uint8)
+    observables = numpy.asarray(((1, 0, 0),), numpy.uint8)
+    owned = numpy.ones(3, dtype=bool)
+    prior_array = numpy.asarray(priors)
+    return fault_models.PlacedFaultModel(
+        representation=GRAPHLIKE,
+        check=check,
+        priors=prior_array,
+        observables=observables,
+        owned=owned,
+        source_fault_ids=source_fault_ids,
+        boundary_flips={},
+    )
+
+
+def test_models_of_the_same_columns_share_one_graph_and_others_do_not():
+    """A stream's moved window keeps its columns under new fault names.
+
+    Its graph is the template's own object, equal to a graph built
+    afresh; a model whose prior differs gets a graph of its own.
+    """
+    template = _placed_ring((0.1, 0.1, 0.1), (0, 1, 2))
+    moved = _placed_ring((0.1, 0.1, 0.1), (30, 31, 32))
+    likelier = _placed_ring((0.1, 0.2, 0.1), (30, 31, 32))
+
+    first = window_decoder.shared_graph(
+        template, location="ring", weight_step=0.1
+    )
+    again = window_decoder.shared_graph(moved, location="ring", weight_step=0.1)
+    other = window_decoder.shared_graph(
+        likelier, location="ring", weight_step=0.1
+    )
+    afresh = window_decoder.graph_from_model(
+        moved, location="ring", weight_step=0.1
+    )
+
+    assert again is first
+    assert again == afresh
+    assert other is not first
+    assert other.edges != first.edges

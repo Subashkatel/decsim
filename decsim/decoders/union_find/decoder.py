@@ -93,9 +93,13 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         faults: fault_models.PlacedFaultModel,
         model: fault_models.WindowErrorModel,
     ) -> evidence_records.UnionFindGraph:
-        """The immutable weighted graph of one placed model."""
+        """The immutable weighted graph of one placed model.
+
+        Shared with every placed model of the same columns, as a stream's
+        moved windows are (window_decoder.shared_graph).
+        """
         del model
-        return window_decoder.graph_from_model(
+        return window_decoder.shared_graph(
             faults,
             location="Union-Find window model",
             weight_step=self.weight_step,

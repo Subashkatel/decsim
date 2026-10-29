@@ -342,10 +342,12 @@ def _retention(
     A switching run keeps every round a strong redo would read.
     """
     formation_reads = plan.formation_reads
+    buffering = plan.run_plan.buffering
     return round_retention_module.RoundRetention(
         is_strong_context_retained=is_switching,
         primary_tier=window_tier,
         strong_side_seat=formation_reads.strong_side_seat,
+        restart_reread_buffer_regions=buffering.restart_reread_buffer_regions,
     )
 
 

@@ -95,6 +95,7 @@ class RoundRetention:
         is_strong_context_retained: bool,
         primary_tier: window_records.PoolId,
         strong_side_seat: Optional[str] = None,
+        restart_reread_buffer_regions: Optional[int] = None,
     ) -> None:
         self.is_strong_context_retained = is_strong_context_retained
         self.primary_tier = primary_tier
@@ -102,6 +103,10 @@ class RoundRetention:
         # that forms the detection events (detection_events.formed_at),
         # None when none does
         self.strong_side_seat = strong_side_seat
+        # the re-read width a window laid while the run goes claims for a
+        # restart, None when no strong window absorbs weak ones
+        # (records/decoding.py SyndromeBufferingPlan)
+        self.restart_reread_buffer_regions = restart_reread_buffer_regions
         # each escalate edge, by its source pool: a pool leaves by at
         # most one edge (topology/part_kinds.py), so its source names it
         self.edge_by_source: dict = {}
@@ -246,6 +251,7 @@ class RoundRetention:
         potential = decoding_records.PotentialStrong(key)
         held = primary_reads + strong_context
         self._hold_on_the_chain(potential, held)
+        self._hold_restart_reads(key, window, store)
         self._hold_later_stream_reads(window)
         self._release_claimed_copies(window, store)
 
@@ -780,6 +786,31 @@ class RoundRetention:
             )
 
     # ---- private
+
+    def _hold_restart_reads(
+        self,
+        key: tuple,
+        window: window_records.Window,
+        store: ports.RetainedRounds,
+    ) -> None:
+        """Under an absorbing strong window, a bounded window claims a re-read.
+
+        The plan places this claim on its windows up front
+        (frontends/planner.py _hold_restart_reads); a stream's window,
+        laid as its rounds arrive, places it here, by the same rule.
+        """
+        if self.restart_reread_buffer_regions is None:
+            return
+        if not window_records.is_bounded_by_its_stream(window):
+            return
+        lower, upper = window_records.restart_claim_bounds(
+            window, self.restart_reread_buffer_regions
+        )
+        round_keys = self.read_keys_for_bounds(
+            window.stream_id, lower, upper, window
+        )
+        restart = decoding_records.PotentialRestart(key)
+        store.register_hold(restart, round_keys)
 
     def _hold_later_stream_reads(self, window: window_records.Window) -> None:
         """Keep what the stream's windows after this one read before it.

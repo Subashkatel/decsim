@@ -430,6 +430,32 @@ def restart_reread_round_count(
     return reread_buffer_regions * buffer_round_count
 
 
+def restart_claim_bounds(window: "Window", reread_buffer_regions: int) -> tuple:
+    """(first round, last round) a restart of the window would read.
+
+    An earlier escalation may re-slice the window as its restart window,
+    which re-reads reread_buffer_regions of its buffer regions before its
+    commit (Toshio et al. 2510.25222 Sec. III C) and reads on to its own
+    last round; round one closes the span.
+    """
+    look_ahead = window.buffer_hi - window.commit_hi
+    buffer_rounds = max(0, look_ahead)
+    reread_rounds = restart_reread_round_count(
+        reread_buffer_regions, buffer_rounds
+    )
+    lower_start = window.commit_lo - reread_rounds
+    lower = max(1, lower_start)
+    return lower, window.buffer_hi
+
+
+def is_bounded_by_its_stream(window: "Window") -> bool:
+    """Whether an earlier window of its own stream bounds the window."""
+    for dependency in window.deps:
+        if dependency[0] == window.stream_id:
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class StrongRegionPlan:
     """Geometry for one deferred strong decode."""

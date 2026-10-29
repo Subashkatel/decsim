@@ -365,10 +365,15 @@ class SyndromeBufferingPlan:
     """The holds every window places on the stores.
 
     A hold names the rounds a consumer keeps alive.
+    restart_reread_buffer_regions is the re-read width a window bounded
+    by its stream claims for a restart, the absorbing strong window's,
+    and None when no strong window absorbs weak ones; a stream's windows
+    laid while the run goes claim it too (windows/round_retention.py).
     """
 
     weak_holds: tuple
     potential_holds: tuple
+    restart_reread_buffer_regions: Optional[int] = None
 
 
 @dataclass(frozen=True)

@@ -333,8 +333,10 @@ def _plan_syndrome_buffering(
     """Plan logical holds over one upstream round allocation.
 
     formation_reads says which reads also hold the raw rounds before
-    their first (windows/round_retention.py keeps the same rule for the
-    reads it places while the run goes).
+    their first, and an absorbing strong window's re-read width what a
+    window bounded by its stream claims for a restart
+    (windows/round_retention.py keeps both rules for the reads it places
+    while the run goes).
     """
     weak = _HoldSet()
     strong = _HoldSet()
@@ -358,8 +360,11 @@ def _plan_syndrome_buffering(
                 absorbs_weak_windows,
                 formation_reads,
             )
+    claimed_regions = None
+    if absorbs_weak_windows:
+        claimed_regions = restart_reread_buffer_regions
     return decoding_records.SyndromeBufferingPlan(
-        tuple(weak.holds), tuple(strong.holds)
+        tuple(weak.holds), tuple(strong.holds), claimed_regions
     )
 
 
@@ -411,26 +416,14 @@ def _hold_restart_reads(
     """
     if not absorbs_weak_windows:
         return
-    if not _has_same_stream_dependency(window, stream_id):
+    if not window_records.is_bounded_by_its_stream(window):
         return
-    look_ahead = window.buffer_hi - window.commit_hi
-    buffer_rounds = max(0, look_ahead)
-    reread_rounds = window_records.restart_reread_round_count(
-        restart_reread_buffer_regions, buffer_rounds
+    lower, upper = window_records.restart_claim_bounds(
+        window, restart_reread_buffer_regions
     )
-    lower_start = window.commit_lo - reread_rounds
-    lower = max(1, lower_start)
-    round_keys = _read_keys(execution, stream_id, lower, window.buffer_hi)
+    round_keys = _read_keys(execution, stream_id, lower, upper)
     owner = decoding_records.PotentialRestart((stream_id, window.window_index))
     weak.add(owner, round_keys)
-
-
-def _has_same_stream_dependency(window, stream_id) -> bool:
-    """Whether an earlier window of the same stream bounds this one."""
-    for dependency in window.deps:
-        if dependency[0] == stream_id:
-            return True
-    return False
 
 
 def _hold_strong_context(

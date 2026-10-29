@@ -239,7 +239,7 @@ class CorrelatedPyMatchingDecoder(decoder_module.WindowDecoderBase):
     used and matches again. PyMatching reads the hyperedges from a Stim
     detector error model whose errors are decomposed into graphlike
     components, so the window's linked models are written as one
-    (_correlated_model). Measured mode times the decode alone, as
+    (correlated_model). Measured mode times the decode alone, as
     PyMatchingDecoder's does.
     """
 
@@ -282,7 +282,7 @@ class CorrelatedPyMatchingDecoder(decoder_module.WindowDecoderBase):
         model: fault_models.WindowErrorModel,
     ) -> pymatching.Matching:
         """The correlated matching graph of one window model, warm."""
-        detector_error_model = _correlated_model(faults, model)
+        detector_error_model = correlated_model(faults, model)
         matching = pymatching.Matching.from_detector_error_model(
             detector_error_model, enable_correlations=True
         )
@@ -314,6 +314,48 @@ class CorrelatedPyMatchingDecoder(decoder_module.WindowDecoderBase):
         predicted_count = len(prediction)
         selected[:predicted_count] = prediction
         return decoding_records.WindowDecode(selected)
+
+
+def correlated_model(
+    graphlike: fault_models.PlacedFaultModel,
+    model: fault_models.WindowErrorModel,
+) -> stim.DetectorErrorModel:
+    """The window as a decomposed Stim model, one observable per column.
+
+    Each physical fault is one error whose components, split by ^, are
+    the graphlike faults the link says it is made of
+    (stim_fault_catalog._physical_catalog_and_link), as Stim's
+    decompose_errors writes it. Graphlike column i carries observable i,
+    so the matching's prediction is the columns it selects (an element
+    is 1 when the matching holds an odd number of edges with that fault
+    id, Matching.decode). A graphlike fault no physical fault of the
+    window holds is an error of its own at its graphlike prior. It is
+    public because the correlated matching timing campaign
+    (experiments/correlated_matching_timing) writes each window's model
+    as this row reads it.
+    """
+    physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
+    link = model.physical_to_graphlike_detector_projection
+    physical_priors = weights.finite_priors(physical.priors)
+    detector_error_model = stim.DetectorErrorModel()
+    linked_columns = set()
+    for physical_column in range(link.shape[1]):
+        components = basis_split.column_rows(link, physical_column)
+        if not components:
+            continue
+        linked_columns.update(components)
+        targets = _component_targets(graphlike.check, components)
+        prior = float(physical_priors[physical_column])
+        detector_error_model.append("error", [prior], targets)
+    graphlike_priors = weights.finite_priors(graphlike.priors)
+    for column in range(len(graphlike_priors)):
+        if column in linked_columns:
+            continue
+        targets = _component_targets(graphlike.check, (column,))
+        prior = float(graphlike_priors[column])
+        detector_error_model.append("error", [prior], targets)
+    _declare_detectors(detector_error_model, graphlike.check)
+    return detector_error_model
 
 
 def _check_preset_latency(microseconds) -> None:
@@ -437,42 +479,6 @@ def _with_pinned_observable(syndrome, observable_bit: int):
     """The syndrome with the pinned graph's observable detector appended."""
     extended = numpy.concatenate([syndrome, [observable_bit]])
     return extended.astype(numpy.uint8)
-
-
-def _correlated_model(graphlike, model) -> stim.DetectorErrorModel:
-    """The window as a decomposed Stim model, one observable per column.
-
-    Each physical fault is one error whose components, split by ^, are
-    the graphlike faults the link says it is made of
-    (stim_fault_catalog._physical_catalog_and_link), as Stim's
-    decompose_errors writes it. Graphlike column i carries observable i,
-    so the matching's prediction is the columns it selects (an element
-    is 1 when the matching holds an odd number of edges with that fault
-    id, Matching.decode). A graphlike fault no physical fault of the
-    window holds is an error of its own at its graphlike prior.
-    """
-    physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
-    link = model.physical_to_graphlike_detector_projection
-    physical_priors = weights.finite_priors(physical.priors)
-    detector_error_model = stim.DetectorErrorModel()
-    linked_columns = set()
-    for physical_column in range(link.shape[1]):
-        components = basis_split.column_rows(link, physical_column)
-        if not components:
-            continue
-        linked_columns.update(components)
-        targets = _component_targets(graphlike.check, components)
-        prior = float(physical_priors[physical_column])
-        detector_error_model.append("error", [prior], targets)
-    graphlike_priors = weights.finite_priors(graphlike.priors)
-    for column in range(len(graphlike_priors)):
-        if column in linked_columns:
-            continue
-        targets = _component_targets(graphlike.check, (column,))
-        prior = float(graphlike_priors[column])
-        detector_error_model.append("error", [prior], targets)
-    _declare_detectors(detector_error_model, graphlike.check)
-    return detector_error_model
 
 
 def _component_targets(check, components: tuple) -> list:

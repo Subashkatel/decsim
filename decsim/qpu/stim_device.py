@@ -26,6 +26,7 @@ import decsim.detector_error_model.error_model_sampler as error_model_sampler
 import decsim.detector_error_model.window_model_builders as window_models
 import decsim.detector_error_model.window_slicer as window_slicer
 import decsim.ports as ports
+import decsim.qpu.burst_shapes as burst_shapes
 import decsim.qpu.shot_datasets as shot_datasets
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.fault_model_contracts as fault_models
@@ -1201,33 +1202,14 @@ def _burst_region(
     coordinates = circuit.get_final_qubit_coordinates()
     center = burst.burst_center
     if center is None:
-        center = _coordinate_midpoint(coordinates)
-    region = set()
-    for qubit, position in coordinates.items():
-        position_x, position_y = _planar(position)
-        offset_x = position_x - center[0]
-        offset_y = position_y - center[1]
-        distance = math.hypot(offset_x, offset_y)
-        if distance <= burst.burst_radius:
-            region.add(qubit)
+        center = burst_shapes.coordinate_midpoint(coordinates)
+    distances = burst_shapes.planar_distances(coordinates, center)
+    region = [
+        qubit
+        for qubit, distance in distances.items()
+        if distance <= burst.burst_radius
+    ]
     return frozenset(region)
-
-
-def _coordinate_midpoint(coordinates: dict) -> tuple:
-    """The centre of the box the qubits' first two coordinates span."""
-    positions = [_planar(position) for position in coordinates.values()]
-    x_values = [position_x for position_x, _ in positions]
-    y_values = [position_y for _, position_y in positions]
-    middle_x = (min(x_values) + max(x_values)) / 2
-    middle_y = (min(y_values) + max(y_values)) / 2
-    return (middle_x, middle_y)
-
-
-def _planar(position) -> tuple:
-    """A qubit's first two coordinates; a line's qubits sit at y = 0."""
-    if len(position) < 2:
-        return (position[0], 0.0)
-    return (position[0], position[1])
 
 
 def _round_ends(table: formation_records.FormationTable) -> list:
@@ -1254,20 +1236,13 @@ def _round_of(round_ends: list, measurement_count: int) -> int:
 
 def _burst_probability(burst: BurstStimDevice.Settings, round_index) -> float:
     """The extra probability in one round, zero before the onset."""
-    rounds_since_onset = round_index - burst.burst_onset_round
-    if rounds_since_onset < 0:
-        return 0.0
-    rounds_climbed = rounds_since_onset + 1
-    climbed_share = rounds_climbed / burst.burst_rise_rounds
-    rise_share = min(climbed_share, 1.0)
-    amplitude = burst.burst_error_probability * rise_share
-    if burst.burst_decay_rounds is None:
-        return amplitude
-    rounds_past_peak = rounds_climbed - burst.burst_rise_rounds
-    rounds_since_peak = max(rounds_past_peak, 0)
-    exponent = -rounds_since_peak / burst.burst_decay_rounds
-    decay = math.exp(exponent)
-    return amplitude * decay
+    share = burst_shapes.peak_share(
+        round_index,
+        burst.burst_onset_round,
+        burst.burst_rise_rounds,
+        burst.burst_decay_rounds,
+    )
+    return burst.burst_error_probability * share
 
 
 def _burst_copy(

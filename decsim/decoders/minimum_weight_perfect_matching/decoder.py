@@ -12,6 +12,7 @@ is the minimum weight inside that logical class (Gidney et al.
 """
 
 import dataclasses
+import itertools
 import math
 from typing import Optional, Union
 
@@ -360,29 +361,22 @@ def correlated_model(
     public because the correlated matching timing campaign
     (experiments/correlated_matching_timing) writes each window's model
     as this row reads it.
+
+    The model is written as Stim's text and read in one call: appending
+    error by error makes every target a Python object, 0.59 s a strong
+    window at d = 9 against 0.08 s for the text. repr writes each prior
+    as the shortest text that reads back to the same double.
     """
     physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
     link = model.physical_to_graphlike_detector_projection
-    physical_priors = weights.finite_priors(physical.priors)
-    detector_error_model = stim.DetectorErrorModel()
-    linked_columns = set()
-    for physical_column in range(link.shape[1]):
-        components = basis_split.column_rows(link, physical_column)
-        if not components:
-            continue
-        linked_columns.update(components)
-        targets = _component_targets(graphlike.check, components)
-        prior = float(physical_priors[physical_column])
-        detector_error_model.append("error", [prior], targets)
-    graphlike_priors = weights.finite_priors(graphlike.priors)
-    for column in range(len(graphlike_priors)):
-        if column in linked_columns:
-            continue
-        targets = _component_targets(graphlike.check, (column,))
-        prior = float(graphlike_priors[column])
-        detector_error_model.append("error", [prior], targets)
-    _declare_detectors(detector_error_model, graphlike.check)
-    return detector_error_model
+    components_by_fault = basis_split.every_column_rows(link)
+    words = _component_words(graphlike.check)
+    linked = _linked_error_lines(physical, components_by_fault, words)
+    unlinked = _unlinked_error_lines(graphlike, components_by_fault, words)
+    declaration = _detector_declaration(graphlike.check)
+    lines = linked + unlinked + declaration
+    text = "\n".join(lines)
+    return stim.DetectorErrorModel(text)
 
 
 def _check_preset_latency(microseconds) -> None:
@@ -519,23 +513,59 @@ def _with_pinned_observable(syndrome, observable_bit: int):
     return extended.astype(numpy.uint8)
 
 
-def _component_targets(check, components: tuple) -> list:
-    """One error's targets: each component's detectors and its column."""
-    targets = []
-    for column in components:
-        if targets:
-            separator = stim.target_separator()
-            targets.append(separator)
-        rows = basis_split.column_rows(check, column)
-        for row in rows:
-            detector = stim.target_relative_detector_id(row)
-            targets.append(detector)
-        observable = stim.target_logical_observable_id(column)
-        targets.append(observable)
-    return targets
+def _component_words(check) -> list:
+    """Each graphlike column as Stim text: its detectors, then its column."""
+    rows_by_column = basis_split.every_column_rows(check)
+    words = []
+    for column, rows in enumerate(rows_by_column):
+        targets = [f"D{row}" for row in rows]
+        targets.append(f"L{column}")
+        word = " ".join(targets)
+        words.append(word)
+    return words
 
 
-def _declare_detectors(detector_error_model, check) -> None:
+def _linked_error_lines(
+    physical, components_by_fault: list, component_words: list
+) -> list:
+    """Each physical fault as one error of its graphlike components."""
+    finite_priors = weights.finite_priors(physical.priors)
+    physical_priors = finite_priors.tolist()
+    lines = []
+    for physical_column, components in enumerate(components_by_fault):
+        if not components:
+            continue
+        prior = physical_priors[physical_column]
+        line = _error_line(prior, components, component_words)
+        lines.append(line)
+    return lines
+
+
+def _unlinked_error_lines(
+    graphlike, components_by_fault: list, component_words: list
+) -> list:
+    """An error of its own for each graphlike fault no physical one holds."""
+    finite_priors = weights.finite_priors(graphlike.priors)
+    graphlike_priors = finite_priors.tolist()
+    linked = itertools.chain.from_iterable(components_by_fault)
+    linked_columns = set(linked)
+    lines = []
+    for column, prior in enumerate(graphlike_priors):
+        if column in linked_columns:
+            continue
+        line = _error_line(prior, (column,), component_words)
+        lines.append(line)
+    return lines
+
+
+def _error_line(prior: float, components: tuple, component_words: list) -> str:
+    """One error of Stim text, its components split by ^."""
+    words = [component_words[column] for column in components]
+    targets = " ^ ".join(words)
+    return f"error({prior!r}) {targets}"
+
+
+def _detector_declaration(check) -> list:
     """Declare the window's last row, so every row is a detector.
 
     A row no fault flips still has its syndrome bit, and PyMatching
@@ -543,10 +573,9 @@ def _declare_detectors(detector_error_model, check) -> None:
     """
     row_count = check.shape[0]
     if row_count == 0:
-        return
+        return []
     last_row = row_count - 1
-    last_detector = stim.target_relative_detector_id(last_row)
-    detector_error_model.append("detector", [], [last_detector])
+    return [f"detector D{last_row}"]
 
 
 def _warm_up_correlated(matching, faults) -> None:

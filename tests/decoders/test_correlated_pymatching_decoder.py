@@ -16,6 +16,7 @@ import pytest
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.minimum_weight_perfect_matching.decoder as adapter
+import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.records.decoding as decoding_records
 import decsim.records.fault_model_contracts as fault_models
 from decsim.decoders.minimum_weight_perfect_matching import (
@@ -71,6 +72,25 @@ def test_the_row_differs_from_plain_matching_on_some_shots():
         if plain_observables != correlated_result.logical_observables:
             differing_shots += 1
     assert differing_shots > 0
+
+
+def test_the_model_holds_each_physical_prior_to_the_last_bit():
+    circuit = windows.memory_circuit(3, ROUNDS, 0.01)
+    model = windows.whole_circuit_window(
+        circuit, ROUNDS, fault_models.LINKED_FAULT_MODELS_REQUIRED
+    )
+    graphlike = model.require_faults(fault_models.FaultRepresentation.GRAPHLIKE)
+    physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
+    finite_priors = weights.finite_priors(physical.priors)
+    expected_priors = finite_priors.tolist()
+
+    detector_error_model = adapter.correlated_model(graphlike, model)
+
+    instructions = list(detector_error_model)
+    linked_errors = instructions[: len(expected_priors)]
+    error_args = [error.args_copy() for error in linked_errors]
+    priors = [args[0] for args in error_args]
+    assert priors == expected_priors
 
 
 def test_a_fitted_timing_prices_each_decode_at_its_own_events():

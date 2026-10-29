@@ -16,8 +16,9 @@ page is RESULTS/summary_DATE.md.
 - The calibration: the threshold that escalates each share
   (calibrate.py's calibration.csv).
 - The switching pilot (R3 and R5): each design's failures, escalated
-  share and reaction time, and what it did to union-find's shots,
-  paired with both decoders alone (paired_shots.paired_repairs).
+  share, reaction time and windows past one logical cycle, and what it
+  did to union-find's shots, paired with both decoders alone
+  (paired_shots.paired_repairs).
 
 Reaction is buffer0_ready_to_frame: a window's data complete to its
 correction at the frame. The share past one logical cycle is reported
@@ -54,8 +55,9 @@ CALIBRATION_HEADER = (
 )
 DESIGN_HEADER = (
     "| Design | Failures | Error per round (95%) | Escalated | "
-    "Reaction mean / p99 (us) | Repaired / broken / missed |\n"
-    "|---|---|---|---|---|---|"
+    "Reaction mean / p99 (us) | Past one cycle | "
+    "Repaired / broken / missed |\n"
+    "|---|---|---|---|---|---|---|"
 )
 
 
@@ -174,10 +176,11 @@ def _design_line(selection: dict, row: dict, pair) -> str:
     rate = _rate_text(row)
     escalated = _fixed(row["escalated_fraction"], 3)
     reaction = _reaction_text(row)
+    past = _past_cycle_text(row)
     effect = f"{pair.repaired} / {pair.broken} / {pair.missed}"
     return (
         f"| {name} | {row['logical_failures']} | {rate} | {escalated} | "
-        f"{reaction} | {effect} |"
+        f"{reaction} | {past} | {effect} |"
     )
 
 

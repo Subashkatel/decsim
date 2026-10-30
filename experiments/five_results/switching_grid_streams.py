@@ -21,7 +21,14 @@ import decsim.experiments.sweeps as sweeps
 import decsim.topology.graph as graph
 
 config = sweeps.load_beside(__file__, "config.py")
-grid = sweeps.load_beside(__file__, "switching_grid.py")
+designs = sweeps.load_beside(__file__, "switching_designs.py")
+# a distance streams once calibration.py holds its thresholds, so d = 9
+# can run while d = 5 and 7 are still being calibrated
+DISTANCES = tuple(
+    distance
+    for distance in (5, 7, 9)
+    if (distance, 0.003) in designs.calibration.CALIBRATED
+)
 
 
 def machine(
@@ -31,7 +38,7 @@ def machine(
     physical_error_probability: float,
 ) -> graph.Machine:
     """One grid design, streaming its memory."""
-    design_machine = grid.machine(
+    design_machine = designs.machine(
         design, share, distance, physical_error_probability
     )
     return config.streaming(design_machine)
@@ -43,13 +50,13 @@ sweep = decsim.Sweep(
     "five_results_switching_grid_streams",
     machine,
     grid={
-        "design": tuple(grid.DESIGNS),
-        "share": grid.SHARES,
-        "distance": (5, 7, 9),
-        "physical_error_probability": grid.PHYSICAL_ERROR_PROBABILITIES,
+        "design": tuple(designs.DESIGNS),
+        "share": designs.SHARES,
+        "distance": DISTANCES,
+        "physical_error_probability": designs.PHYSICAL_ERROR_PROBABILITIES,
     },
-    task_name=grid.TASK_NAME,
+    task_name=designs.TASK_NAME,
     stop=stop,
-    metadata=grid.metadata,
+    metadata=designs.metadata,
 )
 experiment = sweep.experiment()

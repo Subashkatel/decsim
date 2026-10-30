@@ -18,19 +18,19 @@ python -m decsim run switching_grid_d9.py --record --out RESULTS
 import decsim
 import decsim.experiments.sweeps as sweeps
 
-grid = sweeps.load_beside(__file__, "switching_grid.py")
+designs = sweeps.load_beside(__file__, "switching_designs.py")
 
 sweep = decsim.Sweep(
     "five_results_switching_grid_d9",
-    grid.machine,
+    designs.machine,
     grid={
         "design": ("sliding_1core", "double_2core"),
         "share": (0.3,),
         "distance": (9,),
         "physical_error_probability": (0.003,),
     },
-    task_name=grid.TASK_NAME,
-    stop=grid.stop,
-    metadata=grid.metadata,
+    task_name=designs.TASK_NAME,
+    stop=designs.stop,
+    metadata=designs.metadata,
 )
 experiment = sweep.experiment()

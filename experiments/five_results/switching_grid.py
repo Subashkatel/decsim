@@ -28,63 +28,21 @@ then the jobs and the fold of docs/how-to/run_on_a_slurm_cluster.md.
 
 import decsim
 import decsim.experiments.sweeps as sweeps
-import decsim.topology.graph as graph
 
-config = sweeps.load_beside(__file__, "config.py")
-calibration = sweeps.load_beside(__file__, "calibration.py")
-# design -> (window rule, strong cores)
-DESIGNS = {
-    "sliding_1core": ("sliding", 1),
-    "speculation_1core": ("speculation", 1),
-    "double_1core": ("double", 1),
-    "double_2core": ("double", 2),
-}
-SHARES = (0.05, 0.1, 0.2, 0.3)
+designs = sweeps.load_beside(__file__, "switching_designs.py")
 DISTANCES = (5, 7)
-PHYSICAL_ERROR_PROBABILITIES = (0.003,)
-TASK_NAME = "{design}_{share}_d{distance}_p{physical_error_probability}"
 
-
-def machine(
-    design: str,
-    share: float,
-    distance: int,
-    physical_error_probability: float,
-) -> graph.Machine:
-    """One design at the threshold calibrated to the share."""
-    scheme, strong_unit_count = DESIGNS[design]
-    point = (distance, physical_error_probability)
-    threshold_decibels = calibration.CALIBRATED[point][share]
-    return config.switching(
-        scheme,
-        distance,
-        physical_error_probability,
-        threshold_decibels,
-        strong_unit_count,
-    )
-
-
-def metadata(cell: dict, task: decsim.Task) -> dict:
-    """The point's cells as config.metadata names them, and the design's parts."""
-    scheme, strong_unit_count = DESIGNS[cell["design"]]
-    named = config.metadata(cell, task)
-    return {**named, "scheme": scheme, "strong_unit_count": strong_unit_count}
-
-
-stop = decsim.CollectionSettings(
-    max_shots=config.EVALUATION_SHOTS, first_seed=config.EVALUATION_FIRST_SEED
-)
 sweep = decsim.Sweep(
     "five_results_switching_grid",
-    machine,
+    designs.machine,
     grid={
-        "design": tuple(DESIGNS),
-        "share": SHARES,
+        "design": tuple(designs.DESIGNS),
+        "share": designs.SHARES,
         "distance": DISTANCES,
-        "physical_error_probability": PHYSICAL_ERROR_PROBABILITIES,
+        "physical_error_probability": designs.PHYSICAL_ERROR_PROBABILITIES,
     },
-    task_name=TASK_NAME,
-    stop=stop,
-    metadata=metadata,
+    task_name=designs.TASK_NAME,
+    stop=designs.stop,
+    metadata=designs.metadata,
 )
 experiment = sweep.experiment()

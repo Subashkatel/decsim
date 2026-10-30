@@ -44,6 +44,7 @@ def machine(
     peak_factor: float,
     distance: int,
     physical_error_probability: float,
+    rate_target: float = RATE_TARGET,
 ) -> graph.Machine:
     """The double window on 2 cores under one threshold rule."""
     point = (distance, physical_error_probability)
@@ -52,26 +53,34 @@ def machine(
         "double", distance, physical_error_probability, threshold_decibels, 2
     )
     timed = config.fitted_strong_time(design, distance, "double")
-    ruled = with_rule(timed, rule, threshold_decibels)
+    ruled = with_rule(timed, rule, threshold_decibels, rate_target)
     return bursts.with_burst(config.streaming(ruled), peak_factor)
 
 
 def with_rule(
-    machine: graph.Machine, rule: str, threshold_decibels: float
+    machine: graph.Machine,
+    rule: str,
+    threshold_decibels: float,
+    rate_target: float = RATE_TARGET,
 ) -> graph.Machine:
-    """The machine's threshold source for the rule; fixed keeps its own."""
+    """The machine's threshold source for the rule; fixed keeps its own.
+
+    The step rule's levels are STEP_LEVELS below the target, then the
+    target itself.
+    """
     if rule == "fixed":
         return machine
     steps = None
     if rule == "steps":
+        levels = tuple(level for level in STEP_LEVELS if level < rate_target)
         steps = target_steps.TargetSteps.Settings(
-            start=RATE_TARGET,
-            levels=STEP_LEVELS,
+            start=rate_target,
+            levels=levels + (rate_target,),
             check_every_windows=STEP_CHECK_EVERY_WINDOWS,
         )
     threshold = threshold_sources.RateThreshold.Settings(
         threshold_decibels=threshold_decibels,
-        target_escalation_rate=RATE_TARGET,
+        target_escalation_rate=rate_target,
         steps=steps,
     )
     return machine.with_settings(machines.SWITCHING, threshold=threshold)

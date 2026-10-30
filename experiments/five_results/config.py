@@ -66,6 +66,9 @@ STRONG_DECODE_DISTANCES_BY_SCHEME = {
     "sliding": 2,
     "speculation": 2,
     "double": 3,
+    # Skoric's A block reads d on each side of its d commit, and the B
+    # block commits the 3d between two A commits (windows/schemes/parallel.py)
+    "parallel": 3,
 }
 # B1 stage 2 (experiments.md, decision D4): correlated matching's time
 # as a law in each window's detection events, fitted to decsim's own

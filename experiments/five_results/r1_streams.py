@@ -36,7 +36,8 @@ import decsim.topology.graph as graph
 
 config = sweeps.load_beside(__file__, "config.py")
 DECODINGS = ("weak_alone", "strong_alone")
-DISTANCES = (9,)
+# d = 9 ran first (2026-10-29); d = 5 and 7 on 2026-10-30
+DISTANCES = (5, 7)
 PHYSICAL_ERROR_PROBABILITIES = (0.003,)
 
 

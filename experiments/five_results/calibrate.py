@@ -27,7 +27,7 @@ import sys
 
 import decsim.experiments.report as report
 
-TARGET_SHARES = (0.05, 0.1, 0.2)
+TARGET_SHARES = (0.05, 0.1, 0.2, 0.3)
 # two steps closer than two bins could share a bin edge, and the bins
 # could not tell which side of a threshold between them a gap falls
 SMALLEST_STEP_DECIBELS = 2 / report.CONFIDENCE_BINS_PER_DECIBEL

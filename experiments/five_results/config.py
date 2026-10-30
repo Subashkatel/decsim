@@ -42,9 +42,11 @@ basic_case = sweeps.load_beside(__file__, "../basic_case/config.py")
 ROUND_PERIOD_MICROSECONDS = 1.1
 # values.md section 5: correlated matching's time per round on a Grace
 # CPU, batch 1, at p = 0.003 (2604.12841 p.22, Table IX); at other p the
-# same times are assumed
+# same times are assumed. Table IX has no d = 7: its time is assumed on
+# the power law through d = 5 and 9, 1.15 x (7 / 5)^1.82 = 2.12 us
 CORRELATED_MATCHING_ROUND_MICROSECONDS_BY_DISTANCE = {
     5: 1.15,
+    7: 2.12,
     9: 3.35,
     13: 9.14,
 }

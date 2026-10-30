@@ -18,8 +18,7 @@ al. 1905.02345 lines 186-196, equation 1).
 Over the same shots the pair fails broken - repaired more times than
 the fast decoder alone, and McNemar's exact test reads those two
 counts (failure_statistics.exact_mcnemar). The runs are read from
-shots.csv, a run's shots chosen by the values of its columns, as the
-basic case pairs its runs (experiments/basic_case/window_check_plots.py).
+shots.csv, a run's shots chosen by the values of its columns.
 """
 
 import dataclasses

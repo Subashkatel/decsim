@@ -1,7 +1,7 @@
-"""Three runs paired by seed, against hand counts and the basic case.
+"""Three runs paired by seed, against hand counts.
 
-- McNemar's exact p: the basic case's sum of binomial coefficients
-  (experiments/basic_case/window_check_plots.py), written again here.
+- McNemar's exact p: the two-sided sum of binomial coefficients, written
+  out by hand.
 - The counts: a hand-made set of shots, and the identity that the pair
   fails broken - repaired more times than the fast decoder alone, on
   outcomes numpy draws.
@@ -29,7 +29,7 @@ pair,1,True,False
 """
 
 
-def test_mcnemars_exact_p_is_the_basic_cases_binomial_sum_property():
+def test_mcnemars_exact_p_is_the_binomial_sum_property():
     for first_only in range(13):
         for second_only in range(13):
             p_value = failure_statistics.exact_mcnemar(first_only, second_only)
@@ -90,7 +90,7 @@ def test_a_runs_failures_leave_out_unscored_shots_and_other_runs():
 
 
 def _binomial_sum_p(first_only: int, second_only: int) -> float:
-    """The basic case's McNemar p, as window_check_plots.py writes it.
+    """McNemar's exact two-sided p, summed by hand.
 
     With no discordant pair the one term doubles to 2, so the min gives 1.
     """

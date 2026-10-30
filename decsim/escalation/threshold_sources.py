@@ -538,8 +538,8 @@ class RateThreshold:
     The rate tracker without audits: it reads no strong
     answer and no truth, so it costs nothing but the escalations it
     makes. It starts at a calibrated threshold, the one that escalated
-    the target on calibration shots (experiments/basic_case/
-    threshold_plots.py), and moves step_decibels a window by Gibbs and
+    the target on calibration shots (experiments/five_results/
+    calibrate.py), and moves step_decibels a window by Gibbs and
     Candes's update, unclipped, which bounds the long-run escalated
     share around the target for any gap sequence (EscalationRateTracker).
     One instance persists across a task's shots.

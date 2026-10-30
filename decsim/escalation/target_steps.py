@@ -17,7 +17,7 @@ strong decode holds the next windows, so the weak tier's line grows. With
 the double window the next windows do not wait, so the weak tier's line
 stays empty and the strong tier's grows; such a chain watches "target".
 The levels are a table of shares, as the calibration table holds a
-threshold per share (experiments/basic_case/calibration.py); what a
+threshold per share (experiments/five_results/calibration.py); what a
 share costs in accuracy is read off that table, not decided here.
 Lowering the share cannot undo a window already sent.
 """

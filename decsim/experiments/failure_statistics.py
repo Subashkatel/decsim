@@ -298,8 +298,7 @@ def exact_mcnemar(first_only: int, second_only: int) -> float:
     first_only and second_only are the shots only one run failed. Under
     the hypothesis that both fail as often, each such shot is a fair
     coin, so the p is the two-sided binomial test of first_only in their
-    sum at one half (scipy.stats.binomtest; the basic case's
-    window_check_plots.py sums the same tail). No such shot gives 1.
+    sum at one half (scipy.stats.binomtest). No such shot gives 1.
     """
     discordant = first_only + second_only
     if discordant == 0:

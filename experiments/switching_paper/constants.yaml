@@ -1,7 +1,0 @@
-# Toshio et al.'s Fig. 15 (2510.25222): decoder switching on d-round
-# memories decoded offline, one window a shot. Line numbers are the
-# paper's text (arXiv:2510.25222v1). The grids are in the run files.
-
-round_period_microseconds: 1.0       # tau_gen; offline decoding does not read it
-threshold: 20dB                      # g_th of Figs. 15 and 16 (lines 1419-1421)
-belief_propagation_iterations: 20    # beliefmatching 0.2.0's default; the paper names none (lines 1662-1668)

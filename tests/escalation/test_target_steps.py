@@ -75,6 +75,7 @@ def test_the_share_stays_inside_the_levels():
         ({"levels": (0.3, 0.1)}, "must rise"),
         ({"rise_margin_windows": -1.0}, "rise_margin_windows"),
         ({"check_every_windows": 0}, "check_every_windows"),
+        ({"watched_pool": "strong"}, "watched_pool"),
     ],
 )
 def test_a_bad_setting_is_refused_by_name(changes, words):

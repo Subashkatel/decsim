@@ -157,9 +157,15 @@ def test_a_stream_whose_threshold_moves_records_the_source_beside_it():
     assert online["trajectory"][0][2] == "start"
 
 
-def test_a_stream_whose_target_steps_by_the_backlog_binds_its_queue():
+@pytest.mark.parametrize("watched_pool", ["source", "target"])
+def test_a_stream_whose_target_steps_by_the_backlog_binds_its_queue(
+    watched_pool,
+):
     steps = target_steps.TargetSteps.Settings(
-        start=0.2, levels=(0.1, 0.2), check_every_windows=10
+        start=0.2,
+        levels=(0.1, 0.2),
+        check_every_windows=10,
+        watched_pool=watched_pool,
     )
     rate = {"target_escalation_rate": 0.2, "steps": steps}
     machine = run_files.switching_machine(rate=rate)

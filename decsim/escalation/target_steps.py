@@ -4,7 +4,7 @@ Throughput comes first. A chain that keeps up holds a backlog that comes and
 goes: one escalated window holds the next windows for its service, so
 bursts are the queue's ordinary state. A chain that falls behind holds
 one that grows. So every check_every_windows windows the loop reads the
-mean windows waiting for the weak tier since the last check, and:
+mean windows waiting for its watched pool since the last check, and:
   - steps one level down, fewer windows to the strong tier, when that
     mean rose at each of the last rise_checks checks and by more than
     rise_margin_windows over them;
@@ -12,6 +12,10 @@ mean windows waiting for the weak tier since the last check, and:
     rise and the mean is no higher than it was calm_checks checks ago,
     which it cannot be before that many checks;
   - holds otherwise.
+The watched pool is the weak tier by default: with the sliding window a
+strong decode holds the next windows, so the weak tier's line grows. With
+the double window the next windows do not wait, so the weak tier's line
+stays empty and the strong tier's grows; such a chain watches "target".
 The levels are a table of shares, as the calibration table holds a
 threshold per share (experiments/basic_case/calibration.py); what a
 share costs in accuracy is read off that table, not decided here.
@@ -29,7 +33,9 @@ class TargetSteps:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The levels, the start, the cadence and the trend's tests."""
+        """The levels, the start, the cadence, the trend's tests and the
+        pool whose line the loop watches: "source" (the weak tier) or
+        "target" (the strong tier)."""
 
         start: float
         levels: tuple = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
@@ -37,10 +43,16 @@ class TargetSteps:
         rise_checks: int = 2
         rise_margin_windows: float = 5.0
         calm_checks: int = 5
+        watched_pool: str = "source"
 
         def __post_init__(self) -> None:
             _check_levels(self.levels, self.start)
             _check_counts(self)
+            if self.watched_pool not in ("source", "target"):
+                raise ValueError(
+                    "target_steps.watched_pool must be 'source' or 'target', "
+                    f"got {self.watched_pool!r}"
+                )
 
         def build(self) -> "TargetSteps":
             """A loop at its start level."""

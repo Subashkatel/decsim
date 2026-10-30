@@ -216,13 +216,21 @@ class Switching:
     def _bind_the_queue_readers(
         self, decoders: "decoders_part.Decoders"
     ) -> None:
-        """A verdict or threshold stepped by the backlog reads the queue."""
+        """A verdict or threshold stepped by the backlog reads the queue.
+
+        A threshold's loop reads the pool it watches: the source pool,
+        or the strong target pool for a double window, whose weak tier
+        never waits.
+        """
         source = self.strong_redecode.source
         queue = decoders.manager_of(source)
         if self.edge.settings.verdict.reads_source_queue:
             self.policy.verdict.source_queue = queue
-        if self.policy.threshold.reads_source_queue:
-            self.policy.threshold.source_queue = queue
+        threshold = self.policy.threshold
+        if threshold.reads_source_queue:
+            pools = {"source": source, "target": self.strong_redecode.target}
+            watched = pools[threshold.watched_pool]
+            threshold.source_queue = decoders.manager_of(watched)
 
     def _bind_the_deadline(self, decoders: "decoders_part.Decoders") -> None:
         """The backlog trigger reads the source pool's queue."""

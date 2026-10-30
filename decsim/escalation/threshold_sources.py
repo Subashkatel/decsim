@@ -546,7 +546,9 @@ class RateThreshold:
 
     With steps, the outer loop (target_steps.TargetSteps) sets
     the target: before each window the source reads the windows waiting
-    for the source pool and the loop steps the share by their trend. The
+    for the pool the loop watches (watched_pool: the source pool, or the
+    strong target pool), bound to source_queue by the build, and the
+    loop steps the share by their trend. The
     tracker's bound holds for a moving target, its long-run share then
     the targets' average (Gibbs and Candes, arXiv:2106.00170, Sec. 4).
     The backlog is a stream's, so a run of shots refuses it
@@ -659,8 +661,13 @@ class RateThreshold:
 
     @property
     def reads_source_queue(self) -> bool:
-        """Whether an outer loop reads the source pool's queue."""
+        """Whether an outer loop reads a pool's queue."""
         return self.steps is not None
+
+    @property
+    def watched_pool(self) -> str:
+        """The pool whose queue the outer loop reads: source or target."""
+        return self.steps.settings.watched_pool
 
     def _step_the_target(self) -> None:
         """The loop reads the backlog; the tracker takes its share."""

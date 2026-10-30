@@ -7,7 +7,9 @@ escalated 16.6% of calibration windows; RateThreshold holding an 18%
 share from the gaps alone; and RateThreshold with TargetSteps, which
 steps that share down to 2% while the waiting line rises and back up
 when it is calm, checked every 20 windows so it can act inside a fade
-of 550 rounds. The burst is r2_bursts.py's. Task names:
+of 550 rounds. The step rule watches the strong pool's line: with the
+double window union-find never waits, so its own line stays empty. The
+burst is r2_bursts.py's. Task names:
 {rule}_peak{peak_factor}_d{distance}_p{physical_error_probability}.
 
 Usage
@@ -77,6 +79,7 @@ def with_rule(
             start=rate_target,
             levels=levels + (rate_target,),
             check_every_windows=STEP_CHECK_EVERY_WINDOWS,
+            watched_pool="target",
         )
     threshold = threshold_sources.RateThreshold.Settings(
         threshold_decibels=threshold_decibels,

@@ -140,8 +140,6 @@ class StreamMeasures:
         observation_settings = machine.graph.observation
         deadline_us = observation_settings.reaction_deadline_microseconds
         self.folds = _Folds(deadline_us)
-        # the weak and the strong tier's pools (Layout.tier_pools)
-        self.tier_pools = machine.layout.tier_pools()
         self.series = _series_of(machine)
         self.window_times = _window_times_of(machine)
         self._connect(machine)
@@ -224,7 +222,8 @@ class StreamMeasures:
         values = folds.value_summaries()
         tiers = dict(folds.window_tiers)
         end_reaction = folds.end_of_stream_reaction()
-        weak_pools, strong_pools = self.tier_pools
+        # the weak and the strong tier's pools (Layout.tier_pools)
+        weak_pools, strong_pools = self.machine.layout.tier_pools()
         weak_growth = folds.growth_rate(weak_pools)
         strong_growth = folds.growth_rate(strong_pools)
         missed, first_miss = folds.deadline_misses()
@@ -317,7 +316,7 @@ class StreamMeasures:
         """A window the frame committed: its decode, then its latencies."""
         stages = self.machine.observation.stages
         decode = measure.committed_decode(stages, frame_record)
-        _weak_pools, strong_pools = self.tier_pools
+        _weak_pools, strong_pools = self.machine.layout.tier_pools()
         is_escalated = decode.tier in strong_pools
         if is_escalated:
             self.folds.fold_strong(decode)

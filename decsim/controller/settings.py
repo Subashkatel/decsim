@@ -35,6 +35,9 @@ class ControllerSettings:
     (final_result_gate.py): a decision starts only once every decision it
     descends from has its final result, which a provisional release
     (windows.release_stage) delivers after the decision itself.
+    final_result_hold_limit_microseconds bounds that hold: a decision held
+    that long starts on the weak answers; None holds until the finals are
+    in.
     """
 
     clock: Optional[config.Clock] = None
@@ -43,6 +46,7 @@ class ControllerSettings:
     decision_to_pulse_cycles: int = 0
     packing_rounds_in_flight: Optional[int] = None
     holds_decisions_for_final_results: bool = False
+    final_result_hold_limit_microseconds: Optional[float] = None
 
     def __post_init__(self) -> None:
         config.check_cycles(
@@ -57,6 +61,7 @@ class ControllerSettings:
             self.decision_to_pulse_cycles,
         )
         self._check_rounds_in_flight()
+        self._check_hold_limit()
 
     def _check_rounds_in_flight(self) -> None:
         """Refuse a bound that is not a whole count of at least one round.
@@ -72,4 +77,19 @@ class ControllerSettings:
         raise ValueError(
             "controller.packing_rounds_in_flight must be a whole count of "
             f"rounds, at least one, or None for no bound (got {bound!r})"
+        )
+
+    def _check_hold_limit(self) -> None:
+        """A limit is a duration, and bounds a gate the controller builds."""
+        limit = self.final_result_hold_limit_microseconds
+        if limit is None:
+            return
+        config.check_duration(
+            "controller.final_result_hold_limit_microseconds", limit
+        )
+        if self.holds_decisions_for_final_results:
+            return
+        raise ValueError(
+            "controller.final_result_hold_limit_microseconds bounds the "
+            "final-result gate; set holds_decisions_for_final_results too"
         )

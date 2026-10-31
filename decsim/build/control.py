@@ -158,7 +158,13 @@ def _final_result_gate(
     """The gate over the program's decisions, if the controller holds any."""
     if not controller.holds_decisions_for_final_results:
         return None
-    return final_result_gate_module.FinalResultGate(engine, plan.operations)
+    limit = controller.final_result_hold_limit_microseconds
+    limit_ticks = None
+    if limit is not None:
+        limit_ticks = config.microseconds_to_ticks(limit)
+    return final_result_gate_module.FinalResultGate(
+        engine, plan.operations, limit_ticks
+    )
 
 
 def _feedback_streams(

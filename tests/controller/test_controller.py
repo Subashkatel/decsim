@@ -111,3 +111,11 @@ def test_a_negative_cycle_count_is_refused_by_its_name(key):
 
     with pytest.raises(ValueError, match=sentence):
         controller_settings.ControllerSettings(**{key: -1})
+
+
+def test_a_hold_limit_without_the_gate_is_refused():
+    """The limit bounds the final-result gate, which this run would lack."""
+    with pytest.raises(ValueError, match="set holds_decisions_for_final"):
+        controller_settings.ControllerSettings(
+            final_result_hold_limit_microseconds=10.0
+        )

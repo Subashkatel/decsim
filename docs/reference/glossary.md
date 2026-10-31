@@ -139,7 +139,9 @@ These are not from the papers. The pages use them everywhere.
   strong answer may then repair the frame. The **final-result gate**
   (`controller.holds_decisions_for_final_results`) holds each decision's
   start until the decisions before it have their strong answers, so
-  each repair is in before the next decision starts.
+  each repair is in before the next decision starts. With a hold limit
+  (`controller.final_result_hold_limit_microseconds`) a decision held
+  that long starts on the weak answers, which bounds the worst case.
 - **absorb**: a strong window absorbs a weak window when it decodes the
   same rounds again and replaces that window's answer, so the weak
   window is never decoded on its own.

@@ -21,11 +21,17 @@ frame_to_controller as a decision does (pauli_frame/decision_dispatch.py)
 and drives no pulse; the operations it frees start on the runtime's next
 try.
 
+A bounded gate holds a decision for at most its limit, timed from the
+first time it is asked. Then the decision starts on the weak answers,
+and a strong answer that lands later repairs nothing. This is the
+fallback that bounds the worst case: when the strong tier falls behind,
+the program keeps its pace and loses only the answers that came late.
+
 StartHold is the controller package's own seam: the issuer asks it.
 """
 
 import functools
-from typing import Protocol
+from typing import Optional, Protocol
 
 import decsim.engine as engine_module
 import decsim.ports as ports
@@ -46,12 +52,22 @@ class FinalResultGate:
     dispatch = ports.Port(ports.DecisionDispatch)
     runtime = ports.Port(ports.OperationRuntime)
 
-    def __init__(self, engine: engine_module.Engine, operations: tuple) -> None:
+    def __init__(
+        self,
+        engine: engine_module.Engine,
+        operations: tuple,
+        hold_limit_ticks: Optional[int] = None,
+    ) -> None:
         self.engine = engine
         self.earlier_by_decision = earlier_decisions(operations)
         # each decision whose final result is at the controller, to the tick
         # it landed
         self.final_ticks: dict = {}
+        # None holds a decision until the finals are in
+        self.hold_limit_ticks = hold_limit_ticks
+        # the decisions whose bounded hold has begun, and those it ended
+        self.bounded_ids: set = set()
+        self.expired_ids: set = set()
 
     def note_result_final(self, operation: program_records.Operation) -> None:
         """A decision's awaited decodes are final: the notice leaves."""
@@ -63,8 +79,30 @@ class FinalResultGate:
         earlier = self.earlier_by_decision.get(operation.id, ())
         for decision_id in earlier:
             if decision_id not in self.final_ticks:
-                return False
+                return self._has_reached_its_limit(operation.id)
         return True
+
+    def expire(self, operation_id: int) -> None:
+        """The hold reached its limit: the decision starts on weak answers."""
+        self.expired_ids.add(operation_id)
+        self.engine.log(
+            log_sources.CONTROLLER,
+            f"op#{operation_id} held to its limit: starts on weak answers",
+        )
+        self.runtime.retry_ready_operations()
+
+    def _has_reached_its_limit(self, operation_id: int) -> bool:
+        """Whether a bounded hold ended; the first refusal starts its clock."""
+        if operation_id in self.expired_ids:
+            return True
+        if self.hold_limit_ticks is None:
+            return False
+        if operation_id in self.bounded_ids:
+            return False
+        self.bounded_ids.add(operation_id)
+        expire = functools.partial(self.expire, operation_id)
+        self.engine.schedule(self.hold_limit_ticks, expire, label="hold limit")
+        return False
 
     def open_after(self, operation_id: int) -> None:
         """The decision's final result is at the controller: retry starts."""

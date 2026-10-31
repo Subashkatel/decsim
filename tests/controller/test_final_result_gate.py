@@ -46,9 +46,11 @@ class CountingRuntime:
         self.retries += 1
 
 
-def gate_over(operations):
+def gate_over(operations, hold_limit_ticks=None):
     engine = engine_module.Engine()
-    gate = final_result_gate.FinalResultGate(engine, operations)
+    gate = final_result_gate.FinalResultGate(
+        engine, operations, hold_limit_ticks
+    )
     gate.dispatch = LandingDispatch()
     gate.runtime = CountingRuntime()
     return gate
@@ -141,3 +143,28 @@ def test_a_decision_after_a_merge_waits_for_both_patches():
 
     assert not one_final
     assert gate.is_open(t_after)
+
+
+def test_a_bounded_hold_lets_the_decision_start_at_its_limit():
+    """The fallback: past its limit it starts on the weak answers."""
+    gate = gate_over(TWO_T_GATES, hold_limit_ticks=5)
+
+    held = gate.is_open(T_SECOND)
+    gate.engine.run()
+
+    assert not held
+    assert gate.engine.now == 5
+    assert gate.is_open(T_SECOND)
+    assert gate.runtime.retries == 1
+    assert gate.final_ticks == {}
+
+
+def test_a_final_result_inside_the_limit_opens_the_gate_at_once():
+    gate = gate_over(TWO_T_GATES, hold_limit_ticks=5)
+
+    held = gate.is_open(T_SECOND)
+    gate.note_result_final(T_FIRST)
+
+    assert not held
+    assert gate.is_open(T_SECOND)
+    assert gate.expired_ids == set()

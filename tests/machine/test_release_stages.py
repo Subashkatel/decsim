@@ -15,6 +15,7 @@ when it starts (Chamberland, Iyer and Poulin 1704.06662 Sec. 2; Litinski
 import pathlib
 
 import decsim.confidence.no_signal as no_signal
+import decsim.config as config
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
@@ -42,9 +43,18 @@ TWO_T_GATES = DATA / "two_t_gates.lss"
 FIRST_T_MERGE = 1
 FIRST_S_MERGE = 3
 SECOND_T_MERGE = 8
-ALWAYS_WAIT = (window_records.FINAL_STAGE, False)
-NEVER_WAIT = (window_records.PROVISIONAL_STAGE, False)
-REPAIR = (window_records.PROVISIONAL_STAGE, True)
+# a hold of 2 us, far below the strong tier's 20 us, and the round after
+HOLD_LIMIT_MICROSECONDS = 2.0
+ROUND_MICROSECONDS = 1.0
+# (release stage, whether the gate holds decisions, its hold limit)
+ALWAYS_WAIT = (window_records.FINAL_STAGE, False, None)
+NEVER_WAIT = (window_records.PROVISIONAL_STAGE, False, None)
+REPAIR = (window_records.PROVISIONAL_STAGE, True, None)
+BOUNDED_REPAIR = (
+    window_records.PROVISIONAL_STAGE,
+    True,
+    HOLD_LIMIT_MICROSECONDS,
+)
 
 
 def _pool(microseconds):
@@ -68,16 +78,19 @@ def _escalating_every_window():
 
 def run_two_t_gates(design):
     """The machine after its run, union-find 0.5 us and the strong 20 us."""
-    release_stage, holds = design
+    release_stage, holds, limit = design
     workload = lattice_surgery.read_schedule(TWO_T_GATES, DISTANCE)
     settings = workload_settings.WorkloadSettings.running(workload)
     scheme = region_sliding.RegionSlidingScheme.Settings()
     windows = window_settings.WindowSettings(
         scheme=scheme, release_stage=release_stage
     )
-    qpu = qpu_settings.QpuSettings(distance=DISTANCE)
+    qpu = qpu_settings.QpuSettings(
+        distance=DISTANCE, round_period_microseconds=ROUND_MICROSECONDS
+    )
     controller = controller_settings.ControllerSettings(
-        holds_decisions_for_final_results=holds
+        holds_decisions_for_final_results=holds,
+        final_result_hold_limit_microseconds=limit,
     )
     base = machines.base(settings, windows, qpu, controller)
     weak_pool = _pool(0.5)
@@ -129,3 +142,17 @@ def test_the_gate_holds_the_next_t_merge_that_never_waiting_starts():
     held_start = started_at(repairing, SECOND_T_MERGE)
     assert never_waiting.control.final_result_gate is None
     assert free_start < held_start
+
+
+def test_a_bounded_hold_delays_a_decision_by_at_most_its_limit():
+    """It waits 2 us and the boundary after, then starts on weak answers."""
+    never_waiting = run_two_t_gates(NEVER_WAIT)
+    bounded = run_two_t_gates(BOUNDED_REPAIR)
+
+    free_start = started_at(never_waiting, SECOND_T_MERGE)
+    bounded_start = started_at(bounded, SECOND_T_MERGE)
+    gate = bounded.control.final_result_gate
+    bound = HOLD_LIMIT_MICROSECONDS + ROUND_MICROSECONDS
+    limit_and_a_round = config.microseconds_to_ticks(bound)
+    assert free_start < bounded_start <= free_start + limit_and_a_round
+    assert gate.expired_ids == {SECOND_T_MERGE}

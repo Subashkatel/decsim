@@ -47,8 +47,7 @@ def sd6_memory_program(
     """The SD6 memory the experiments decode, cut into its rounds.
 
     Stim's generated Z memory with Deltakit's SD6 and noiseless time
-    boundaries, as experiments/basic_case/config.py memory makes it. A
-    test is skipped where Deltakit is not installed.
+    boundaries. A test is skipped where Deltakit is not installed.
     """
     pytest.importorskip("deltakit_explorer")
     sd6 = deltakit.SD6Noise()

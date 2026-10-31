@@ -3,12 +3,11 @@
 Sparse Blossom's time grows with the detection events it matches: about
 linearly below threshold, and faster than linearly in dense noise
 (Higgott and Gidney 2303.15933 Sec. 5 and Fig. 12, O(n^1.32) above
-threshold). DetectionEventTime prices one decode by such a law, fitted
-to decsim's own correlated matching timed on decsim's SD6 windows on
-one pinned core (experiments/correlated_matching_timing), then scaled
-so that its mean over calm windows at p = 0.003 is 2604.12841 Table
-IX's time per round times the window's rounds. The law keeps the shape
-measured here; the scale is the paper's Grace CPU. No host time enters.
+threshold). DetectionEventTime prices one decode by such a law. A run
+file fits it to decsim's own correlated matching, timed on one pinned
+core, and may scale it so that its mean over calm windows is a paper's
+time, such as 2604.12841 Table IX's time per round times the window's
+rounds. No host time enters.
 """
 
 import dataclasses

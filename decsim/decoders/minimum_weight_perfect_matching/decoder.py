@@ -358,9 +358,8 @@ def correlated_model(
     is 1 when the matching holds an odd number of edges with that fault
     id, Matching.decode). A graphlike fault no physical fault of the
     window holds is an error of its own at its graphlike prior. It is
-    public because the correlated matching timing campaign
-    (experiments/correlated_matching_timing) writes each window's model
-    as this row reads it.
+    public so that a timing run can write each window's model as this
+    row reads it.
 
     The model is written as Stim's text and read in one call: appending
     error by error makes every target a Python object, 0.59 s a strong

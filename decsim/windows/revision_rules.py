@@ -20,6 +20,7 @@ for the window. An edge's switching settings name one of each
 """
 
 import dataclasses
+from typing import Optional
 
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
@@ -156,13 +157,16 @@ class EdgeRules:
     replace and cancel are the edge's replace rule and cancel rule,
     built; costs prices its verdict on its own clock.
     escalates_on_a_guess lets a window whose decode read a provisional
-    boundary escalate at once (strong_window_shapes.RedoWindow).
+    boundary escalate at once (strong_window_shapes.RedoWindow), while
+    the target's queue holds fewer waiting jobs than guess_backlog_limit,
+    None for always.
     """
 
     replace: ports.ReplaceRule
     cancel: ports.CancelRule
     costs: window_commits.VerdictCosts = window_commits.VerdictCosts()
     escalates_on_a_guess: bool = False
+    guess_backlog_limit: Optional[int] = None
 
 
 # the rules of an edge whose settings name none: today's

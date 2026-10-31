@@ -70,6 +70,12 @@ it differs, the redo is withdrawn wherever it is (the edge counts
 meets its verdict anew. The final answers are the held run's; only the
 ticks move.
 
+A withdrawn redo is wasted strong work, and in a burst it can crowd the
+pool. `--set switching.strong_window.guess_backlog_limit=1` starts a
+redo on a guess only while the strong queue holds fewer waiting jobs
+than the limit; otherwise the window waits for its final boundary, as
+without a guess.
+
 ## A backup on a deadline
 
 ```bash

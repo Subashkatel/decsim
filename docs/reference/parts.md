@@ -659,7 +659,7 @@ slack_microseconds is the budget from the source job's arrival.
 
 `decsim/escalation/settings.py`. A strong window row's settings record (strong_window_shapes.py).
 
-restart_reread_buffer_regions is the double window's re-read width; starts_on_a_guess whether a window escalates on a provisional input.
+restart_reread_buffer_regions is the double window's re-read width; starts_on_a_guess whether a window escalates on a provisional input, and guess_backlog_limit the strong queue's waiting jobs below which it does, None for always.
 
 | Member | Type |
 | --- | --- |
@@ -668,6 +668,7 @@ restart_reread_buffer_regions is the double window's re-read width; starts_on_a_
 | `boundary_policy` | `ports.BoundaryPolicySettings` |
 | `restart_reread_buffer_regions` | `int` |
 | `starts_on_a_guess` | `bool` |
+| `guess_backlog_limit` | `Optional[int]` |
 | `build(self, engine: engine_module.Engine)` | `strong_window_shapes.StrongWindowShape` |
 
 ### `SwitchingSettings`
@@ -703,12 +704,13 @@ strong_answer_route names one of records/routes.py ANSWER_ROUTE_NAMES, the way a
 
 boundary_policy is the boundary row the windows take: held, the default, where the window after an escalated one waits for the strong answer, or checked, where it decodes on the weak boundary and is checked when the strong one lands. Eager is refused (policies.py): its provisional boundary is never corrected.
 
-starts_on_a_guess, under checked boundaries only, lets a window whose decode read a provisional boundary escalate at once, its past face pinned on that boundary, instead of when it is final.
+starts_on_a_guess, under checked boundaries only, lets a window whose decode read a provisional boundary escalate at once, its past face pinned on that boundary, instead of when it is final. guess_backlog_limit, when set, starts on a guess only while the strong queue holds fewer waiting jobs than it, so redos that may be withdrawn never crowd a busy pool; the window then waits for its final boundary, as without a guess.
 
 | Field | Type | Default |
 | --- | --- | --- |
 | `boundary_policy` | `ports.BoundaryPolicySettings` | `boundary_policies.Held.Settings()` |
 | `starts_on_a_guess` | `bool` | `False` |
+| `guess_backlog_limit` | `Optional[int]` | `None` |
 
 ### `DoubleWindow.Settings`
 

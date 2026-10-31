@@ -377,7 +377,11 @@ def _edge_rules(
     cancel = cancel_rule.build()
     strong_window = settings.strong_window
     return revision_rules.EdgeRules(
-        replace, cancel, costs, strong_window.starts_on_a_guess
+        replace,
+        cancel,
+        costs,
+        strong_window.starts_on_a_guess,
+        strong_window.guess_backlog_limit,
     )
 
 

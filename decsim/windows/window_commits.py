@@ -508,12 +508,13 @@ class WindowVerdict:
         result, so the chain goes on and the unit is free. The verdict
         is acted on once the input is final: no strong work starts on a
         guess, and the frame takes only a final result. An edge that
-        escalates on a guess starts its strong work now.
+        escalates on a guess starts its strong work now, while its
+        target's backlog allows (_may_guess).
         """
         revision = self._revision(job, result)
         self.committer.commit_revision(revision, False, read_result)
         is_escalated = verdict is decoding_records.Verdict.ESCALATE
-        if is_escalated and edge.rules.escalates_on_a_guess:
+        if is_escalated and _may_guess(edge):
             self._escalate_on_the_guess(job, result, edge)
             return
         settle = functools.partial(
@@ -691,6 +692,24 @@ def _verdict_for(
     if edge.result_is_unavailable(job):
         return decoding_records.Verdict.ESCALATE
     return edge.policy.verdict_for_weak_result(job, result)
+
+
+def _may_guess(edge: ports.EscalateEdge) -> bool:
+    """Whether the edge starts its redo on a guess now.
+
+    Under a backlog limit a guess starts only while the target's queue
+    holds fewer waiting jobs, the backlog DART-Q's trigger reads
+    (escalation/deadlines.py), so a redo that may be withdrawn takes
+    only a pool that has room for it.
+    """
+    rules = edge.rules
+    if not rules.escalates_on_a_guess:
+        return False
+    limit = rules.guess_backlog_limit
+    if limit is None:
+        return True
+    waiting = edge.decode_queue.waiting_jobs()
+    return waiting < limit
 
 
 def _nothing_to_read() -> None:

@@ -154,12 +154,17 @@ class RedoWindow(StrongWindowPorts):
         starts_on_a_guess, under checked boundaries only, lets a window
         whose decode read a provisional boundary escalate at once, its
         past face pinned on that boundary, instead of when it is final.
+        guess_backlog_limit, when set, starts on a guess only while the
+        strong queue holds fewer waiting jobs than it, so redos that may
+        be withdrawn never crowd a busy pool; the window then waits for
+        its final boundary, as without a guess.
         """
 
         boundary_policy: ports.BoundaryPolicySettings = (
             boundary_policies.Held.Settings()
         )
         starts_on_a_guess: bool = False
+        guess_backlog_limit: Optional[int] = None
         # the word the refusals name this row by
         name = "redo_window"
         # it restarts no weak window, so the width the window interaction
@@ -169,6 +174,10 @@ class RedoWindow(StrongWindowPorts):
         def __post_init__(self) -> None:
             if self.starts_on_a_guess:
                 _refuse_a_guess_without_checks(self.boundary_policy)
+            if self.guess_backlog_limit is not None:
+                _check_backlog_limit(
+                    self.guess_backlog_limit, self.starts_on_a_guess
+                )
 
         @property
         def absorbs_weak_windows(self) -> bool:
@@ -281,6 +290,7 @@ class DoubleWindow(StrongWindowPorts):
         name = "double_window"
         # it waits for the far weak boundary, so it never starts early
         starts_on_a_guess = False
+        guess_backlog_limit = None
 
         def __post_init__(self) -> None:
             _check_restart_reread(self.restart_reread_buffer_regions)
@@ -1108,6 +1118,20 @@ def _refuse_a_guess_without_checks(
         "redo_window.starts_on_a_guess needs checked boundaries: only "
         "they check a provisional boundary again, so only there is a "
         "guess corrected"
+    )
+
+
+def _check_backlog_limit(limit: int, starts_on_a_guess: bool) -> None:
+    """A limit is a positive count, on a row that starts on a guess."""
+    if not starts_on_a_guess:
+        raise ValueError(
+            "redo_window.guess_backlog_limit limits the redos that start on "
+            "a guess; set starts_on_a_guess too"
+        )
+    if limit >= 1:
+        return
+    raise ValueError(
+        f"redo_window.guess_backlog_limit must be at least 1, got {limit}"
     )
 
 

@@ -378,6 +378,7 @@ class _OutsideShape:
         boundary_policy = _OutsideBoundaryPolicy.Settings()
         restart_reread_buffer_regions = 1
         starts_on_a_guess = False
+        guess_backlog_limit = None
 
         def build(self, engine) -> "_OutsideShape":
             return _OutsideShape(engine)

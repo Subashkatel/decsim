@@ -114,7 +114,9 @@ class StrongWindowSettings(Protocol):
     """A strong window row's settings record (strong_window_shapes.py).
 
     restart_reread_buffer_regions is the double window's re-read width;
-    starts_on_a_guess whether a window escalates on a provisional input.
+    starts_on_a_guess whether a window escalates on a provisional input,
+    and guess_backlog_limit the strong queue's waiting jobs below which
+    it does, None for always.
     """
 
     name: str
@@ -122,6 +124,7 @@ class StrongWindowSettings(Protocol):
     boundary_policy: ports.BoundaryPolicySettings
     restart_reread_buffer_regions: int
     starts_on_a_guess: bool
+    guess_backlog_limit: Optional[int]
 
     def build(
         self, engine: engine_module.Engine

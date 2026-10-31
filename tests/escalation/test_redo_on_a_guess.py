@@ -67,6 +67,29 @@ def test_redos_of_one_stream_overlap_only_on_a_guess():
     assert overlapped > 0
 
 
+def test_a_backlog_limit_keeps_a_busy_pool_from_guessing():
+    """With one strong unit, a limit of 1 starts no redo that is withdrawn.
+
+    The answers stay serial switching's.
+    """
+    held = switching_mode.switching_graph(20.0)
+    limited_redo = strong_window_shapes.RedoWindow.Settings(
+        boundary_policy=CHECKED, starts_on_a_guess=True, guess_backlog_limit=1
+    )
+    guessing = _with_redo(held, GUESSING_REDO)
+    limited = _with_redo(held, limited_redo)
+
+    always = _count_over(guessing, range(4), "withdrawn")
+    when_room = _count_over(limited, range(4), "withdrawn")
+
+    assert when_room < always
+    for seed in range(4):
+        _held_machine, held_result = switching_mode.run_shot(held, seed)
+        _machine, result = switching_mode.run_shot(limited, seed)
+        held_predictions = switching_mode.predictions(held_result)
+        assert switching_mode.predictions(result) == held_predictions
+
+
 # ---- helpers
 
 

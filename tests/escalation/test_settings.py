@@ -70,6 +70,24 @@ def test_a_guess_under_held_boundaries_is_refused():
         strong_window_shapes.RedoWindow.Settings(starts_on_a_guess=True)
 
 
+def test_a_backlog_limit_without_a_guess_is_refused():
+    checked = boundary_policies.Checked.Settings()
+    with pytest.raises(ValueError, match="set starts_on_a_guess too"):
+        strong_window_shapes.RedoWindow.Settings(
+            boundary_policy=checked, guess_backlog_limit=2
+        )
+
+
+def test_a_backlog_limit_below_one_is_refused():
+    checked = boundary_policies.Checked.Settings()
+    with pytest.raises(ValueError, match="at least 1"):
+        strong_window_shapes.RedoWindow.Settings(
+            boundary_policy=checked,
+            starts_on_a_guess=True,
+            guess_backlog_limit=0,
+        )
+
+
 def test_a_guess_beside_run_both_at_once_is_refused():
     """Both start the redo early; the two contradict."""
     checked = boundary_policies.Checked.Settings()

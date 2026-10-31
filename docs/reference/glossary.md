@@ -142,6 +142,11 @@ These are not from the papers. The pages use them everywhere.
   each repair is in before the next decision starts. With a hold limit
   (`controller.final_result_hold_limit_microseconds`) a decision held
   that long starts on the weak answers, which bounds the worst case.
+- **guess**: the weak boundary a window decodes on before the window
+  behind it is final (checked boundaries). A redo that **starts on a
+  guess** (`switching.strong_window.starts_on_a_guess`) pins its past
+  face on it and leaves at once; a final boundary that differs
+  **withdraws** the redo and the window is decoded again.
 - **absorb**: a strong window absorbs a weak window when it decodes the
   same rounds again and replaces that window's answer, so the weak
   window is never decoded on its own.

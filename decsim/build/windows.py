@@ -291,6 +291,7 @@ class Windows:
         verdict.committer = self.committer
         verdict.input_checks = self.input_checks
         verdict.requester = requester
+        verdict.retention = self.retention
         requester.tracker = self.tracker
         requester.retention = self.retention
         requester.builder = self.builder

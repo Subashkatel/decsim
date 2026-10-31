@@ -104,6 +104,12 @@ class StrongRedecode:
             "held strong windows dropped for a kept weak result",
             "windows",
         ),
+        statistics_registry.Statistic(
+            "withdrawn",
+            statistic_kinds.Count,
+            "escalations on a guess whose pinned face changed",
+            "windows",
+        ),
     )
     statistics = statistics_registry.unrecorded(STATISTICS)
 
@@ -344,6 +350,16 @@ class StrongRedecode:
         self.decode_queue.cancel_strong(window_key)
         if self.next_edge is not None:
             self.next_edge.cancel_strong_request(window_key)
+
+    def withdraw_strong_request(self, window_key: tuple) -> None:
+        """An escalation on a guess read a face that changed: it ends.
+
+        The window is decoded again and may ask for a new redo at once,
+        so the old one is cancelled wherever it is, whatever the cancel
+        rule, and its result, landed or not, is never used.
+        """
+        self.statistics.withdrawn.add()
+        self.cancel_strong_request(window_key)
 
     def abandon_strong_request(self, window_key: tuple) -> None:
         """A kept weak result: a held request ends, a submitted one runs out.

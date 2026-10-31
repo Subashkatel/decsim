@@ -310,6 +310,23 @@ class StrongRequests:
             self._close_attempt(window_key, live.request_job)
         return taken
 
+    def withdraw_selection(
+        self, window_key: tuple, pool: window_records.PoolId
+    ) -> None:
+        """The destination waits for its selected result on pool no more.
+
+        Its window is decoded again on a face that changed, and may
+        select a new request.
+        """
+        key = (window_key, pool)
+        record = self.by_window.get(key)
+        if record is None:
+            return
+        record.phase = StrongPhase.NONE
+        record.selected_request_key = None
+        record.results_owed = 0
+        self._drop_if_empty(key)
+
     def abandon(self, window_key: tuple, pool: window_records.PoolId) -> None:
         """The destination's live request on pool runs out, unwanted.
 

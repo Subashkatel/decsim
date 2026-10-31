@@ -8,7 +8,8 @@ al. 2412.05115 lines 625-644), with the weak decoder's own boundary as
 the prediction. The window commits provisionally and waits. When the
 final boundary lands, the state it leaves in the window is compared with
 the state the decode read. The same: the result stands, and the step the
-window waits with runs, its final commit or its escalation. Different:
+window waits with runs, its final commit or its escalation, or the
+confirmation of an escalation that left on the guess. Different:
 the window is decoded again on the state it holds now; its new boundary
 is checked in turn by the window after it, so only a window whose input
 changed is decoded again, SWIPER's optimistic restart (lines 643-644). A
@@ -164,6 +165,10 @@ class InputChecks:
     ) -> None:
         """A result on a provisional input waits: on_final, or on_stale."""
         self.waiting_by_window[window_key] = _Waiting(on_final, on_stale)
+
+    def awaits_final_input(self, window_key: tuple) -> bool:
+        """Whether the window's committed result still waits for its input."""
+        return window_key in self.waiting_by_window
 
     # ---- private
 

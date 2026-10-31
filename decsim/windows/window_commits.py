@@ -19,7 +19,10 @@ A first revision that read a boundary not final yet commits
 provisionally and waits for that boundary (input_checks.py): a keep is
 final, and an escalation leaves, once it is final and the same; a
 boundary that changed drops the revision and the window is decoded
-again, which starts its revisions over.
+again, which starts its revisions over. On an edge that escalates on a
+guess the escalation leaves at once, and a later revision that lands
+before the boundary is final waits for it; a boundary that changed
+withdraws the escalation too.
 """
 
 import dataclasses
@@ -344,9 +347,14 @@ class WindowVerdict:
     input_checks = ports.Port(input_checks_module.InputChecks)
     # the window decoded again when a boundary its decode read changed
     requester = ports.Port(ports.WindowRequests)
+    # the rounds a window escalated on a guess keeps until it is checked
+    retention = ports.Port(ports.WindowRetention)
 
     def __init__(self, engine: engine_module.Engine) -> None:
         self.engine = engine
+        # window key -> the later revision that waits for the window's
+        # first revision to read final boundaries
+        self.revision_by_window: dict = {}
 
     def accept_revision(
         self,
@@ -360,10 +368,14 @@ class WindowVerdict:
         below the threshold asks the next pool for the window after the
         switch cost, then commits provisionally, its boundary leaving
         with the first commit. A strong result no edge leaves is final.
+        A later revision of a window whose first one escalated on a
+        guess waits until the guess is checked.
         """
         pool = job.request_key.pool
         edge = self.edges.leaving(pool)
         is_first = self._decoded_first(job)
+        if self._holds_for_its_guess(job, result, is_first):
+            return
         if not is_first and edge is None:
             self._commit_final_revision(job, result)
             return
@@ -373,6 +385,22 @@ class WindowVerdict:
         if edge is not None:
             edge.note_source_result(job)
         self._price_the_threshold(job, result, edge)
+
+    def _holds_for_its_guess(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        is_first: bool,
+    ) -> bool:
+        """Hold a later revision while the window's guess is unchecked."""
+        if is_first:
+            return False
+        request_key = job.request_key
+        window_key = (request_key.stream_id, request_key.window_id)
+        if not self.input_checks.awaits_final_input(window_key):
+            return False
+        self.revision_by_window[window_key] = (job, result)
+        return True
 
     def _price_the_threshold(
         self,
@@ -479,10 +507,15 @@ class WindowVerdict:
         The provisional commit hands the boundary on and reads the
         result, so the chain goes on and the unit is free. The verdict
         is acted on once the input is final: no strong work starts on a
-        guess, and the frame takes only a final result.
+        guess, and the frame takes only a final result. An edge that
+        escalates on a guess starts its strong work now.
         """
         revision = self._revision(job, result)
         self.committer.commit_revision(revision, False, read_result)
+        is_escalated = verdict is decoding_records.Verdict.ESCALATE
+        if is_escalated and edge.rules.escalates_on_a_guess:
+            self._escalate_on_the_guess(job, result, edge)
+            return
         settle = functools.partial(
             self._settle_the_guess, job, result, verdict, edge
         )
@@ -490,6 +523,64 @@ class WindowVerdict:
         self.input_checks.wait_for_final_input(
             revision.window.key, settle, decode_again
         )
+
+    def _escalate_on_the_guess(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        edge: ports.EscalateEdge,
+    ) -> None:
+        """The escalation leaves now, its past face pinned on the guess.
+
+        The strong redo no longer waits for the redo before it, so one
+        stream's redos overlap instead of forming a chain; the guess is
+        checked when the final boundary lands. The window's rounds stay
+        on the chip until then, in case it is decoded again.
+        """
+        window = self._window_of(job)
+        self.retention.hold_guessed_reads(window)
+        edge.escalate(job)
+        confirm = functools.partial(self._confirm_the_guess, job, result)
+        withdraw = functools.partial(self._withdraw_the_guess, job, result)
+        self.input_checks.wait_for_final_input(window.key, confirm, withdraw)
+
+    def _confirm_the_guess(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """The face the redo pinned is final and the same: it stands.
+
+        A strong result that landed already commits now.
+        """
+        window = self._window_of(job)
+        window.t_input_final = self.engine.now
+        self.retention.release_guessed_reads(window.key)
+        queue = self._queue_of(job.request_key.pool)
+        escalate = decoding_records.Verdict.ESCALATE
+        queue.resolve_weak_request(job, result, escalate)
+        waiting = self.revision_by_window.pop(window.key, None)
+        if waiting is None:
+            return
+        self.accept_revision(*waiting)
+
+    def _withdraw_the_guess(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+    ) -> None:
+        """The face the redo pinned changed: drop it, decode the window again.
+
+        The new decode reads the final face, so its own verdict says
+        whether a redo is asked for again.
+        """
+        window = self._window_of(job)
+        self.revision_by_window.pop(window.key, None)
+        edge = self.edges.leaving(job.request_key.pool)
+        edge.withdraw_strong_request(window.key)
+        # the guessed hold keeps the rounds the new decode and any new
+        # redo read, until a guess holds or the window is final
+        self._decode_again(job, result)
 
     def _settle_the_guess(
         self,

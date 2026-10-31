@@ -697,6 +697,12 @@ class WindowRetention(Protocol):
     def hold_strong_input(self, job: decoding_records.DecodeJob) -> None:
         """The strong job's context becomes its input hold."""
 
+    def hold_guessed_reads(self, window: window_records.Window) -> None:
+        """Keep what the window's potential strong read keeps, while checked."""
+
+    def release_guessed_reads(self, key: tuple) -> None:
+        """The guess held: the redo's own hold keeps what it reads."""
+
     def strong_window_input(
         self,
         builder: "WindowJobBuilder",
@@ -1028,6 +1034,9 @@ class EscalateEdge(Protocol):
 
     def cancel_strong_request(self, window_key: tuple) -> None:
         """A kept source result: its target request ends, held or submitted."""
+
+    def withdraw_strong_request(self, window_key: tuple) -> None:
+        """An escalation on a guess read a face that changed: it ends."""
 
     def abandon_strong_request(self, window_key: tuple) -> None:
         """A kept source result: a held request ends, a submitted one runs out.

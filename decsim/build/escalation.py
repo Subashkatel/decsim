@@ -375,7 +375,10 @@ def _edge_rules(
     cancel_rule = settings.cancel_rule
     replace = replace_rule.build()
     cancel = cancel_rule.build()
-    return revision_rules.EdgeRules(replace, cancel, costs)
+    strong_window = settings.strong_window
+    return revision_rules.EdgeRules(
+        replace, cancel, costs, strong_window.starts_on_a_guess
+    )
 
 
 def _threshold_source(

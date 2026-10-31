@@ -425,8 +425,10 @@ class DecoderManager:
         (Toshio 2510.25222 lines 606-614, the ongoing strong computation
         halted), and nothing happens when no request is live or done. A
         cancel ends one request and passes no verdict on the
-        destination, so the cancelled request can be replaced.
+        destination, so the cancelled request can be replaced; a
+        destination that selected it waits for it no more.
         """
+        self.strong_requests.withdraw_selection(key, self.pool_id)
         discarded = self._discard_strong_outputs(key)
         taken = self.strong_requests.take_live(key, self.pool_id)
         if not taken:

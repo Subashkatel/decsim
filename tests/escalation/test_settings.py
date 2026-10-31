@@ -64,6 +64,23 @@ def test_a_deadline_beside_an_absorbing_window_is_refused():
         _switching(deadline=deadline, strong_window=double_window)
 
 
+def test_a_guess_under_held_boundaries_is_refused():
+    """Only checked boundaries check a provisional one again."""
+    with pytest.raises(ValueError, match="needs checked boundaries"):
+        strong_window_shapes.RedoWindow.Settings(starts_on_a_guess=True)
+
+
+def test_a_guess_beside_run_both_at_once_is_refused():
+    """Both start the redo early; the two contradict."""
+    checked = boundary_policies.Checked.Settings()
+    redo = strong_window_shapes.RedoWindow.Settings(
+        boundary_policy=checked, starts_on_a_guess=True
+    )
+
+    with pytest.raises(ValueError, match="starts_on_a_guess"):
+        _switching(run_both_at_once=True, strong_window=redo)
+
+
 def test_a_deadline_beside_checked_boundaries_is_refused():
     """A rescue starts the target early; checked boundaries wait for it.
 

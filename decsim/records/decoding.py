@@ -345,6 +345,36 @@ class RephaseGuard:
         return ()
 
 
+@dataclass(frozen=True)
+class GuessedReads:
+    """A hold: a window's rounds while its escalation on a guess is unchecked.
+
+    The window escalated on a provisional boundary, and its potential
+    strong read left with the redo (escalation/strong_window_shapes.py,
+    RedoWindow); a face that changes decodes it again on these rounds,
+    and it may escalate again. The hold ends when a guess holds or the
+    window is final.
+    """
+
+    window_key: tuple
+
+    def referenced_stream_ids(self) -> tuple:
+        """None: the rounds held are the window's own."""
+        return ()
+
+    def stream_ids_read_at_once(self) -> tuple:
+        """None: the hold ends when the guess is checked."""
+        return ()
+
+    def served_window_key(self) -> Optional[tuple]:
+        """The window whose decode the hold serves."""
+        return self.window_key
+
+    def holders_waited_for(self) -> tuple:
+        """None: the hold ends when the guess is checked."""
+        return ()
+
+
 # Every hold a syndrome buffer keeps rounds for; the store asks it the
 # three questions above and never reads which one it is.
 Hold = Union[
@@ -357,6 +387,7 @@ Hold = Union[
     StrongInputInFlight,
     DecoderInputHold,
     RephaseGuard,
+    GuessedReads,
 ]
 
 

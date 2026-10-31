@@ -623,12 +623,34 @@ class RoundRetention:
         for store in self._strong_context_stores(stream_id):
             self.release_hold_if_live(owner, store)
 
+    def hold_guessed_reads(self, window: window_records.Window) -> None:
+        """Keep what the window's potential strong read keeps, while checked.
+
+        That read leaves with the redo (hold_strong_input). A face that
+        changes withdraws the redo, and the window decodes again and may
+        escalate again, on the same rounds in the same stores, so one
+        hold serves each attempt until the guess holds or the window is
+        final.
+        """
+        held = self._potential_strong_reads(window)
+        owner = decoding_records.GuessedReads(window.key)
+        for store in self._chain_stores(window.stream_id):
+            if not store.has_hold(owner):
+                store.register_hold(owner, held)
+
+    def release_guessed_reads(self, key: tuple) -> None:
+        """The guess held: the redo's own hold keeps what it reads."""
+        owner = decoding_records.GuessedReads(key)
+        for store in self._chain_stores(key[0]):
+            self.release_hold_if_live(owner, store)
+
     def release_potential_strong(self, key: tuple) -> None:
         """The window is final: no edge re-decodes it, so each read ends."""
         for edge in self._chain_of(key[0]):
             potential = decoding_records.PotentialStrong(key, edge.target)
             for store in self._held_stores(edge):
                 self.release_hold_if_live(potential, store)
+        self.release_guessed_reads(key)
 
     def landing_stores(self) -> tuple:
         """Each store a region lands in, once.
@@ -919,6 +941,23 @@ class RoundRetention:
         """The edge's two stores; a run with an edge keeps strong context."""
         return (edge.carried_from, edge.landed_in)
 
+    def _chain_stores(
+        self,
+        stream_id: Any,  # an opaque identity
+    ) -> tuple:
+        """Every store of the stream's chain, once."""
+        stores = []
+        for edge in self._chain_of(stream_id):
+            held = self._held_stores(edge)
+            _add_new_stores(stores, held)
+        return tuple(stores)
+
+    def _potential_strong_reads(self, window: window_records.Window) -> list:
+        """The rounds a window's potential strong read keeps, as registered."""
+        primary_reads = self.primary_read_keys(window)
+        strong_context = self.strong_context_read_keys(window, primary_reads)
+        return primary_reads + strong_context
+
     def _chain_of(
         self,
         stream_id: Any,  # an opaque identity
@@ -1091,6 +1130,13 @@ def _holds_store(stores: list, store) -> bool:
         if listed is store:
             return True
     return False
+
+
+def _add_new_stores(stores: list, more: tuple) -> None:
+    """Append each store of more that stores does not list yet."""
+    for store in more:
+        if not _holds_store(stores, store):
+            stores.append(store)
 
 
 def _stored_through(tracker, store, stream_id) -> int:

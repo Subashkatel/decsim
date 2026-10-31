@@ -13,6 +13,7 @@ the last section lists what is refused for now.
 | Escalate on doubt | a switching part: a confidence row and a verdict | Toshio 2510.25222 Sec. III A | [two tiers](../tutorials/two_tiers.md) |
 | A chain of any length | `machines.with_escalation`, once per pool | | [a chain of decoders](build_a_chain_of_decoders.md) |
 | Speculative | `switching.run_both_at_once` | Toshio Sec. III A, Step 1 | below |
+| A redo that starts on a guess | `switching.strong_window.starts_on_a_guess`, with checked boundaries | SWIPER 2412.05115's predicted boundary, for the strong tier | below |
 | A backup on a deadline | `switching.deadline` | DART-Q 2605.09142 | below |
 | A backup on a failure | `switching.verdict.type=status` | BP+OSD runs OSD when BP does not converge | [a chain of decoders](build_a_chain_of_decoders.md) |
 | An ensemble or a vote | the `ensemble` decoder row | Harmony 2401.12434; VibeLSD 2508.15743 | [an ensemble](decode_a_window_with_an_ensemble.md) |
@@ -53,6 +54,22 @@ default) or lets it run out and drops its answer
 chain. Which revision the frame takes is `switching.replace_rule`:
 `latest`, the default, or `best_status`.
 
+## A redo that starts on a guess
+
+```bash
+decsim run run.py --set windows.boundary_policy.type=Checked --set switching.strong_window.boundary_policy.type=Checked --set switching.strong_window.starts_on_a_guess=true
+```
+
+Under checked boundaries a window escalates only once the boundary its
+decode read is final, so one patch's redos run one after another. Here
+the redo leaves at the provisional commit, its past face pinned on the
+weak boundary it read. A strong answer that lands first waits for that
+boundary. When the final boundary is the same, the answer stands; when
+it differs, the redo is withdrawn wherever it is (the edge counts
+`withdrawn`), and the window is decoded again on the final boundary and
+meets its verdict anew. The final answers are the held run's; only the
+ticks move.
+
 ## A backup on a deadline
 
 ```bash
@@ -77,6 +94,7 @@ to this table, when the machine is built:
 |---|---|
 | `double_window` on an edge past the entry pool | Toshio defines it over the entry pool's sliding chain; a pool past it decodes only what it is sent. A `redo_window` there redoes the double region. |
 | switching on parallel or sandwich windows | a redo pins its past face on the window that commits the rounds before it, and an A block or a core decodes before that seam |
+| `starts_on_a_guess` without checked boundaries, or beside `run_both_at_once` | only checked boundaries check a guess again; `run_both_at_once` starts the redo already |
 | `windows.release_stage` provisional on a run without patch streams | an operation decoded on its own windows delivers its result once; a patch stream's blocker releases by segment, which reads the committed prefix |
 | `double_window` beside a router | it absorbs neighbouring windows, which a router may send to two pools |
 | more than one router | |

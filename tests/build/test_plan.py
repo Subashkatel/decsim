@@ -377,6 +377,7 @@ class _OutsideShape:
         absorbs_weak_windows = False
         boundary_policy = _OutsideBoundaryPolicy.Settings()
         restart_reread_buffer_regions = 1
+        starts_on_a_guess = False
 
         def build(self, engine) -> "_OutsideShape":
             return _OutsideShape(engine)

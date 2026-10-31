@@ -113,13 +113,15 @@ class DeadlineSettings(Protocol):
 class StrongWindowSettings(Protocol):
     """A strong window row's settings record (strong_window_shapes.py).
 
-    restart_reread_buffer_regions is the double window's re-read width.
+    restart_reread_buffer_regions is the double window's re-read width;
+    starts_on_a_guess whether a window escalates on a provisional input.
     """
 
     name: str
     absorbs_weak_windows: bool
     boundary_policy: ports.BoundaryPolicySettings
     restart_reread_buffer_regions: int
+    starts_on_a_guess: bool
 
     def build(
         self, engine: engine_module.Engine
@@ -195,6 +197,8 @@ class SwitchingSettings:
             )
         if self.deadline is not None:
             self._refuse_deadline_contradictions()
+        if self.strong_window.starts_on_a_guess:
+            self._refuse_two_early_starts()
 
     def build_policy(
         self, threshold: ports.ThresholdSource
@@ -207,6 +211,16 @@ class SwitchingSettings:
             self.run_both_at_once,
             built_verdict,
             verdict.reads_threshold,
+        )
+
+    def _refuse_two_early_starts(self) -> None:
+        """A guess starts the redo early; run_both_at_once does already."""
+        if not self.run_both_at_once:
+            return
+        raise ValueError(
+            "switching.strong_window.starts_on_a_guess starts the redo at "
+            "the provisional commit; run_both_at_once starts it with every "
+            "weak job (the two policies contradict; pick one)"
         )
 
     def _refuse_deadline_contradictions(self) -> None:

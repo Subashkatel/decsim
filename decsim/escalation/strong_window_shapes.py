@@ -124,6 +124,13 @@ class RedoWindow(StrongWindowPorts):
     window with no earlier neighbour pins nothing: the initialisation
     closes its past face.
 
+    That wait makes one stream's redos a chain: each starts when the
+    one before it lands. A row that starts on a guess escalates at the
+    provisional commit and pins the neighbour's weak commit, the guess
+    SWIPER's windows decode on (Vittal et al. 2412.05115 lines 625-644).
+    Its answer counts once the face is final and the same; a face that
+    changed withdraws it, and the window is decoded again.
+
     The job waits for its rounds in the strong syndrome buffer, and the
     rounds the chip still holds go up with the escalation. This is not
     Fig. 12's geometry (Toshio et al. 2510.25222 lines 1249-1250); the
@@ -143,16 +150,25 @@ class RedoWindow(StrongWindowPorts):
         boundary and is checked when the strong one lands. Eager is
         refused (policies.py): its provisional boundary is never
         corrected.
+
+        starts_on_a_guess, under checked boundaries only, lets a window
+        whose decode read a provisional boundary escalate at once, its
+        past face pinned on that boundary, instead of when it is final.
         """
 
         boundary_policy: ports.BoundaryPolicySettings = (
             boundary_policies.Held.Settings()
         )
+        starts_on_a_guess: bool = False
         # the word the refusals name this row by
         name = "redo_window"
         # it restarts no weak window, so the width the window interaction
         # is handed is the double window's default, read by nothing
         restart_reread_buffer_regions = 1
+
+        def __post_init__(self) -> None:
+            if self.starts_on_a_guess:
+                _refuse_a_guess_without_checks(self.boundary_policy)
 
         @property
         def absorbs_weak_windows(self) -> bool:
@@ -263,6 +279,8 @@ class DoubleWindow(StrongWindowPorts):
         restart_reread_buffer_regions: int = 1
         # the word the refusals name this row by
         name = "double_window"
+        # it waits for the far weak boundary, so it never starts early
+        starts_on_a_guess = False
 
         def __post_init__(self) -> None:
             _check_restart_reread(self.restart_reread_buffer_regions)
@@ -1076,6 +1094,20 @@ def _waiting_for_its_windows(
         stored_data_of_streams=(key[0],),
         name="region_windows",
         released_description="the stream laid the region's windows",
+    )
+
+
+def _refuse_a_guess_without_checks(
+    boundary_policy: ports.BoundaryPolicySettings,
+) -> None:
+    """A guess is only checked again under the checked boundary row."""
+    built = boundary_policy.build()
+    if built.rechecks_provisional_boundaries:
+        return
+    raise ValueError(
+        "redo_window.starts_on_a_guess needs checked boundaries: only "
+        "they check a provisional boundary again, so only there is a "
+        "guess corrected"
     )
 
 

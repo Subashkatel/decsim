@@ -155,11 +155,14 @@ class EdgeRules:
 
     replace and cancel are the edge's replace rule and cancel rule,
     built; costs prices its verdict on its own clock.
+    escalates_on_a_guess lets a window whose decode read a provisional
+    boundary escalate at once (strong_window_shapes.RedoWindow).
     """
 
     replace: ports.ReplaceRule
     cancel: ports.CancelRule
     costs: window_commits.VerdictCosts = window_commits.VerdictCosts()
+    escalates_on_a_guess: bool = False
 
 
 # the rules of an edge whose settings name none: today's

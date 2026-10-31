@@ -56,17 +56,6 @@ def test_the_lookahead_policy_keeps_the_stride_and_reads_past_the_stream():
     ]
 
 
-def test_only_the_lookahead_policy_declares_trailing_tail_context():
-    """The fact the escalation policy reads, declared by the policy."""
-    flush_row = sliding_scheme.SlidingWindowScheme(terminal_policy="flush")
-    lookahead_row = sliding_scheme.SlidingWindowScheme(
-        terminal_policy="lookahead"
-    )
-
-    assert flush_row.has_trailing_tail_context is False
-    assert lookahead_row.has_trailing_tail_context is True
-
-
 def test_every_window_chains_to_the_one_after_it():
     row = sliding_scheme.SlidingWindowScheme(terminal_policy="flush")
 

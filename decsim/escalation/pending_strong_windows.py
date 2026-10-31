@@ -2,7 +2,7 @@
 
 A shape row that cannot build its job at the escalation declares what
 releases it: the weak windows whose commits it waits on, or the
-operation whose stored rounds release it when it has no later window.
+streams whose stored rounds release it when it has no later window.
 Toshio et al. 2510.25222 Sec. III C starts the strong decoder "after the
 boundary conditions at both ends have been determined by the weak
 decoder" (lines 1248-1250); which boundaries those are is the row's
@@ -44,13 +44,14 @@ class ReleaseConditions:
     """What must happen before a held strong job may be built.
 
     committed_windows are the weak windows whose commits the row waits
-    on; stored_data_of_stream is the stream whose stored rounds
-    release it. name labels the wait in the run's view,
+    on; stored_data_of_streams are the streams whose stored rounds
+    release it, each a stream the row reads (a window across a coupling
+    reads more than its own). name labels the wait in the run's view,
     released_description in the log.
     """
 
     committed_windows: tuple = ()
-    stored_data_of_stream: Any = None  # an opaque identity
+    stored_data_of_streams: tuple = ()
     name: str = "nothing"
     released_description: str = ""
 
@@ -68,9 +69,9 @@ class PendingStrongWindow:
 class PendingStrongWindows:
     """The held strong windows, under every condition that can release one.
 
-    An entry is indexed under each window it waits on and under the
-    operation whose data releases it, and a release takes it out of
-    every index at once.
+    An entry is indexed under each window it waits on and under each
+    stream whose data releases it, and a release takes it out of every
+    index at once.
     """
 
     def __init__(self) -> None:
@@ -82,7 +83,7 @@ class PendingStrongWindows:
     def register(self, held: PendingStrongWindow) -> None:
         """Hold the assignment under the conditions its row declared."""
         conditions = held.conditions
-        waits_on_data = conditions.stored_data_of_stream is not None
+        waits_on_data = bool(conditions.stored_data_of_streams)
         has_condition = bool(conditions.committed_windows) or waits_on_data
         if not has_condition:
             raise RuntimeError(
@@ -94,12 +95,8 @@ class PendingStrongWindows:
         self.uncommitted_windows[held.key] = set(conditions.committed_windows)
         for window_key in conditions.committed_windows:
             _index(self.keys_by_committed_window, window_key, held.key)
-        if waits_on_data:
-            _index(
-                self.keys_by_stored_operation,
-                conditions.stored_data_of_stream,
-                held.key,
-            )
+        for stream_id in conditions.stored_data_of_streams:
+            _index(self.keys_by_stored_operation, stream_id, held.key)
 
     def released_by_commit(self, window_key: tuple) -> tuple:
         """The entries this weak commit satisfies, in registration order."""
@@ -132,8 +129,7 @@ class PendingStrongWindows:
         del self.uncommitted_windows[held.key]
         for window_key in held.conditions.committed_windows:
             _unindex(self.keys_by_committed_window, window_key, held.key)
-        stream_id = held.conditions.stored_data_of_stream
-        if stream_id is not None:
+        for stream_id in held.conditions.stored_data_of_streams:
             _unindex(self.keys_by_stored_operation, stream_id, held.key)
 
     def held_for(self, window_key: tuple) -> Optional[PendingStrongWindow]:
@@ -160,8 +156,7 @@ def waiting_text(conditions: ReleaseConditions) -> str:
     parts = []
     for window_key in conditions.committed_windows:
         parts.append(f"commit of window {window_key}")
-    stream_id = conditions.stored_data_of_stream
-    if stream_id is not None:
+    for stream_id in conditions.stored_data_of_streams:
         parts.append(f"stored rounds of stream {stream_id}")
     return ", ".join(parts)
 

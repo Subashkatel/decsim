@@ -43,6 +43,7 @@ import decsim.records.windows as window_records
 import decsim.topology.graph as graph
 import decsim.topology.graph_layout as graph_layout
 import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.schemes.parallel as parallel_scheme
 import decsim.windows.schemes.sliding as sliding_scheme
 import decsim.windows.settings as window_settings
 import tests.declared_run as declared_run
@@ -553,7 +554,7 @@ class DelegatingWindowScheme:
     2007.03152 lines 489-491).
     """
 
-    has_trailing_tail_context = True
+    pins_each_past_face = True
     commits_in_one_serial_chain = True
     supports_dynamic_streams = True
     reads_across_couplings = False
@@ -623,8 +624,8 @@ class UndeclaredWindowScheme:
 def test_a_windowing_scheme_added_from_outside_runs_under_switching():
     """The double window reads the row's declaration, not its class.
 
-    A row that commits in one serial chain and keeps trailing tail
-    context serves the double window, whatever class it is.
+    A row that commits in one serial chain serves the double window,
+    whatever class it is.
     """
     scheme = DelegatingWindowScheme.Settings()
     machine = fabric.switching_machine(
@@ -642,21 +643,40 @@ def test_a_windowing_scheme_added_from_outside_runs_under_switching():
     ]
 
 
-def test_a_flush_tail_is_refused_under_switching():
-    """A strong recovery reads past the last commit, which flush drops."""
-    held = boundary_policies.Held.Settings()
-    serial = _serial_switching_graph(held)
-    serial_windows = serial.held(machines.WINDOWS)
-    windows = dataclasses.replace(serial_windows, terminal_policy="flush")
-    flushing = serial.with_held(machines.WINDOWS, windows)
-    with pytest.raises(ValueError, match="no trailing tail context"):
-        machine_module.Machine.build(flushing, 0)
+def test_a_flush_tails_last_window_is_redone_under_switching():
+    """The redo reads no round past the last window's commit.
+
+    A redo reads its commit and one buffer past it (records/windows.py
+    strong_context_bounds); a flush tail's last window has no buffer,
+    and the stream's end closes its future face as a pinned face would
+    (Bombin et al. 2303.04846 lines 1456-1458).
+    """
+    switching = fabric.switching_graph(rounds=9, escalated_windows={1})
+    windows = switching.held(machines.WINDOWS)
+    flush_windows = dataclasses.replace(windows, terminal_policy="flush")
+    flushing = switching.with_held(machines.WINDOWS, flush_windows)
+    machine = machine_module.Machine.build(flushing, 0)
+
+    machine.run()
+
+    tiers = declared_run.frame_tiers(machine)
+    assert tiers == [((1, 0), "weak"), ((1, 1), "strong")]
+
+
+def test_switching_on_parallel_windows_is_refused():
+    """An A block decodes before the seam that commits the rounds before it.
+
+    A redo of it would read its past face as the stream's start.
+    """
+    scheme = parallel_scheme.ParallelWindowScheme.Settings()
+    with pytest.raises(NotImplementedError, match="pins its past face"):
+        fabric.switching_machine(rounds=9, escalated_windows={1}, scheme=scheme)
 
 
 def test_a_switching_run_on_a_scheme_that_declares_nothing_still_stops():
     """The policy reads the facts the row does not declare."""
     scheme = UndeclaredWindowScheme.Settings()
-    with pytest.raises(AttributeError, match="has_trailing_tail_context"):
+    with pytest.raises(AttributeError, match="pins_each_past_face"):
         fabric.switching_machine(rounds=9, escalated_windows={1}, scheme=scheme)
 
 

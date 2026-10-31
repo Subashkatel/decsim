@@ -87,11 +87,13 @@ class _Shape:
         is_held: bool,
         waits_on=(FAR_BOUNDARY_KEY,),
         missing_rounds=(),
+        read_streams=(1,),
     ) -> None:
         self.job = job
         self.is_held = is_held
         self.waits_on = waits_on
         self.missing_rounds = tuple(missing_rounds)
+        self.read_streams = read_streams
         self.planned = []
 
     def plan(self, weak_job) -> pending_module.StrongAssignment:
@@ -102,12 +104,12 @@ class _Shape:
 
     def release_conditions(self, assignment):
         del assignment
-        stored_data_of_stream = None
+        stored_data_of_streams = ()
         if self.missing_rounds:
-            stored_data_of_stream = 1
+            stored_data_of_streams = self.read_streams
         return pending_module.ReleaseConditions(
             committed_windows=self.waits_on,
-            stored_data_of_stream=stored_data_of_stream,
+            stored_data_of_streams=stored_data_of_streams,
             name="far_boundary",
             released_description="far-side weak boundary determined",
         )
@@ -613,6 +615,33 @@ def test_a_held_windows_missing_rounds_are_carried_up_once_and_land():
     assert redecode.strong_receiver.reserved == 3
     assert redecode.strong_receiver.landed == [(region, ARRIVAL)]
     assert redecode.strong_receiver.coming == set()
+    assert _call_names(queue) == ["await", "enqueue"]
+    assert not redecode.has_pending()
+
+
+def test_a_row_that_reads_two_streams_leaves_on_a_round_of_either():
+    """A redo across a coupling reads its partner stream's rounds too.
+
+    The partner's round may be the last one stored, so a round stored on
+    either stream releases the row (strong_window_shapes.RedoWindow).
+    """
+    strong_job = _strong_job(5)
+    shape = _Shape(
+        strong_job,
+        is_held=True,
+        waits_on=(),
+        missing_rounds=REGION_ROUND_KEYS,
+        read_streams=(1, 2),
+    )
+    redecode, output, _strong, queue, _done = _redecode(shape)
+    weak_job = _weak_job()
+
+    redecode.escalate(weak_job)
+    _region, landed = output.regions[0]
+    landed()
+    shape.missing_rounds = ()
+    redecode.submit_if_stored_data_releases(2)
+
     assert _call_names(queue) == ["await", "enqueue"]
     assert not redecode.has_pending()
 

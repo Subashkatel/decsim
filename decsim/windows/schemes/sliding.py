@@ -33,9 +33,11 @@ class SlidingWindowScheme:
     terminal_policy is the one setting this row reads: flush ends the
     last window at the stream's last round, qLDPC's last window, and
     lookahead keeps the regular stride, so the last window still reads
-    rounds past its own commit and a strong recovery has context to read.
+    rounds past its own commit, as every other window does.
     """
 
+    # each window waits on the one before it
+    pins_each_past_face = True
     commits_in_one_serial_chain = True
     supports_dynamic_streams = True
     reads_across_couplings = False
@@ -61,7 +63,6 @@ class SlidingWindowScheme:
 
     def __init__(self, terminal_policy: str = "flush") -> None:
         self.terminal_policy = terminal_policy
-        self.has_trailing_tail_context = terminal_policy == "lookahead"
 
     def plan_operation(
         self,

@@ -497,13 +497,13 @@ class DoubleWindow(StrongWindowPorts):
         restart_key = held.resolved_region.restart_window_key
         if restart_key is None:
             return pending_strong_windows.ReleaseConditions(
-                stored_data_of_stream=held.key[0],
+                stored_data_of_streams=(held.key[0],),
                 name="terminal_data",
                 released_description="terminal data complete",
             )
         return pending_strong_windows.ReleaseConditions(
             committed_windows=(restart_key,),
-            stored_data_of_stream=held.key[0],
+            stored_data_of_streams=(held.key[0],),
             name="far_boundary",
             released_description="far-side weak boundary determined",
         )
@@ -854,12 +854,25 @@ def _assignment_of(
 def _stored_rounds_conditions(
     held: "_HeldStrongRedo",
 ) -> pending_strong_windows.ReleaseConditions:
-    """The rounds the row reads, stored in the strong syndrome buffer."""
+    """The rounds the row reads, stored in the strong syndrome buffer.
+
+    A round of any stream it reads may be the last one stored: a window
+    across a coupling reads its partners' rounds too.
+    """
+    streams_read = _streams_of(held.read_keys)
     return pending_strong_windows.ReleaseConditions(
-        stored_data_of_stream=held.key[0],
+        stored_data_of_streams=streams_read,
         name="context_stored",
         released_description="strong context stored in strong syndrome buffer",
     )
+
+
+def _streams_of(round_keys: tuple) -> tuple:
+    """Each stream the (stream, round) keys name, once, in first order."""
+    streams = {}
+    for stream_id, _round_index in round_keys:
+        streams[stream_id] = None
+    return tuple(streams)
 
 
 def _job_once_stored(
@@ -1060,7 +1073,7 @@ def _waiting_for_its_windows(
 ) -> pending_strong_windows.ReleaseConditions:
     """A region the stream has not laid out: each stored round may."""
     return pending_strong_windows.ReleaseConditions(
-        stored_data_of_stream=key[0],
+        stored_data_of_streams=(key[0],),
         name="region_windows",
         released_description="the stream laid the region's windows",
     )

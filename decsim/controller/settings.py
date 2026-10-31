@@ -30,6 +30,11 @@ class ControllerSettings:
     (round_assembly.RoundsInFlight); None is unbounded. clock is the domain
     all three costs are charged on, None the machine's; a zero cost is not
     rounded up to an edge.
+
+    holds_decisions_for_final_results builds the final-result gate
+    (final_result_gate.py): a decision starts only once every decision it
+    descends from has its final result, which a provisional release
+    (windows.release_stage) delivers after the decision itself.
     """
 
     clock: Optional[config.Clock] = None
@@ -37,6 +42,7 @@ class ControllerSettings:
     packing_cycles_per_round: int = 0
     decision_to_pulse_cycles: int = 0
     packing_rounds_in_flight: Optional[int] = None
+    holds_decisions_for_final_results: bool = False
 
     def __post_init__(self) -> None:
         config.check_cycles(

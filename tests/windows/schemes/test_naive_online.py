@@ -42,5 +42,4 @@ def test_the_row_declares_itself_unwindowed_and_batches_idle_rounds():
     assert plan.windowed is False
     assert plan.batch_preceding_idle_rounds is True
     assert plan.internal_dependencies == ()
-    assert row.has_trailing_tail_context is False
     assert row.supports_dynamic_streams is False

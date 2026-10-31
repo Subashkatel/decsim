@@ -28,7 +28,8 @@ import decsim.windows.schemes.window_data as window_data
 class RegionSlidingScheme:
     """Region windows, each reading the next region and its coupled ones."""
 
-    has_trailing_tail_context = False
+    # each window waits on the one before it on its stream
+    pins_each_past_face = True
     # a coupled region's windows wait across streams, not along one chain
     commits_in_one_serial_chain = False
     supports_dynamic_streams = True

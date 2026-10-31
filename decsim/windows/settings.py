@@ -57,7 +57,7 @@ class WindowSettings:
     boundary_policy is a boundary row's Settings record
     (windows/boundary_policies.py), when a committed window ships its
     boundary to the windows after it. A switching run's policy refuses a
-    tail or a boundary row its strong window cannot serve.
+    boundary row its strong window cannot serve.
     boundary_payload is a payload row's Settings record
     (windows/boundary_payloads.py), how the hand-off between windows is
     written on the hop between their decoders. clock and decision_cycles price
@@ -70,6 +70,11 @@ class WindowSettings:
     edge's signal. release_rule is a release rule row's Settings record
     (windows/release_rules.py), the decodes a blocking operation's
     outcome waits for; None is release_rule_for's choice by the run.
+    release_stage is one of RELEASE_STAGES (records/windows.py), which
+    revision of those decodes the outcome waits for: final, the default,
+    or provisional, the weak commit of an escalated window, its final
+    revision then announced to the controller's final-result gate
+    (controller/final_result_gate.py).
     """
 
     clock: Optional[config.Clock] = None
@@ -84,10 +89,12 @@ class WindowSettings:
     )
     recorded_confidence: Optional[ports.ConfidenceSettings] = None
     release_rule: Optional[ReleaseRuleSettings] = None
+    release_stage: str = window_records.FINAL_STAGE
 
     def __post_init__(self) -> None:
         config.check_cycles("windows.decision_cycles", self.decision_cycles)
         _check_terminal_policy(self.terminal_policy)
+        _check_release_stage(self.release_stage)
 
 
 def switching_windows(
@@ -95,8 +102,12 @@ def switching_windows(
 ) -> WindowSettings:
     """The windows with the tail and boundary row a switching run takes.
 
-    A strong recovery reads past the last window's commit, so the tail is
-    lookahead. The boundary row is the record the strong window gives
+    The tail is lookahead, so the last window's redo reads one buffer past
+    its commit as every other redo does. A flush tail, set after, serves
+    too: a redo reads no round past its own window's reads
+    (records/windows.py strong_context_bounds), and the stream's end
+    closes the last window's future face (Bombin et al. 2303.04846 lines
+    1456-1458). The boundary row is the record the strong window gives
     (ports.StrongWindowBoundaries).
     """
     boundary_policy = strong_window.boundary_policy
@@ -120,6 +131,16 @@ def release_rule_for(
     if patch_lives:
         return release_rules.DecodedAncestors.Settings()
     return release_rules.OwnStreams.Settings()
+
+
+def _check_release_stage(release_stage) -> None:
+    """windows.release_stage is one of the two words."""
+    if release_stage in window_records.RELEASE_STAGES:
+        return
+    listed = list(window_records.RELEASE_STAGES)
+    raise ValueError(
+        f"windows.release_stage is one of {listed}, got {release_stage!r}"
+    )
 
 
 def _check_terminal_policy(terminal_policy) -> None:

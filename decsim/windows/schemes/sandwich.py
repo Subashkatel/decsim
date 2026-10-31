@@ -19,9 +19,9 @@ import decsim.windows.schemes.window_data as window_data
 class TanSandwichScheme:
     """Tan et al.'s zero-seam sandwich decoder for graphlike memory DEMs."""
 
-    # The last core commits to the operation's last round, so its read
-    # window ends where its commit ends.
-    has_trailing_tail_context = False
+    # A core decodes before the seam that commits the rounds before it,
+    # so no window it waits on pins its past face.
+    pins_each_past_face = False
     # The cores are independent and a seam waits on the core on each
     # side of it, so the commits are a depth-two graph, not a chain.
     commits_in_one_serial_chain = False

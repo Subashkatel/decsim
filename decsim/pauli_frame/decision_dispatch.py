@@ -5,7 +5,10 @@ bills a transfer to the port it left by (src/mem/coherent_xbar.cc:354-357)
 and OMNeT++ refuses a module that sends a message it does not own
 (src/sim/csimplemodule.cc:333-334). A card that prices no path has no
 fabric: the decision is at the controller at once, and only the
-controller's decision-to-pulse cost stands.
+controller's decision-to-pulse cost stands. A notice that a result is
+final rides the same path and stops at the controller, which holds the
+decisions waiting on it (controller/final_result_gate.py); it drives no
+pulse.
 """
 
 import functools
@@ -37,11 +40,26 @@ class DecisionDispatch:
         """Send one decision to the controller; deliver runs at the QPU."""
         self._log_dispatch(decision)
         landed = functools.partial(self._at_the_controller, decision, deliver)
+        self._send(decision.target_operation_id, landed)
+
+    def dispatch_final_result(
+        self, operation_id: int, landed: Callable[[], None]
+    ) -> None:
+        """Send one final-result notice; landed runs at the controller."""
+        self.engine.log(
+            log_sources.PAULI_FRAME,
+            f"DISPATCH final result for op#{operation_id} -> controller",
+        )
+        at_the_controller = functools.partial(_call_landed, landed)
+        self._send(operation_id, at_the_controller)
+
+    def _send(self, operation_id: int, landed) -> None:
+        """Put one message on frame_to_controller; landed runs on arrival."""
         if self.link is None:
             self.engine.schedule(0, landed, label="pauli frame->controller")
             return
         attribution = transfer_records.TransferAttribution(
-            owner_id=decision.target_operation_id,
+            owner_id=operation_id,
             patch_ids=(),
             window_id=None,
             first_round=None,
@@ -70,3 +88,8 @@ class DecisionDispatch:
             f"DISPATCH {instruction} for op#{decision.target_operation_id} "
             f"-> controller -> controller sequencer",
         )
+
+
+def _call_landed(landed, _transfer=None) -> None:
+    """Run a notice's landing, with or without the transfer that carried it."""
+    landed()

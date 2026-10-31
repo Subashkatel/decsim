@@ -113,7 +113,9 @@ class Windows:
         router = _router(layout, routed_operations)
         builder = decode_requests.DecodeRequestBuilder(engine)
         ledger = committed_rounds.LogicalLedger()
-        results = operation_results.OperationResults()
+        results = operation_results.OperationResults(
+            windows_settings.release_stage
+        )
         rule_settings = window_settings.release_rule_for(
             windows_settings, workload.patch_lives
         )
@@ -171,12 +173,14 @@ class Windows:
         factory: ports.MagicStateFactory,
         detection_events: ports.DetectionEventPlacement,
         entry_sides: tuple,
+        final_results: Optional[ports.FinalResultReceiver] = None,
     ) -> None:
         """Read from the stores, decode on the managers, commit to the frame.
 
         entry_sides are every entry pool's routers.EntrySide, which the
         router hands each window it sends there, its store among them;
-        writes is how far the controller wrote each stream.
+        writes is how far the controller wrote each stream. final_results
+        is the controller's final-result gate, None when it has none.
         """
         self.models.decoder = primary_decoder
         for target_decoder in target_decoders:
@@ -191,6 +195,7 @@ class Windows:
         self.decoder_output.frame = frame
         self.results.conditional_release = conditional_release
         self.results.factory = factory
+        self.results.final_results = final_results
         for side in entry_sides:
             self.router.add_side(side)
 

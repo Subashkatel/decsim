@@ -1443,14 +1443,28 @@ class ReleaseReceiver(Protocol):
     """The conditional release, as the window manager sees it."""
 
     def release_waiters(self, operation: program_records.Operation) -> None:
-        """A final result is in: send every decision it releases."""
+        """A result its release stage takes is in: send what it releases."""
+
+
+@runtime_checkable
+class FinalResultReceiver(Protocol):
+    """The final-result gate, as the window manager sees it.
+
+    It hears a needed outcome once every decode the outcome awaits is
+    final, which under a provisional release comes after its waiters
+    went on (windows/operation_results.py).
+    """
+
+    def note_result_final(self, operation: program_records.Operation) -> None:
+        """Every decode the outcome awaits is final."""
 
 
 @runtime_checkable
 class DecisionDispatch(Protocol):
     """The frame's dispatch, as the conditional release sees it.
 
-    The decision leaves by the frame's end of frame_to_controller.
+    The decision leaves by the frame's end of frame_to_controller, and so
+    does the notice that a result is final, which the controller keeps.
     """
 
     def dispatch_decision(
@@ -1459,6 +1473,11 @@ class DecisionDispatch(Protocol):
         deliver: Callable[[program_records.Decision], None],
     ) -> None:
         """Send one decision to the controller; deliver runs at the QPU."""
+
+    def dispatch_final_result(
+        self, operation_id: int, landed: Callable[[], None]
+    ) -> None:
+        """Send one final-result notice; landed runs at the controller."""
 
 
 @runtime_checkable
@@ -2302,9 +2321,10 @@ class WindowingScheme(Protocol):
     facts about the layout are declared, never read off the class
     (gem5's port API, arXiv 2007.03152 lines 489-491):
 
-    has_trailing_tail_context: the last window this scheme lays out
-        reads rounds past its own commit, which is what the switching
-        recovery re-reads when a strong result revises a window.
+    pins_each_past_face: every window after its stream's first waits on
+        the window that commits the round before it, so a strong redo
+        pins its past face on that commit (Bombin et al. 2303.04846
+        lines 1456-1458) and reads no round before it.
     commits_in_one_serial_chain: the windows commit one after another in
         stride order, which the double window absorbs.
     supports_dynamic_streams: an operation whose round count is not known
@@ -2314,7 +2334,7 @@ class WindowingScheme(Protocol):
         layouts couple segments.
     """
 
-    has_trailing_tail_context: bool
+    pins_each_past_face: bool
     commits_in_one_serial_chain: bool
     supports_dynamic_streams: bool
     reads_across_couplings: bool

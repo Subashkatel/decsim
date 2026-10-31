@@ -43,6 +43,16 @@ STRONG_POOL_ID = PoolId("strong")
 # stride, so the last window still reads rounds past its own commit.
 TERMINAL_POLICIES = ("flush", "lookahead")
 
+# WindowSettings.release_stage names one of these: which revision of the
+# decodes a needed outcome awaits lets it release its waiters. final waits
+# for each window's last revision; provisional takes the first commit,
+# an escalated window's weak one, and the final follows (Chamberland,
+# Iyer and Poulin 1704.06662 Sec. 2: the correction a T gate leaves is
+# learned before the next T gate).
+FINAL_STAGE = "final"
+PROVISIONAL_STAGE = "provisional"
+RELEASE_STAGES = (FINAL_STAGE, PROVISIONAL_STAGE)
+
 
 @dataclass(frozen=True)
 class DecoderRequestKey:
@@ -288,6 +298,15 @@ class RoundSpan:
         """The rounds the span holds."""
         return self.last_round - self.first_round + 1
 
+    @property
+    def round_keys(self) -> tuple:
+        """Every round of the span as a (stream, round) key, in order."""
+        stop_round = self.last_round + 1
+        keys = []
+        for round_index in range(self.first_round, stop_round):
+            keys.append((self.stream_id, round_index))
+        return tuple(keys)
+
 
 @dataclass(frozen=True)
 class OperationWindowPlan:
@@ -424,6 +443,14 @@ def strong_context_bounds(window: "Window") -> tuple:
     buffer_rounds = max(0, buffer_span)
     context_hi = window.commit_hi + buffer_rounds
     return window.commit_lo, window.commit_lo, window.commit_hi, context_hi
+
+
+def spatial_read_keys(window: "Window") -> list:
+    """The (stream, round) keys of each region the window reads across."""
+    keys = []
+    for span in window.spatial_reads:
+        keys.extend(span.round_keys)
+    return keys
 
 
 def restart_reread_round_count(

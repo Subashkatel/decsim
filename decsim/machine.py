@@ -259,6 +259,7 @@ class Machine:
             factory=qpu.factory,
             detection_events=readout.detection_events,
             entry_sides=entry_sides,
+            final_results=control.final_result_gate,
         )
         control.connect(
             qpu=qpu.device,

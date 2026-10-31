@@ -131,6 +131,15 @@ These are not from the papers. The pages use them everywhere.
   the weak crossing commit, one bit per logical observable, 64 + k
   bits; on `through_weak_chip` it is the 64-bit name alone. The region
   and the strong answer carry the same name in front of their bits.
+- **decision**: an operation whose outcome is needed: another operation
+  is `blocked_by` it, or the QPU needs its result back.
+- **release stage**: which answer of an escalated window a decision's
+  release waits for (`windows.release_stage`). `final` waits for the
+  strong answer. `provisional` releases on the weak commit, and the
+  strong answer may then repair the frame. The **final-result gate**
+  (`controller.holds_decisions_for_final_results`) holds each decision's
+  start until the decisions before it have their strong answers, so
+  each repair is in before the next decision starts.
 - **absorb**: a strong window absorbs a weak window when it decodes the
   same rounds again and replaces that window's answer, so the weak
   window is never decoded on its own.
@@ -248,7 +257,7 @@ presets' parts (`decsim/presets/machines.py`).
 | `reverse` | `strong_to_weak` | an answer down an edge to the source chip, which joins it and sends it home (`switching.strong_answer_route` `through_weak_chip`); and a boundary to an earlier pool's window |
 | `same_pool` | `weak_to_weak` | one window's committed boundary to the next window of the same pool |
 | `answer` | `weak_to_frame` | a correction to the Pauli frame |
-| `decision` | `frame_to_controller` | the conditional release |
+| `decision` | `frame_to_controller` | the conditional release, and the notice that a decision's result is final |
 | `command` | `controller_to_qpu` | the instruction, and its pulse cost |
 
 ## Read next

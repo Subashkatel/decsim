@@ -59,7 +59,7 @@ class Switching:
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse a run shape the escalation cannot serve."""
-        _refuse_flush_terminal(plan.scheme)
+        _refuse_unpinned_past_faces(plan.scheme)
         if self.run_both_at_once:
             _refuse_batches_beside_run_both(plan)
         if not plan.is_absorbing_strong_window:
@@ -203,14 +203,20 @@ def _refuse_batches_beside_run_both(plan: decoding_records.RunShape) -> None:
         )
 
 
-def _refuse_flush_terminal(scheme) -> None:
-    """Switching needs a last window that still reads past its commit."""
-    if scheme.has_trailing_tail_context:
+def _refuse_unpinned_past_faces(scheme) -> None:
+    """A redo pins its past face on the window that commits before it.
+
+    It reads no round before its commit (records/windows.py
+    strong_context_bounds), so a window decoded before that neighbour
+    would be redone with its past face read as the stream's start.
+    """
+    if scheme.pins_each_past_face:
         return
-    raise ValueError(
-        "switching and strong-window recovery require a windowing scheme "
-        "whose last window carries buffer context past its commit; this "
-        "scheme has no trailing tail context"
+    raise NotImplementedError(
+        "switching on a windowing scheme whose windows decode before the "
+        "window that commits the rounds before them (parallel blocks, "
+        "sandwich cores) is not implemented yet: a redo pins its past "
+        f"face on that commit; {refusals.REFUSALS}"
     )
 
 

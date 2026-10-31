@@ -27,6 +27,7 @@ import decsim.records.formation as formation_records
 import decsim.records.program as program_records
 import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
+import decsim.refusals as refusals
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 
@@ -154,6 +155,7 @@ def build_plan(
         windows, workload.patch_lives
     )
     _check_release_rule(release_rule, workload.patch_lives)
+    _check_release_stage(windows.release_stage, workload.patch_lives)
     has_patch_lives = bool(workload.patch_lives)
     planned_operations = _decode_plan_operations(
         operations,
@@ -380,6 +382,21 @@ def _check_release_rule(rule, lives: tuple) -> None:
             "decodes, which only a lattice-surgery run's patch streams "
             "track; use windows/release_rules.py OwnStreams.Settings()"
         )
+
+
+def _check_release_stage(release_stage: str, lives: tuple) -> None:
+    """A provisional release is built for patch streams only.
+
+    Their blockers release by stream segment (windows/operation_results.py),
+    which reads the committed prefix; an operation decoded on its own
+    windows delivers its result once, final.
+    """
+    if release_stage == window_records.FINAL_STAGE or lives:
+        return
+    raise NotImplementedError(
+        "windows.release_stage provisional on a run without patch streams "
+        f"is not implemented yet; {refusals.REFUSALS}"
+    )
 
 
 def _unique_operations(operations) -> tuple:

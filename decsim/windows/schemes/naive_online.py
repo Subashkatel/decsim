@@ -15,9 +15,9 @@ import decsim.windows.schemes.window_data as window_data
 class NaiveOnlineScheme:
     """Decode each operation as one full batch after all rounds arrive."""
 
-    # One window covers the operation, so there is nothing past its
-    # commit and nothing after it to chain to.
-    has_trailing_tail_context = False
+    # One window covers the stream: its past face is the stream's start,
+    # which the initialisation closes, and nothing after it chains to it.
+    pins_each_past_face = True
     commits_in_one_serial_chain = False
     supports_dynamic_streams = False
     reads_across_couplings = False

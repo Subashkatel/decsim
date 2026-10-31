@@ -4,7 +4,10 @@ The result is the ledger's XOR over [1, rounds], delivered once after
 every window committed and no strong wait; a segment releases when the
 committed prefix covers it, its value the stream's from round 1 (Skoric
 et al. 2209.08552: the logical correction of a stream is the sum over
-its committed windows).
+its committed windows). Under the provisional stage a segment releases
+on its windows' weak commits, and the final-result gate hears it once
+they are final (Chamberland, Iyer and Poulin 1704.06662 Sec. 2: the
+correction is learned before the next T gate).
 """
 
 import types
@@ -23,6 +26,14 @@ class _Release:
 
     def release_waiters(self, operation) -> None:
         self.released.append(operation.id)
+
+
+class _FinalResults:
+    def __init__(self) -> None:
+        self.final = []
+
+    def note_result_final(self, operation) -> None:
+        self.final.append(operation.id)
 
 
 class _Store:
@@ -62,7 +73,7 @@ class _Factory:
 class _Fixture:
     """One six-round operation in two windows, committed by hand."""
 
-    def __init__(self) -> None:
+    def __init__(self, release_stage=window_records.FINAL_STAGE) -> None:
         self.operation = program_records.Operation(
             1, "memory", (0,), patches=(0,)
         )
@@ -99,7 +110,7 @@ class _Fixture:
         self.completions = []
         self.ledger = committed_rounds.LogicalLedger()
         self.factory = _Factory(self.completions)
-        self.results = operation_results.OperationResults()
+        self.results = operation_results.OperationResults(release_stage)
         self.results.planner = plan
         self.results.tracker = tracker
         self.results.retention = retention
@@ -235,3 +246,68 @@ def test_a_timing_only_window_leaves_no_result():
     fixture.commit((1, 1), (1, 1))
     assert fixture.release.released == [1]
     assert fixture.delivered.result_by_operation == {}
+
+
+def _segment_on_the_first_window(fixture) -> None:
+    """Operation 2, blocked on, whose segment ends with window (1, 0)."""
+    segment = program_records.Operation(
+        2, "segment", (0,), blocked_by=1, stream_id=1
+    )
+    fixture.results.tracker.operation_by_id[2] = segment
+    fixture.results.tracker.blocking_operation_ids.add(2)
+    fixture.results.bind_stream_segment(2, 1, 0)
+    fixture.results.bind_required_stream_end(2, 3)
+
+
+def _land_strong(fixture, key) -> None:
+    """The strong answer for the window lands and makes it final."""
+    window = fixture.windows[key]
+    window.published_request_key = window_records.DecoderRequestKey(
+        key[0], key[1], window_records.STRONG_POOL_ID, 7
+    )
+    fixture.results.note_window_final(window)
+    fixture.results.release_committed_segments(key[0])
+
+
+def test_the_final_stage_holds_a_segment_for_its_strong_answer():
+    fixture = _Fixture()
+    _segment_on_the_first_window(fixture)
+
+    fixture.commit((1, 0), (1, 1), is_final=False)
+
+    assert fixture.release.released == []
+
+
+def test_the_provisional_stage_releases_a_segment_on_its_weak_commit():
+    fixture = _Fixture(window_records.PROVISIONAL_STAGE)
+    _segment_on_the_first_window(fixture)
+
+    fixture.commit((1, 0), (1, 1), is_final=False)
+
+    assert fixture.release.released == [2]
+
+
+def test_the_gate_hears_a_provisional_result_once_its_strong_answer_lands():
+    fixture = _Fixture(window_records.PROVISIONAL_STAGE)
+    final_results = _FinalResults()
+    fixture.results.final_results = final_results
+    _segment_on_the_first_window(fixture)
+    fixture.commit((1, 0), (1, 1), is_final=False)
+    assert final_results.final == []
+
+    _land_strong(fixture, (1, 0))
+
+    assert final_results.final == [2]
+    assert fixture.release.released == [2]
+
+
+def test_the_gate_hears_a_final_stage_result_as_it_releases():
+    fixture = _Fixture()
+    final_results = _FinalResults()
+    fixture.results.final_results = final_results
+    _segment_on_the_first_window(fixture)
+
+    fixture.commit((1, 0), (1, 1))
+
+    assert fixture.release.released[0] == 2
+    assert final_results.final == [2]

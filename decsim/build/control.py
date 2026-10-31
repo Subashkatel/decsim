@@ -14,6 +14,7 @@ import decsim.build.plan as plan_build
 import decsim.config as config
 import decsim.controller.conditional_release as conditional_release_module
 import decsim.controller.feedback_streams as feedback_streams
+import decsim.controller.final_result_gate as final_result_gate_module
 import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.instruction_output as instruction_output_module
 import decsim.controller.operation_issue as operation_issue
@@ -31,6 +32,8 @@ class Control:
     """The components that run the program's feedback loop with the QPU.
 
     pauli_frame is None when the run commits into no frame.
+    final_result_gate is None when no decision waits for earlier final
+    results.
     """
 
     execution_runtime: execution_runtime_module.ExecutionRuntime
@@ -45,6 +48,7 @@ class Control:
     conditional_release: conditional_release_module.ConditionalRelease
     pauli_frame: Optional[ports.Frame]
     decision_dispatch: decision_dispatch_module.DecisionDispatch
+    final_result_gate: Optional[final_result_gate_module.FinalResultGate]
 
     @classmethod
     def build(
@@ -83,6 +87,7 @@ class Control:
             clocked_frame = config.with_machine_clock(frame, machine_clock)
             pauli_frame = clocked_frame.build(engine)
         decision_dispatch = decision_dispatch_module.DecisionDispatch(engine)
+        final_result_gate = _final_result_gate(controller, engine, plan)
         control = cls(
             execution_runtime=execution_runtime,
             issuer=issuer,
@@ -92,6 +97,7 @@ class Control:
             conditional_release=conditional_release,
             pauli_frame=pauli_frame,
             decision_dispatch=decision_dispatch,
+            final_result_gate=final_result_gate,
         )
         control._wire_inside(links)
         return control
@@ -136,6 +142,23 @@ class Control:
         self.conditional_release.runtime = self.execution_runtime
         self.decision_dispatch.instruction_output = self.instruction_output
         self.decision_dispatch.link = links
+        gate = self.final_result_gate
+        if gate is None:
+            return
+        gate.dispatch = self.decision_dispatch
+        gate.runtime = self.execution_runtime
+        self.issuer.final_results = gate
+
+
+def _final_result_gate(
+    controller: controller_settings.ControllerSettings,
+    engine: engine_module.Engine,
+    plan: plan_build.Plan,
+) -> Optional[final_result_gate_module.FinalResultGate]:
+    """The gate over the program's decisions, if the controller holds any."""
+    if not controller.holds_decisions_for_final_results:
+        return None
+    return final_result_gate_module.FinalResultGate(engine, plan.operations)
 
 
 def _feedback_streams(

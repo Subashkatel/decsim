@@ -177,6 +177,8 @@ decision_to_pulse is the control processor's issue pipeline: 8 cycles traced on 
 
 packing_rounds_in_flight bounds the rounds in the packing stage (round_assembly.RoundsInFlight); None is unbounded. clock is the domain all three costs are charged on, None the machine's; a zero cost is not rounded up to an edge.
 
+holds_decisions_for_final_results builds the final-result gate (final_result_gate.py): a decision starts only once every decision it descends from has its final result, which a provisional release (windows.release_stage) delivers after the decision itself.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `clock` | `Optional[config.Clock]` | `None` |
@@ -184,6 +186,7 @@ packing_rounds_in_flight bounds the rounds in the packing stage (round_assembly.
 | `packing_cycles_per_round` | `int` | `0` |
 | `decision_to_pulse_cycles` | `int` | `0` |
 | `packing_rounds_in_flight` | `Optional[int]` | `None` |
+| `holds_decisions_for_final_results` | `bool` | `False` |
 
 ## decsim/decoders
 
@@ -1378,7 +1381,7 @@ It holds the window sizes, None being the code distance, and builds the scheme w
 
 `decsim/windows/settings.py`. The window side's settings.
 
-scheme is a windowing scheme row's Settings record (windows/schemes/), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a tail or a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py), how the hand-off between windows is written on the hop between their decoders. clock and decision_cycles price issuing one decode request; clock None is the machine's clock. recorded_confidence is a confidence row's Settings record (decsim/confidence/) that a run with no switching computes on every window and records, deciding nothing, so a decoder run alone gives each window's gap beside its answer; its work is charged as on a switching run. None computes none; a switching run records its own edge's signal. release_rule is a release rule row's Settings record (windows/release_rules.py), the decodes a blocking operation's outcome waits for; None is release_rule_for's choice by the run.
+scheme is a windowing scheme row's Settings record (windows/schemes/), which holds the window sizes, commit_rounds and buffer_rounds, None being the code distance. terminal_policy is flush or lookahead (TERMINAL_POLICIES, records/windows.py), how a finite stream drains its last buffered window; the rows that lay their own tail read none. boundary_policy is a boundary row's Settings record (windows/boundary_policies.py), when a committed window ships its boundary to the windows after it. A switching run's policy refuses a boundary row its strong window cannot serve. boundary_payload is a payload row's Settings record (windows/boundary_payloads.py), how the hand-off between windows is written on the hop between their decoders. clock and decision_cycles price issuing one decode request; clock None is the machine's clock. recorded_confidence is a confidence row's Settings record (decsim/confidence/) that a run with no switching computes on every window and records, deciding nothing, so a decoder run alone gives each window's gap beside its answer; its work is charged as on a switching run. None computes none; a switching run records its own edge's signal. release_rule is a release rule row's Settings record (windows/release_rules.py), the decodes a blocking operation's outcome waits for; None is release_rule_for's choice by the run. release_stage is one of RELEASE_STAGES (records/windows.py), which revision of those decodes the outcome waits for: final, the default, or provisional, the weak commit of an escalated window, its final revision then announced to the controller's final-result gate (controller/final_result_gate.py).
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -1390,6 +1393,7 @@ scheme is a windowing scheme row's Settings record (windows/schemes/), which hol
 | `boundary_payload` | `BoundaryPayloadSettings` | `boundary_payloads.DenseSeamMask.Settings()` |
 | `recorded_confidence` | `Optional[ports.ConfidenceSettings]` | `None` |
 | `release_rule` | `Optional[ReleaseRuleSettings]` | `None` |
+| `release_stage` | `str` | `window_records.FINAL_STAGE` |
 
 ## decsim/windows/schemes
 

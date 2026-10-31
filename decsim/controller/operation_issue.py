@@ -4,7 +4,9 @@ Every command is queued ahead and starts at the next boundary; a
 feedback-blocked one is issued once its release has crossed the output
 path (instruction_output.py), so the branch cost is paid once, by the
 decision. The runtime hears the start boundary through
-on_started, so the issuer never calls the runtime.
+on_started, so the issuer never calls the runtime. A run whose decisions
+wait for earlier final results asks its final-result gate too
+(final_result_gate.py).
 """
 
 import dataclasses
@@ -13,6 +15,7 @@ from collections.abc import Callable
 from typing import Any, Optional
 
 import decsim.controller.feedback_streams as feedback_streams
+import decsim.controller.final_result_gate as final_result_gate
 import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.engine as engine_module
 import decsim.ports as ports
@@ -26,6 +29,9 @@ class OperationIssuer:
     streams = ports.Port(feedback_streams.Streams)
     idle_rounds = ports.Port(idle_rounds_module.IdleRoundAccounting)
     output = ports.Port(ports.InstructionReceiver)
+    # holds a decision until the decisions before it are final; a run
+    # whose decisions wait for no final result leaves it unbound
+    final_results = ports.Port(final_result_gate.StartHold, optional=True)
 
     def __init__(
         self,
@@ -50,8 +56,12 @@ class OperationIssuer:
         return self.resolved_operation_by_id[operation.id].round_count
 
     def can_start(self, operation: program_records.Operation) -> bool:
-        """False while a protected stream holds the operation for a boundary."""
-        return not self.streams.blocks_start(operation)
+        """False while a stream holds it for a boundary or a gate holds it."""
+        if self.streams.blocks_start(operation):
+            return False
+        if self.final_results is None:
+            return True
+        return self.final_results.is_open(operation)
 
     def issue_operation(
         self,

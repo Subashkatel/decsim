@@ -30,6 +30,7 @@ import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.records.circuits as circuit_records
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
+import decsim.records.windows as window_records
 import decsim.records.workload as workload_records
 import decsim.topology.graph_layout as graph_layout
 import decsim.trace_source as trace_source
@@ -313,17 +314,15 @@ def test_a_run_that_never_escalates_gets_the_flush_tail():
     plan = _plan()
 
     assert plan.scheme.terminal_policy == "flush"
-    assert plan.scheme.has_trailing_tail_context is False
 
 
 def test_a_run_that_may_escalate_gets_the_lookahead_tail():
-    """A strong recovery reads past the last window's commit."""
+    """The last window's redo reads a buffer past its commit, as any does."""
     switching = _switching()
 
     plan = _plan(switching=switching)
 
     assert plan.scheme.terminal_policy == "lookahead"
-    assert plan.scheme.has_trailing_tail_context is True
 
 
 def test_a_run_that_never_escalates_ships_boundaries_eagerly():
@@ -427,6 +426,15 @@ def test_a_lattice_surgery_run_on_a_scheme_laying_no_regions_is_refused(
 
     with pytest.raises(ValueError, match="decodes in regions across"):
         _plan(workload=workload)
+
+
+def test_a_provisional_release_without_patch_streams_is_refused():
+    """An operation decoded on its own windows delivers its result once."""
+    provisional = window_records.PROVISIONAL_STAGE
+    windows = window_settings.WindowSettings(release_stage=provisional)
+
+    with pytest.raises(NotImplementedError, match="release_stage provisional"):
+        _plan(windows=windows)
 
 
 def test_a_region_scheme_refuses_a_feedback_stream():

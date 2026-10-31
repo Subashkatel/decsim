@@ -8,6 +8,15 @@ it (Skoric et al. 2209.08552: the logical correction of a stream is the
 sum over its committed windows). The workload is complete once every
 window is final.
 
+A segment's release stage (records/windows.py RELEASE_STAGES) says which
+revision of its awaited decodes it waits for: the final one, or the
+first commit, an escalated window's weak one. Under the provisional
+stage the decision goes ahead on the weak answer and the strong answer
+repairs it later: a T gate's correction is "a logical Clifford gate"
+learned "right before the next logical two-qubit gate or T gate"
+(Chamberland, Iyer and Poulin 1704.06662 Sec. 2). Either way, once every
+awaited decode is final the final-result gate hears it.
+
 An operation's windows commit ranges that follow one another in window
 order (the scheme plans them so; a cut or a closed tail clips one in
 place), so each prefix is kept as a cursor over the windows in order:
@@ -53,8 +62,12 @@ class OperationResults:
     factory = ports.Port(ports.MagicStateFactory)
     # which segments a blocker's release waits for
     release_rule = ports.Port(release_rules.ReleaseRule)
+    # hears each needed outcome once its awaited decodes are final; a run
+    # whose decisions wait for no final result leaves it unbound
+    final_results = ports.Port(ports.FinalResultReceiver, optional=True)
 
-    def __init__(self) -> None:
+    def __init__(self, release_stage: str) -> None:
+        self.release_stage = release_stage
         self.deliveries = _Deliveries()
         self.bindings = _Bindings()
         self.trace = _TraceSources()
@@ -307,7 +320,7 @@ class OperationResults:
     def _release_segments_if_committed(
         self, operation: program_records.Operation
     ) -> None:
-        """Deliver once every segment the release rule awaits is final.
+        """Deliver, then announce final, once the awaited segments allow.
 
         Its own segments always, and under SWIPER's rule those of its
         decoded ancestors too (release_rules.py). Only a needed outcome is
@@ -317,17 +330,41 @@ class OperationResults:
         is_needed = is_awaited or operation.requires_result_return_to_qpu
         if not is_needed:
             return
+        awaited_ids = self.release_rule.awaited_by(operation.id)
+        self._deliver_segments_if_ready(operation, awaited_ids)
+        self._announce_final_if_ready(operation, awaited_ids)
+
+    def _deliver_segments_if_ready(
+        self, operation: program_records.Operation, awaited_ids: tuple
+    ) -> None:
+        """Deliver once every awaited segment reached the release stage."""
         if operation.id in self.deliveries.segment_results_sent:
             return
-        awaited_ids = self.release_rule.awaited_by(operation.id)
+        is_ready = self._are_segments_final
+        if self.release_stage == window_records.PROVISIONAL_STAGE:
+            is_ready = self._are_segments_committed
         for awaited_id in awaited_ids:
-            if not self._are_segments_final(awaited_id):
+            if not is_ready(awaited_id):
                 return
         segments = self.bindings.segments_by_operation[operation.id]
         logical_observables = self._segments_observables(operation, segments)
         self._record_result(operation.id, logical_observables)
         self.deliveries.segment_results_sent.add(operation.id)
         self.conditional_release.release_waiters(operation)
+
+    def _announce_final_if_ready(
+        self, operation: program_records.Operation, awaited_ids: tuple
+    ) -> None:
+        """Tell the final-result gate once every awaited segment is final."""
+        if self.final_results is None:
+            return
+        if operation.id in self.deliveries.final_results_sent:
+            return
+        for awaited_id in awaited_ids:
+            if not self._are_segments_final(awaited_id):
+                return
+        self.deliveries.final_results_sent.add(operation.id)
+        self.final_results.note_result_final(operation)
 
     def _release_if_committed(self, operation_ids: tuple) -> None:
         for operation_id in operation_ids:
@@ -336,12 +373,20 @@ class OperationResults:
 
     def _are_segments_final(self, operation_id) -> bool:
         """Whether the operation has begun and every segment of it is final."""
+        return self._every_segment(operation_id, self._is_segment_final)
+
+    def _are_segments_committed(self, operation_id) -> bool:
+        """Whether the operation has begun and every segment's end committed."""
+        return self._every_segment(operation_id, self._is_segment_committed)
+
+    def _every_segment(self, operation_id, holds) -> bool:
+        """Whether the operation has begun and each segment passes the test."""
         segments = self.bindings.segments_by_operation.get(operation_id)
         if segments is None:
             return False
         operation = self.tracker.operation_by_id[operation_id]
         for segment in segments:
-            if not self._is_segment_final(operation, segment):
+            if not holds(operation, segment):
                 return False
         return True
 
@@ -373,15 +418,22 @@ class OperationResults:
         round_count = self.planner.round_count_of(operation.id)
         return segment.stream_offset + round_count
 
+    def _is_segment_committed(
+        self, operation: program_records.Operation, segment: "_Segment"
+    ) -> bool:
+        """Its end is in the stream's committed prefix, provisional or not."""
+        committed_by_stream = self.deliveries.committed_round_count_by_stream
+        committed = committed_by_stream.get(segment.stream_id, 0)
+        segment_end = self._stream_segment_end(operation, segment)
+        return segment_end <= committed
+
     def _is_segment_final(
         self, operation: program_records.Operation, segment: "_Segment"
     ) -> bool:
         """Its end is committed, and no result still to be final changes it."""
-        committed_by_stream = self.deliveries.committed_round_count_by_stream
-        committed = committed_by_stream.get(segment.stream_id, 0)
-        segment_end = self._stream_segment_end(operation, segment)
-        if segment_end > committed:
+        if not self._is_segment_committed(operation, segment):
             return False
+        segment_end = self._stream_segment_end(operation, segment)
         is_waiting = self._segment_waits_for_final(
             segment.stream_id, segment_end
         )
@@ -515,6 +567,7 @@ class _Deliveries:
         self.is_workload_done = False
         self.finished_operation_ids: set = set()
         self.segment_results_sent: set = set()
+        self.final_results_sent: set = set()
         self.committed_round_count_by_stream: dict = {}
         # (test, stream id) -> _Cursor
         self.cursors: dict = {}

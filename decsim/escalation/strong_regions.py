@@ -88,12 +88,18 @@ class StrongRegions:
             source_window.buffer_hi,
         )
         strong_window = _window_over(
-            source_window.stream_id, source_window.window_index, bounds
+            source_window.stream_id,
+            source_window.window_index,
+            bounds,
+            source_window.spatial_reads,
         )
         return self._region_over(strong_window)
 
     def _region_over(self, strong_window: window_records.Window) -> RedoRegion:
-        """The redo of strong_window: its recipes' earlier rounds, its own."""
+        """The redo of strong_window: its recipes' earlier rounds, its own.
+
+        Its own rounds include each region it reads across a coupling.
+        """
         stream_id = strong_window.stream_id
         read_keys = self.retention.strong_rounds_before(
             stream_id, strong_window.buffer_lo, strong_window.buffer_hi
@@ -104,6 +110,8 @@ class StrongRegions:
             strong_window.buffer_hi,
             strong_window,
         )
+        spatial_read_keys = window_records.spatial_read_keys(strong_window)
+        read_keys += spatial_read_keys
         return RedoRegion(strong_window, tuple(read_keys))
 
     def redo_pin_source(self, key: tuple) -> Optional[tuple]:
@@ -466,9 +474,19 @@ def _union_of_owned_faults(owned_sets: list):
 def _near_pinned_window_of(
     weak_window: window_records.Window,
 ) -> window_records.Window:
-    """The weak window's commit rounds plus one trailing buffer region."""
+    """The weak window's commit rounds plus one trailing buffer region.
+
+    It keeps the regions the weak window read across its couplings: a
+    merge's patches are one decoding problem, read in one window (SWIPER
+    2412.05115, swiper/window_builder.py; windows/region_layout.py).
+    """
     bounds = window_records.strong_context_bounds(weak_window)
-    return _window_over(weak_window.stream_id, weak_window.window_index, bounds)
+    return _window_over(
+        weak_window.stream_id,
+        weak_window.window_index,
+        bounds,
+        weak_window.spatial_reads,
+    )
 
 
 def _left_fault_exclusions(commit_lo: int) -> tuple:
@@ -497,11 +515,18 @@ def _strong_window_of(
 
 
 def _window_over(
-    stream_id, window_index: int, bounds: tuple
+    stream_id, window_index: int, bounds: tuple, spatial_reads: tuple = ()
 ) -> window_records.Window:
-    """The strong window over (context_lo, commit_lo, commit_hi, context_hi)."""
+    """The strong window over (context_lo, commit_lo, commit_hi, context_hi).
+
+    Its round count holds its own rounds and each region it reads across,
+    as a planned window's does (WindowGeometry.round_count).
+    """
     context_lo, commit_lo, commit_hi, context_hi = bounds
-    round_count = context_hi - context_lo + 1
+    local_round_count = context_hi - context_lo + 1
+    read_round_counts = [span.round_count for span in spatial_reads]
+    spatial_round_count = sum(read_round_counts)
+    round_count = local_round_count + spatial_round_count
     return window_records.Window(
         stream_id=stream_id,
         window_index=window_index,
@@ -510,6 +535,7 @@ def _window_over(
         buffer_hi=context_hi,
         buffer_lo=context_lo,
         round_count=round_count,
+        spatial_reads=spatial_reads,
     )
 
 

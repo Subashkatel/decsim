@@ -188,7 +188,7 @@ class RoundRetention:
         holder = decoding_records.CopiedReads(
             reader_span.stream_id, read_span, reader_span.last_round
         )
-        round_keys = _round_keys_of(read_span)
+        round_keys = read_span.round_keys
         store.register_hold(holder, round_keys)
         holds = self.copy_holds_by_stream.setdefault(reader_span.stream_id, [])
         holds.append(holder)
@@ -221,7 +221,7 @@ class RoundRetention:
         Each region read across, and each successor round past the
         window's end that has arrived in its own store.
         """
-        awaited = _spatial_read_keys(window)
+        awaited = window_records.spatial_read_keys(window)
         reads = self.read_keys_for_bounds(
             window.stream_id, window.start_round, window.buffer_hi, window
         )
@@ -300,7 +300,7 @@ class RoundRetention:
         new_reads = []
         for round_index in range(window.start_round, stop_round):
             new_reads.append((window.stream_id, round_index))
-        spatial_reads = _spatial_read_keys(window)
+        spatial_reads = window_records.spatial_read_keys(window)
         new_reads.extend(spatial_reads)
         store.replace_hold(reads, new_reads)
 
@@ -314,7 +314,7 @@ class RoundRetention:
         reads = self.read_keys_for_bounds(
             window.stream_id, window.start_round, window.buffer_hi, window
         )
-        spatial_reads = _spatial_read_keys(window)
+        spatial_reads = window_records.spatial_read_keys(window)
         reads.extend(spatial_reads)
         return reads
 
@@ -1063,15 +1063,6 @@ def round_identities_of(payloads: list) -> tuple:
     return tuple(identities)
 
 
-def _round_keys_of(span: window_records.RoundSpan) -> tuple:
-    """Every round of the span, in order."""
-    stop_round = span.last_round + 1
-    keys = []
-    for round_index in range(span.first_round, stop_round):
-        keys.append((span.stream_id, round_index))
-    return tuple(keys)
-
-
 def _refuse_a_copy_already_written(
     writes: ports.RoundWrites, read_span: window_records.RoundSpan
 ) -> None:
@@ -1092,16 +1083,6 @@ def _release_from_each(stores: tuple, owner) -> None:
     """The strong input landed in its unit: both stores let it go."""
     for store in stores:
         store.release_hold(owner)
-
-
-def _spatial_read_keys(window: window_records.Window) -> list:
-    """The round keys of each region the window reads across."""
-    keys = []
-    for span in window.spatial_reads:
-        stop_round = span.last_round + 1
-        for round_index in range(span.first_round, stop_round):
-            keys.append((span.stream_id, round_index))
-    return keys
 
 
 def _holds_store(stores: list, store) -> bool:

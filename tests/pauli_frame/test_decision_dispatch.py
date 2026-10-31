@@ -117,3 +117,38 @@ def test_with_no_fabric_the_decision_is_at_the_controller_at_once():
 
     ticks = [tick for tick, _decision, _deliver in controller.relayed]
     assert ticks == [0]
+
+
+def test_a_final_result_notice_stops_at_the_controller_one_crossing_later():
+    """It rides frame_to_controller as a decision does and drives no pulse.
+
+    The controller keeps the notice (controller/final_result_gate.py), so
+    the instruction output never sees it.
+    """
+    engine = engine_module.Engine()
+    link = priced_fabric(engine)
+    controller = RecordingController(engine)
+    unit = decision_dispatch.DecisionDispatch(engine)
+    unit.instruction_output = controller
+    unit.link = link
+    crossing_ticks = link.expected_delay_ticks(
+        transfer_records.FRAME_TO_CONTROLLER, None, 0
+    )
+    landed_ticks = []
+
+    unit.dispatch_final_result(4, lambda: landed_ticks.append(engine.now))
+    engine.run()
+
+    assert landed_ticks == [crossing_ticks]
+    assert controller.relayed == []
+
+
+def test_with_no_fabric_a_final_result_notice_lands_at_once():
+    engine, unit, controller = dispatch_over(None)
+    landed_ticks = []
+
+    unit.dispatch_final_result(4, lambda: landed_ticks.append(engine.now))
+    engine.run()
+
+    assert landed_ticks == [0]
+    assert controller.relayed == []

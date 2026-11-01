@@ -49,6 +49,11 @@ PEEL_CYCLES_PER_LEVEL = 2
 # 2602.03336 Algorithm 1 tests the join after every iteration); Helios
 # has no such compare, so the one cycle is this design's own
 JOIN_TEST_CYCLES = 1
+# the cycle in which every edge latches the length its selected partners
+# give it before a correlated decode's next pass; the selected flags
+# first cross the element's delay_cycles, as a change does. Helios has
+# no second pass, so the one cycle is this design's own
+REWEIGHT_CYCLES = 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -108,6 +113,13 @@ class CycleCount:
 
     and one join test cycle when no tick was grown at all.
 
+    A correlated decode (correlated_decoder.py) runs the whole law once
+    a pass, and between passes the selected flags cross delay_cycles
+    and the new lengths latch in one cycle:
+
+    correlated cycles = sum over passes of the cycles above
+                      + (delay_cycles + 1) x (passes - 1)
+
     The law is checked against Helios's published points outside the
     repo, with nothing fitted.
     """
@@ -128,9 +140,16 @@ class CycleCount:
     def cycles(
         self, evidence: Optional[evidence_records.UnionFindHardEvidence]
     ) -> int:
-        """The whole decode's cycles; a decode with no graph costs nothing."""
+        """The whole decode's cycles, each earlier pass and reweight too.
+
+        A decode with no graph costs nothing.
+        """
         if evidence is None:
             return 0
+        earlier = 0
+        for earlier_pass in evidence.earlier_passes:
+            earlier += self.cycles(earlier_pass)
+            earlier += self.delay_cycles + REWEIGHT_CYCLES
         graph = evidence.graph
         edge_count = len(graph.edges)
         vertex_cycles = self.setup_cycles_per_vertex * graph.detector_count
@@ -141,7 +160,7 @@ class CycleCount:
         merges = self._merge_cycles(steps)
         peel = self._peel_cycles(evidence.forest_depth)
         counted = iterations + merges + peel
-        return COUNTER_START + setup + counted
+        return earlier + COUNTER_START + setup + counted
 
     def decode_ticks(
         self,

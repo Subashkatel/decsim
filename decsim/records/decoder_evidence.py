@@ -143,6 +143,9 @@ class UnionFindHardEvidence:
     # the deepest parent chain of the trees the peel walked, a root at
     # zero: the levels the peel's flags and completions cross
     forest_depth: int = 0
+    # the passes the unit ran on this window before this one, in order,
+    # whose cycles it also spent: a correlated decode's first pass
+    earlier_passes: tuple["UnionFindHardEvidence", ...] = ()
 
 
 def normalized_weight_step(

@@ -524,6 +524,12 @@ detector_beam, beam_climbing, no_revisit_detectors, priority_queue_limit and mer
 
 ## decsim/decoders/union_find
 
+### `CorrelatedUnionFindDecoder.Settings`
+
+`decsim/decoders/union_find/correlated_decoder.py`. The union_find row's settings; both passes run on one unit.
+
+It extends `union_find.UnionFindDecoder.Settings`, and holds its fields.
+
 ### `UnionFindDecoder.Settings`
 
 `decsim/decoders/union_find/decoder.py`. The union-find row's settings.

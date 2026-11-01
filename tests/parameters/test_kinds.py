@@ -96,7 +96,7 @@ def test_an_unknown_name_is_refused_with_the_near_names_and_the_choices():
         kinds.record_class_named("union_fnd", hint, "weak_decoder.algorithm")
 
     message = str(refused.value)
-    assert "Did you mean union_find?" in message
+    assert "Did you mean union_find or correlated_union_find?" in message
     assert "relay_bp" in message
 
 

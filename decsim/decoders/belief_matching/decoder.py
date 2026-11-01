@@ -165,7 +165,7 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             fault_models.FaultRepresentation.PHYSICAL
         )
         projection = model.physical_to_graphlike_detector_projection
-        columns, error_channel = _distinct_hyperedges(physical)
+        columns, error_channel = distinct_hyperedges(physical)
         physical_check = scipy.sparse.csr_matrix(physical.check)
         hyperedge_check = physical_check[:, columns]
         belief_propagation = ldpc.BpDecoder(
@@ -208,10 +208,8 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
             return decoding_records.WindowDecode(
                 correction, iterations=iterations, evidence=_NOT_MATCHED
             )
-        edge_posteriors = _edge_posteriors(
-            belief_propagation, edge_from_hyperedge
-        )
-        edge_weights = -numpy.log(edge_posteriors)
+        posteriors = edge_posteriors(belief_propagation, edge_from_hyperedge)
+        edge_weights = -numpy.log(posteriors)
         check = faults.check.copy()
         matching = pymatching.Matching.from_check_matrix(
             check, weights=edge_weights
@@ -234,6 +232,53 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         return decoding_records.WindowDecode(
             correction, iterations=iterations, evidence=_MATCHED
         )
+
+
+def distinct_hyperedges(physical: fault_models.PlacedFaultModel) -> tuple:
+    """One column per distinct detector set, and its combined prior.
+
+    stim's decomposed model lists a hyperedge once per decomposition and
+    the linked catalog keeps each as a column. beliefmatching gives BP
+    one mechanism per detector set, the instructions' priors combined as
+    independent faults, its edges the first decomposition's
+    (belief_matching.py lines 104-112 and 135-136), so the first column
+    of each set stands for it here.
+    """
+    check = physical.check
+    position_by_detectors = {}
+    columns = []
+    priors = []
+    for column in range(check.shape[1]):
+        detectors = basis_split.column_rows(check, column)
+        prior = float(physical.priors[column])
+        position = position_by_detectors.get(detectors)
+        if position is None:
+            position_by_detectors[detectors] = len(columns)
+            columns.append(column)
+            priors.append(prior)
+            continue
+        earlier = priors[position]
+        priors[position] = stim_fault_catalog.merge_probability(earlier, prior)
+    return columns, priors
+
+
+def edge_posteriors(
+    belief_propagation: ldpc.BpDecoder,
+    edge_from_hyperedge: scipy.sparse.csr_matrix,
+) -> numpy.ndarray:
+    """Map the decoded BP's hyperedge posteriors onto graphlike edges.
+
+    One posterior per graphlike fault column of the window: the
+    belief_matching row matches on them, the belief_find row grows on
+    them.
+    """
+    log_likelihood_ratios = numpy.asarray(
+        belief_propagation.log_prob_ratios, dtype=float
+    )
+    log_likelihood_ratios = numpy.nan_to_num(log_likelihood_ratios, nan=0.0)
+    hyperedge_posteriors = scipy.special.expit(-log_likelihood_ratios)
+    posteriors = edge_from_hyperedge @ hyperedge_posteriors
+    return numpy.clip(posteriors, POSTERIOR_FLOOR, POSTERIOR_CEILING)
 
 
 _MATCHED = {MATCHED: 1.0}
@@ -265,45 +310,6 @@ def _converged_correction(
             "the matching edges does not flip the syndrome"
         )
     return correction
-
-
-def _distinct_hyperedges(physical) -> tuple:
-    """One column per distinct detector set, and its combined prior.
-
-    stim's decomposed model lists a hyperedge once per decomposition and
-    the linked catalog keeps each as a column. beliefmatching gives BP
-    one mechanism per detector set, the instructions' priors combined as
-    independent faults, its edges the first decomposition's
-    (belief_matching.py lines 104-112 and 135-136), so the first column
-    of each set stands for it here.
-    """
-    check = physical.check
-    position_by_detectors = {}
-    columns = []
-    priors = []
-    for column in range(check.shape[1]):
-        detectors = basis_split.column_rows(check, column)
-        prior = float(physical.priors[column])
-        position = position_by_detectors.get(detectors)
-        if position is None:
-            position_by_detectors[detectors] = len(columns)
-            columns.append(column)
-            priors.append(prior)
-            continue
-        earlier = priors[position]
-        priors[position] = stim_fault_catalog.merge_probability(earlier, prior)
-    return columns, priors
-
-
-def _edge_posteriors(belief_propagation, edge_from_hyperedge):
-    """Map the decoded BP's hyperedge posteriors onto matching edges."""
-    log_likelihood_ratios = numpy.asarray(
-        belief_propagation.log_prob_ratios, dtype=float
-    )
-    log_likelihood_ratios = numpy.nan_to_num(log_likelihood_ratios, nan=0.0)
-    hyperedge_posteriors = scipy.special.expit(-log_likelihood_ratios)
-    edge_posteriors = edge_from_hyperedge @ hyperedge_posteriors
-    return numpy.clip(edge_posteriors, POSTERIOR_FLOOR, POSTERIOR_CEILING)
 
 
 def _check_microseconds(microseconds, field: str) -> None:

@@ -18,6 +18,7 @@ import dataclasses
 import itertools
 
 import numpy
+import scipy.sparse
 
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.union_find.window_decoder as window_decoder
@@ -97,6 +98,28 @@ class CorrelatedUnionFindDecoder(union_find.UnionFindDecoder):
         return union_find.window_decode_of(evidence)
 
 
+def partnered_probabilities(
+    model: fault_models.WindowErrorModel, selected: numpy.ndarray
+) -> numpy.ndarray:
+    """Each selected graphlike fault's probability, the others selected.
+
+    The second pass's rule read on one correction: a selected fault that
+    shares a physical fault with another selected one takes the larger
+    of its prior and P(both) / P(the other), capped at one half. The
+    result follows selected's order.
+    """
+    faults = model.require_faults(fault_models.FaultRepresentation.GRAPHLIKE)
+    priors = numpy.asarray(faults.priors, dtype=float)
+    selected_priors = priors[selected]
+    probabilities = selected_priors.copy()
+    joint = _joint_probabilities(model, selected)
+    for (given, partner), both in joint.items():
+        conditional = both / selected_priors[given]
+        conditional = min(conditional, LARGEST_CONDITIONAL)
+        probabilities[partner] = max(probabilities[partner], conditional)
+    return probabilities
+
+
 def _partner_lengths(
     graph: evidence_records.UnionFindGraph,
     faults: fault_models.PlacedFaultModel,
@@ -106,7 +129,9 @@ def _partner_lengths(
 
     A partner keeps its own length when its prior is already as likely.
     """
-    joint = _joint_probabilities(model)
+    fault_count = faults.check.shape[1]
+    every_fault = numpy.arange(fault_count)
+    joint = _joint_probabilities(model, every_fault)
     priors = numpy.asarray(faults.priors)
     edge_of_fault = {}
     for edge_index, edge in enumerate(graph.edges):
@@ -124,19 +149,31 @@ def _partner_lengths(
     return dict(partner_lengths)
 
 
-def _joint_probabilities(model: fault_models.WindowErrorModel) -> dict:
-    """P(both) of each ordered pair of graphlike parts of one physical fault.
+def _joint_probabilities(
+    model: fault_models.WindowErrorModel, graphlike_faults: numpy.ndarray
+) -> dict:
+    """P(both) of each ordered pair of these faults, by their positions.
 
-    The pairs of several physical faults add, as PyMatching adds the
-    hyperedges two edges share.
+    A pair is two graphlike parts of one physical fault; the pairs of
+    several physical faults add, as PyMatching adds the hyperedges two
+    edges share. Only physical faults with two or more of these parts
+    are read.
     """
     physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
     link = model.physical_to_graphlike_detector_projection
-    components_by_fault = basis_split.every_column_rows(link)
+    link_rows = scipy.sparse.csr_matrix(link)
+    chosen_rows = link_rows[graphlike_faults]
+    by_physical_fault = scipy.sparse.csc_matrix(chosen_rows)
+    part_counts = numpy.diff(by_physical_fault.indptr)
+    is_shared = part_counts >= 2
+    shared = numpy.flatnonzero(is_shared)
+    sharing = by_physical_fault[:, shared]
+    components_by_fault = basis_split.every_column_rows(sharing)
     physical_priors = numpy.asarray(physical.priors)
+    shared_priors = physical_priors[shared]
     joint = collections.defaultdict(float)
-    for physical_fault, components in enumerate(components_by_fault):
-        prior = physical_priors[physical_fault]
+    pairs_by_fault = zip(shared_priors, components_by_fault, strict=True)
+    for prior, components in pairs_by_fault:
         for pair in itertools.permutations(components, 2):
             joint[pair] += prior
     return joint

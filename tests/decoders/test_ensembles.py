@@ -6,7 +6,11 @@ most likely member; VibeLSD (2508.15743 Sec. III.4.2) answers once
 count members have converged, with the most likely of them. A member's
 weight here is sum log((1 - p) / p) over its selected faults: on four
 faults of prior 0.1, 0.1, 0.01 and 0.01, a fault weighs log 9 = 2.197
-or log 99 = 4.595.
+or log 99 = 4.595. Correlated matching's reweighting (Fowler 1310.0863)
+prices a fault its correction pairs with a partner at P(both) /
+P(partner): with one physical fault of prior 0.004 holding faults 2 and
+3, as a Y error holds its X and Z parts, each is 0.4 given the other
+and weighs log 1.5 = 0.405.
 
 The timelines run one memory, mem1, on the declared fabric
 (tests/declared_run.py): W0's input lands at 20 us, its answer rides
@@ -20,6 +24,7 @@ import types
 
 import numpy
 import pytest
+import scipy.sparse
 
 import decsim.confidence.consensus as consensus
 import decsim.config as config
@@ -49,6 +54,22 @@ class _Model:
 
 
 MODEL = _Model()
+PRIORS_BY_REPRESENTATION = {GRAPHLIKE: PRIORS, PHYSICAL: numpy.array([0.004])}
+
+
+class _LinkedModel:
+    """MODEL's four faults, and one physical fault holding faults 2 and 3."""
+
+    physical_to_graphlike_detector_projection = scipy.sparse.csc_matrix(
+        [[0], [0], [1], [1]]
+    )
+
+    def require_faults(self, representation):
+        priors = PRIORS_BY_REPRESENTATION[representation]
+        return types.SimpleNamespace(priors=priors)
+
+
+LINKED_MODEL = _LinkedModel()
 
 
 def test_a_fault_weighs_the_log_of_its_odds_against():
@@ -95,6 +116,38 @@ def test_most_likely_answers_the_member_of_least_weight():
     pooled = pooling.pooled(runs, MODEL)
 
     assert pooled.answer.index == 0
+
+
+def test_a_partner_selected_with_its_pair_weighs_its_conditional_odds():
+    result = _result((1,), faults=(2, 3))
+
+    weight = ensembles.correlated_selection_weight(result, LINKED_MODEL)
+
+    expected = 2 * math.log(1.5)
+    assert weight == pytest.approx(expected)
+
+
+def test_most_likely_correlated_answers_the_correction_that_pairs_partners():
+    """Plain weights 2.2 and 9.2 pick member 0; correlated, 2.2 and 0.81."""
+    runs = (_run(0, (0,), faults=(0,)), _run(1, (1,), faults=(2, 3)))
+    plain = ensembles.MostLikely()
+    correlated = ensembles.CorrelatedMostLikely()
+
+    plain_pooled = plain.pooled(runs, LINKED_MODEL)
+    correlated_pooled = correlated.pooled(runs, LINKED_MODEL)
+
+    assert plain_pooled.answer.index == 0
+    assert correlated_pooled.answer.index == 1
+
+
+def test_correlated_pricing_refuses_a_physical_correction():
+    result = _result((1,), faults=(2, 3), representation=PHYSICAL)
+
+    with pytest.raises(RuntimeError) as refused:
+        ensembles.correlated_selection_weight(result, LINKED_MODEL)
+
+    message = str(refused.value)
+    assert "prices graphlike corrections" in message
 
 
 def test_sum_likelihood_lets_two_likely_members_outweigh_one():

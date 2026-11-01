@@ -528,6 +528,20 @@ detector_beam, beam_climbing, no_revisit_detectors, priority_queue_limit and mer
 
 ## decsim/decoders/union_find
 
+### `BeliefFindDecoder.Settings`
+
+`decsim/decoders/union_find/belief_find.py`. The union_find row's settings and the BP before the growth.
+
+max_iterations and belief_propagation_method are ldpc BpDecoder's max_iter and bp_method; Higgott et al. stop BP at 30 iterations (2203.04948 App. A), as the belief_matching row does. iteration_microseconds is the stated time of one BP iteration on the unit. With the host's measured time as the growth's timing, the host's clock already spans BP, and this is then zero.
+
+It extends `union_find.UnionFindDecoder.Settings`, and holds its fields.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `max_iterations` | `int` | `30` |
+| `belief_propagation_method` | `str` | `'product_sum'` |
+| `iteration_microseconds` | `float` | `0.024` |
+
 ### `CorrelatedUnionFindDecoder.Settings`
 
 `decsim/decoders/union_find/correlated_decoder.py`. The union_find row's settings; both passes run on one unit.

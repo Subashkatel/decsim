@@ -279,10 +279,13 @@ As a gem5 FUPool takes its units as one parameter (src/cpu/o3/FUPool.py:49). nam
 
 `decsim/decoders/ensembles.py`. members are decoder rows; pooling is a row of this module.
 
+dissent_decoder is the decoder row that decodes a window the members disagree on; None keeps the pooled answer always.
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `members` | `tuple` | `()` |
 | `pooling` | `PoolingSettings` | `MostLikely.Settings()` |
+| `dissent_decoder` | `Optional[ports.DecoderSettings]` | `None` |
 
 ### `ExecutionSlots.Settings`
 
@@ -527,6 +530,12 @@ detector_beam, beam_climbing, no_revisit_detectors, priority_queue_limit and mer
 | `merge_errors` | `bool` | `False` |
 
 ## decsim/decoders/union_find
+
+### `BeliefCorrelatedDecoder.Settings`
+
+`decsim/decoders/union_find/belief_correlated.py`. belief_find's settings; BP and both growths run on one unit.
+
+It extends `belief_find.BeliefFindDecoder.Settings`, and holds its fields.
 
 ### `BeliefFindDecoder.Settings`
 

@@ -27,6 +27,14 @@ errors it used". Each answer carries the ensemble's agreement, the
 share of members that vote with the majority prediction, which Harmony
 uses as a confidence score (Sec. V) and the consensus row reads.
 
+A row may name a dissent decoder. When its members do not all give one
+prediction (a member with none dissents), the dissent decoder decodes
+the window once the last member finishes, holding the unit, and its
+answer stands with the members' agreement. Harmony reads the agreement
+as a confidence score (Sec. V), and Toshio et al. send a window of low
+confidence to a stronger decoder (2510.25222 Sec. III.1); here the
+two sit in one unit.
+
 Members differ only as their rows do: Harmony's perturbed priors (Sec.
 III.1) are a matching row's knob, not built. A vote tie goes to the
 earliest listed member's prediction, and the vote answers with the
@@ -43,6 +51,7 @@ import numpy
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.correlated_decoder as correlated_decoder
 import decsim.engine as engine_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
@@ -260,10 +269,15 @@ class EnsembleDecoder(decoder_module.DecoderBase):
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """members are decoder rows; pooling is a row of this module."""
+        """members are decoder rows; pooling is a row of this module.
+
+        dissent_decoder is the decoder row that decodes a window the
+        members disagree on; None keeps the pooled answer always.
+        """
 
         members: tuple = ()
         pooling: PoolingSettings = MostLikely.Settings()
+        dissent_decoder: Optional[ports.DecoderSettings] = None
         name = "ensemble"
 
         def __post_init__(self) -> None:
@@ -281,21 +295,34 @@ class EnsembleDecoder(decoder_module.DecoderBase):
                 members.append(member)
             pooling = self.pooling.build()
             reads_likelihood = self.pooling.reads_likelihood
-            return EnsembleDecoder(tuple(members), pooling, reads_likelihood)
+            dissent_decoder = None
+            if self.dissent_decoder is not None:
+                dissent_decoder = self.dissent_decoder.build()
+            return EnsembleDecoder(
+                tuple(members), pooling, reads_likelihood, dissent_decoder
+            )
 
     def __init__(
-        self, members: tuple, pooling: object, reads_likelihood: bool
+        self,
+        members: tuple,
+        pooling: object,
+        reads_likelihood: bool,
+        dissent_decoder: Optional[decoder_module.DecoderBase] = None,
     ) -> None:
         _refuse_a_member_without_windows(members)
-        _refuse_a_backend_member(members)
+        decoders = members
+        if dissent_decoder is not None:
+            decoders = (*members, dissent_decoder)
+        _refuse_a_backend_member(decoders)
         if reads_likelihood:
             _refuse_mixed_representations(members)
         self.members = members
         self.pooling = pooling
-        self.fault_model_requirement = _joined_requirement(members)
+        self.dissent_decoder = dissent_decoder
+        self.fault_model_requirement = _joined_requirement(decoders)
 
     def run_seed_children(self) -> tuple:
-        """Each member under members, by its place in the list."""
+        """Each member under members, by its place, and the dissent decoder."""
         children = []
         for index, member in enumerate(self.members):
             path = (
@@ -303,6 +330,12 @@ class EnsembleDecoder(decoder_module.DecoderBase):
                 seed_records.RunSeedPathSegment("integer_key", index),
             )
             child = seed_records.RunSeedChild(path, member)
+            children.append(child)
+        if self.dissent_decoder is not None:
+            path = (
+                seed_records.RunSeedPathSegment("field", "dissent_decoder"),
+            )
+            child = seed_records.RunSeedChild(path, self.dissent_decoder)
             children.append(child)
         return tuple(children)
 
@@ -335,7 +368,7 @@ class EnsembleDecoder(decoder_module.DecoderBase):
             )
             return
         runs = self._member_runs(job, engine.now)
-        answer, ticks = self._answer(job, runs)
+        answer, ticks = self._answer(job, runs, engine.now)
         engine.schedule(
             ticks,
             lambda: _deliver(job, answer, on_result),
@@ -347,7 +380,7 @@ class EnsembleDecoder(decoder_module.DecoderBase):
     ) -> decoding_records.DecodeResult:
         """The pooled answer, its timing dropped."""
         runs = self._member_runs(job, 0)
-        answer, _ticks = self._answer(job, runs)
+        answer, _ticks = self._answer(job, runs, 0)
         return answer
 
     def _member_runs(self, job: decoding_records.DecodeJob, now: int) -> tuple:
@@ -357,12 +390,32 @@ class EnsembleDecoder(decoder_module.DecoderBase):
             runs.append(run)
         return tuple(runs)
 
-    def _answer(self, job: decoding_records.DecodeJob, runs: tuple) -> tuple:
+    def _answer(
+        self, job: decoding_records.DecodeJob, runs: tuple, now: int
+    ) -> tuple:
         """(The answer with the agreement, the ticks it answers at)."""
         pooled = self.pooling.pooled(runs, job.detector_error_model)
         agreement = agreement_of(runs)
+        if self.dissent_decoder is not None and agreement < 1.0:
+            return self._dissent_answer(job, pooled.ticks, now, agreement)
         answer = dataclasses.replace(pooled.answer.result, agreement=agreement)
         return answer, pooled.ticks
+
+    def _dissent_answer(
+        self,
+        job: decoding_records.DecodeJob,
+        members_ticks: int,
+        now: int,
+        agreement: float,
+    ) -> tuple:
+        """The dissent decoder's answer, once the last member has finished."""
+        start = now + members_ticks
+        result, ticks = decoder_module.timed_decode(
+            self.dissent_decoder, job, start
+        )
+        answer = dataclasses.replace(result, agreement=agreement)
+        total = members_ticks + ticks
+        return answer, total
 
 
 def majority_prediction(runs: tuple) -> Optional[tuple]:

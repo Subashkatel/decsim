@@ -71,8 +71,8 @@ class CorrelatedUnionFindDecoder(union_find.UnionFindDecoder):
     ) -> CorrelatedGraph:
         """The window's shared graph and its partner table."""
         graph = union_find.UnionFindDecoder.compile(self, faults, model)
-        partner_lengths = _partner_lengths(graph, faults, model)
-        return CorrelatedGraph(graph, partner_lengths)
+        lengths_by_fault = partner_lengths(graph, faults, model)
+        return CorrelatedGraph(graph, lengths_by_fault)
 
     def decode_window(
         self,
@@ -89,10 +89,10 @@ class CorrelatedUnionFindDecoder(union_find.UnionFindDecoder):
         del model
         del faults
         first = window_decoder.decode_graph(backend.graph, syndrome)
-        lengths = _second_pass_lengths(backend, first.selected_faults)
+        lengths = second_pass_lengths(backend, first.selected_faults)
         if not lengths:
             return union_find.window_decode_of(first)
-        second_graph = _with_lengths(backend.graph, lengths)
+        second_graph = with_lengths(backend.graph, lengths)
         second = window_decoder.decode_graph(second_graph, syndrome)
         evidence = dataclasses.replace(second, earlier_passes=(first,))
         return union_find.window_decode_of(evidence)
@@ -120,7 +120,7 @@ def partnered_probabilities(
     return probabilities
 
 
-def _partner_lengths(
+def partner_lengths(
     graph: evidence_records.UnionFindGraph,
     faults: fault_models.PlacedFaultModel,
     model: fault_models.WindowErrorModel,
@@ -137,7 +137,7 @@ def _partner_lengths(
     for edge_index, edge in enumerate(graph.edges):
         edge_of_fault[edge.fault_index] = edge_index
     weight_step = graph.weight_step
-    partner_lengths = collections.defaultdict(list)
+    lengths_by_fault = collections.defaultdict(list)
     for (selected, partner), both in joint.items():
         conditional = both / priors[selected]
         conditional = min(conditional, LARGEST_CONDITIONAL)
@@ -145,8 +145,34 @@ def _partner_lengths(
         if partner_edge is None or conditional <= priors[partner]:
             continue
         length = window_decoder.length_half_ticks(conditional, weight_step)
-        partner_lengths[selected].append((partner_edge, length))
-    return dict(partner_lengths)
+        lengths_by_fault[selected].append((partner_edge, length))
+    return dict(lengths_by_fault)
+
+
+def second_pass_lengths(
+    backend: CorrelatedGraph, selected_faults: tuple[int, ...]
+) -> dict:
+    """The shortest length each partner of a selected fault is given."""
+    lengths = {}
+    chosen = numpy.flatnonzero(selected_faults)
+    for fault_index in chosen.tolist():
+        partners = backend.partner_lengths.get(fault_index, ())
+        for edge_index, length in partners:
+            current = lengths.get(edge_index, length)
+            lengths[edge_index] = min(current, length)
+    return lengths
+
+
+def with_lengths(
+    graph: evidence_records.UnionFindGraph, lengths: dict
+) -> evidence_records.UnionFindGraph:
+    """The graph with these edges at these lengths."""
+    edges = list(graph.edges)
+    for edge_index, length in lengths.items():
+        edge = edges[edge_index]
+        edges[edge_index] = dataclasses.replace(edge, length_half_ticks=length)
+    edge_tuple = tuple(edges)
+    return dataclasses.replace(graph, edges=edge_tuple)
 
 
 def _joint_probabilities(
@@ -177,27 +203,3 @@ def _joint_probabilities(
         for pair in itertools.permutations(components, 2):
             joint[pair] += prior
     return joint
-
-
-def _second_pass_lengths(backend: CorrelatedGraph, selected_faults) -> dict:
-    """The shortest length each partner of a selected fault is given."""
-    lengths = {}
-    chosen = numpy.flatnonzero(selected_faults)
-    for fault_index in chosen.tolist():
-        partners = backend.partner_lengths.get(fault_index, ())
-        for edge_index, length in partners:
-            current = lengths.get(edge_index, length)
-            lengths[edge_index] = min(current, length)
-    return lengths
-
-
-def _with_lengths(
-    graph: evidence_records.UnionFindGraph, lengths: dict
-) -> evidence_records.UnionFindGraph:
-    """The graph with these edges at these lengths."""
-    edges = list(graph.edges)
-    for edge_index, length in lengths.items():
-        edge = edges[edge_index]
-        edges[edge_index] = dataclasses.replace(edge, length_half_ticks=length)
-    edge_tuple = tuple(edges)
-    return dataclasses.replace(graph, edges=edge_tuple)

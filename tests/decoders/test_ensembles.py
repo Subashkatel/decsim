@@ -1,4 +1,4 @@
-"""The ensemble: Harmony's three poolings and VibeLSD's stop rule.
+"""The ensemble: Harmony's poolings, VibeLSD's stop rule, a dissent decoder.
 
 Harmony (Shutty, Newman and Villalonga 2401.12434 Sec. III.2) pools by
 vote, by summed likelihood within each logical prediction, or by the
@@ -10,7 +10,9 @@ or log 99 = 4.595. Correlated matching's reweighting (Fowler 1310.0863)
 prices a fault its correction pairs with a partner at P(both) /
 P(partner): with one physical fault of prior 0.004 holding faults 2 and
 3, as a Y error holds its X and Z parts, each is 0.4 given the other
-and weighs log 1.5 = 0.405.
+and weighs log 1.5 = 0.405. A dissent decoder decodes a window its
+members disagree on, as Toshio et al. send a window of low confidence to
+a stronger decoder (2510.25222 Sec. III.1), once the last member finishes.
 
 The timelines run one memory, mem1, on the declared fabric
 (tests/declared_run.py): W0's input lands at 20 us, its answer rides
@@ -251,6 +253,50 @@ def test_the_ensemble_answers_after_its_pooling_with_the_agreement():
     assert engine.now == 9
     assert delivered[0].logical_observables == (0,)
     assert delivered[0].agreement == 0.5
+
+
+def test_a_dissent_answers_with_the_dissent_decoder_after_the_last_member():
+    """Members of 4 and 9 ticks disagree; the dissent decoder takes 5 more."""
+    vote = ensembles.Vote.Settings()
+    fast = _FixedMember.Settings((0,), 4)
+    slow = _FixedMember.Settings((0,), 9)
+    third = _FixedMember.Settings((1,), 2)
+    dissent = _FixedMember.Settings((1,), 5)
+    settings = ensembles.EnsembleDecoder.Settings(
+        members=(fast, slow, third), pooling=vote, dissent_decoder=dissent
+    )
+    ensemble = settings.build()
+    engine = engine_module.Engine()
+    delivered = []
+    job = _job()
+
+    ensemble.start(job, engine, delivered.append)
+    engine.run()
+
+    assert engine.now == 14
+    assert delivered[0].logical_observables == (1,)
+    assert delivered[0].agreement == 2 / 3
+
+
+def test_agreeing_members_answer_without_the_dissent_decoder():
+    vote = ensembles.Vote.Settings()
+    fast = _FixedMember.Settings((1,), 4)
+    slow = _FixedMember.Settings((1,), 9)
+    dissent = _FixedMember.Settings((0,), 5)
+    settings = ensembles.EnsembleDecoder.Settings(
+        members=(fast, slow), pooling=vote, dissent_decoder=dissent
+    )
+    ensemble = settings.build()
+    engine = engine_module.Engine()
+    delivered = []
+    job = _job()
+
+    ensemble.start(job, engine, delivered.append)
+    engine.run()
+
+    assert engine.now == 9
+    assert delivered[0].logical_observables == (1,)
+    assert delivered[0].agreement == 1.0
 
 
 def test_a_race_answers_at_the_first_member_to_converge():

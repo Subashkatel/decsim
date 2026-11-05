@@ -34,7 +34,6 @@ from typing import Optional
 import decsim.escalation.target_steps as target_steps
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
-import decsim.records.program as program_records
 import decsim.records.recorded_rows as recorded_rows
 import decsim.records.sampled_errors as sampled_error_records
 import decsim.seeding as seeding
@@ -416,7 +415,7 @@ class Replay:
         return KEEP
 
 
-class Truth:
+class Truth(sampled_error_records.FiredErrors):
     """Escalate exactly the windows whose weak answer is wrong.
 
     The perfect switching decision of a speed-of-light study: how close
@@ -449,14 +448,7 @@ class Truth:
             return Truth()
 
     def __init__(self) -> None:
-        # operation id -> the errors its shot fired
-        self.errors_by_operation: dict = {}
-
-    def errors_sampled(
-        self, operation: program_records.Operation, fired_errors: tuple
-    ) -> None:
-        """The source drew an operation's shot; these errors fired."""
-        self.errors_by_operation[operation.id] = fired_errors
+        sampled_error_records.FiredErrors.__init__(self)
 
     def decide(
         self,
@@ -467,8 +459,7 @@ class Truth:
         """Escalate when the weak answer is off the window's label."""
         del threshold
         window = job.window
-        fired_errors = self.errors_by_operation.get(window.stream_id)
-        if fired_errors is None:
+        if window.stream_id not in self.errors_by_operation:
             raise RuntimeError(
                 "switching.verdict truth holds no fired errors for "
                 f"{window.stream_id!r}: its source keeps none (name "
@@ -480,8 +471,8 @@ class Truth:
                 f"switching.verdict truth: window {window.key} has no weak "
                 "answer to judge (a timing-only decode)"
             )
-        label = sampled_error_records.label_of_errors(
-            fired_errors, window.commit_lo, window.commit_hi, len(answer)
+        label = self.label_of(
+            window.stream_id, window.commit_lo, window.commit_hi, len(answer)
         )
         if tuple(answer) != label:
             return ESCALATE

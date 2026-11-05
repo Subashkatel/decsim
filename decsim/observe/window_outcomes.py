@@ -17,7 +17,6 @@ import dataclasses
 from typing import Any, Optional
 
 import decsim.records.decoding as decoding_records
-import decsim.records.program as program_records
 import decsim.records.sampled_errors as sampled_error_records
 
 
@@ -37,18 +36,12 @@ class WindowOutcome:
     label: Optional[tuple[int, ...]]
 
 
-class WindowOutcomes:
-    """The fired errors of each operation, and its windows' outcomes."""
+class WindowOutcomes(sampled_error_records.FiredErrors):
+    """Each operation's windows' outcomes, labelled by its fired errors."""
 
     def __init__(self) -> None:
-        self.errors_by_operation: dict = {}
+        sampled_error_records.FiredErrors.__init__(self)
         self.outcomes_by_operation: dict = {}
-
-    def errors_sampled(
-        self, operation: program_records.Operation, fired_errors: tuple
-    ) -> None:
-        """The source drew an operation's shot; these errors fired."""
-        self.errors_by_operation[operation.id] = fired_errors
 
     def contributions_delivered(
         self,
@@ -61,24 +54,6 @@ class WindowOutcomes:
             outcome = self._outcome_of(operation_id, contribution)
             outcomes.append(outcome)
         self.outcomes_by_operation[operation_id] = tuple(outcomes)
-
-    def label_of(
-        self,
-        operation_id: Any,  # an opaque identity
-        commit_lo: int,
-        commit_hi: int,
-        arity: int,
-    ) -> Optional[tuple[int, ...]]:
-        """The label of any extent: the parity of the errors it owns.
-
-        None when the source kept no errors for the operation.
-        """
-        fired_errors = self.errors_by_operation.get(operation_id)
-        if fired_errors is None:
-            return None
-        return sampled_error_records.label_of_errors(
-            fired_errors, commit_lo, commit_hi, arity
-        )
 
     def _outcome_of(
         self,

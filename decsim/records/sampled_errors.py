@@ -8,6 +8,9 @@ flips.
 """
 
 import dataclasses
+from typing import Any, Optional
+
+import decsim.records.program as program_records
 
 
 @dataclasses.dataclass(frozen=True)
@@ -25,6 +28,40 @@ class FiredError:
     first_round: int
     logical_observables: tuple[int, ...]
     detectors: tuple[int, ...] = ()
+
+
+class FiredErrors:
+    """The errors each operation's shot fired, by the operation's id.
+
+    The source that keeps its errors fires errors_sampled once a shot
+    (qpu/stim_device.py ErrorModelStimDevice). Window outcomes and the
+    truth verdict keep them here and read the same labels from them.
+    """
+
+    def __init__(self) -> None:
+        self.errors_by_operation: dict = {}
+
+    def errors_sampled(
+        self, operation: program_records.Operation, fired_errors: tuple
+    ) -> None:
+        """The source drew an operation's shot; these errors fired."""
+        self.errors_by_operation[operation.id] = fired_errors
+
+    def label_of(
+        self,
+        operation_id: Any,  # an opaque identity
+        commit_lo: int,
+        commit_hi: int,
+        arity: int,
+    ) -> Optional[tuple[int, ...]]:
+        """The label of any extent: the parity of the errors it owns.
+
+        None when the source kept no errors for the operation.
+        """
+        fired_errors = self.errors_by_operation.get(operation_id)
+        if fired_errors is None:
+            return None
+        return label_of_errors(fired_errors, commit_lo, commit_hi, arity)
 
 
 def label_of_errors(

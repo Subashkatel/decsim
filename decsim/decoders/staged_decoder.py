@@ -398,7 +398,7 @@ def _fragments_read(job: decoding_records.DecodeJob) -> list:
     """
     fragments = list(job.payloads)
     for member in job.batch_members:
-        member_fragments = _fragments_of(member)
+        member_fragments = member.input_fragments()
         fragments.extend(member_fragments)
     return fragments
 
@@ -460,17 +460,10 @@ def _round_widths(job: decoding_records.DecodeJob) -> list:
     before; a fragment that states no size holds no bits.
     """
     bits_by_round: dict = {}
-    for fragment in _fragments_of(job):
+    for fragment in job.input_fragments():
         round_key = (fragment.stream_id, fragment.round_index)
         fragment_bits = round_records.stated_bits(fragment.size_bits)
         bits_by_round.setdefault(round_key, 0)
         bits_by_round[round_key] += fragment_bits
     widths = bits_by_round.values()
     return list(widths)
-
-
-def _fragments_of(job: decoding_records.DecodeJob) -> list:
-    decoder_input = job.decoder_input
-    if decoder_input is None:
-        return list(job.payloads)
-    return decoder_input.fragments()

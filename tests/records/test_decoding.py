@@ -48,6 +48,24 @@ def test_one_payload_of_unknown_size_leaves_the_job_size_unknown():
     assert job.payload_bits() is None
 
 
+def test_a_job_reads_its_landed_input_once_it_has_landed():
+    """Before the transfer lands the job reads the payloads it carries."""
+    carried = [make_payload(1), make_payload(2)]
+    job = decoding_records.DecodeJob(
+        stream_id=1,
+        window_id=0,
+        round_count=2,
+        payloads=carried,
+    )
+    assert job.input_fragments() == carried
+    landed_fragment = make_payload(2, size_bits=50)
+    landed = decoding_records.MaterializedSyndromeRound(
+        3, 2, (landed_fragment,)
+    )
+    job.decoder_input = decoding_records.DecoderInput(1, 0, None, (landed,))
+    assert job.input_fragments() == [landed_fragment]
+
+
 def test_a_copy_hold_waits_only_for_its_readers_windows_to_come():
     """It serves no window yet and reads nothing at once.
 

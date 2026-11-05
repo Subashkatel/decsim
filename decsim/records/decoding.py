@@ -663,6 +663,12 @@ class DecodeJob:
                 return None
         return sum(sizes)
 
+    def input_fragments(self) -> list:
+        """What the job reads: its landed input, else its payloads."""
+        if self.decoder_input is None:
+            return list(self.payloads)
+        return self.decoder_input.fragments()
+
 
 @dataclass(frozen=True)
 class LogicalContribution:

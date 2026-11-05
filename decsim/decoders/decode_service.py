@@ -547,7 +547,7 @@ class DecodeService:
 
 def job_defects_text(job: decoding_records.DecodeJob) -> str:
     """The landed window input's set detection-event indices, for the trace."""
-    fragments = _landed_fragments(job)
+    fragments = job.input_fragments()
     bit_arrays = []
     for fragment in fragments:
         if fragment.bits is None:
@@ -587,15 +587,6 @@ def _receiving_text(member: decoding_records.DecodeJob) -> str:
         f"receiving {member.label} input "
         f"({member.round_count} rounds from the syndrome buffer)"
     )
-
-
-def _landed_fragments(job: decoding_records.DecodeJob) -> list:
-    """What the job reads: its landed input, else the payloads it carries."""
-    if job.decoder_input is not None:
-        return job.decoder_input.fragments()
-    if job.payloads is None:
-        return []
-    return job.payloads
 
 
 def _landed_ticks(job: decoding_records.DecodeJob) -> int:

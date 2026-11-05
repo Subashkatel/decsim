@@ -206,7 +206,8 @@ class BoxPacker:
         weak = numpy.asarray(evidence.selected_faults, dtype=numpy.uint8)
         inside = _box_columns(graph, roots, chosen)
         outside = weak & ~inside
-        last_rounds_read = _last_rounds_read(weak_job)
+        fragments = weak_job.input_fragments()
+        last_rounds_read = decoding_records.last_round_by_stream(fragments)
         return DoubtfulBox(
             box_rows,
             outside,
@@ -434,16 +435,6 @@ def _kept_while_the_graph_lives(
     reference = weakref.ref(graph, lambda _dead: cache.pop(identity, None))
     cache[identity] = (reference, value)
     return value
-
-
-def _last_rounds_read(weak_job: decoding_records.DecodeJob) -> tuple:
-    """(stream, last round) of each stream the weak decode read."""
-    decoder_input = weak_job.decoder_input
-    if decoder_input is None:
-        fragments = list(weak_job.payloads)
-    else:
-        fragments = decoder_input.fragments()
-    return decoding_records.last_round_by_stream(fragments)
 
 
 def _bits_to_name(count: int) -> int:

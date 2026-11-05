@@ -337,14 +337,17 @@ def test_all_walks_hold_the_shortest_walks_doubtful_events():
 def test_all_walks_mark_the_rows_the_moved_python_walk_marks():
     """The compiled walks under each limit are all_walks_oracle.py's.
 
-    The limits run from below every gap here to past every gap, so the
-    corpus holds windows with no walk kept, the shortest alone, and
-    walks from several sources, ties included.
+    A graph shape of no edges takes the doubtful clusters alone, so the
+    box's events are the doubtful events. The limits run from below
+    every gap here to past every gap, so the corpus holds windows with
+    no walk kept, the shortest alone, and walks from several sources.
     """
     kept_more = 0
     for nats in (0.5, 2.0, 4.605170, 40.0):
-        shape = doubtful_box.BoxShape(0, 0, doubt="all_walks", doubt_nats=nats)
-        for result, _box, record in shaped_windows(shape):
+        shape = doubtful_box.BoxShape(
+            0, 0, form="graph", doubt="all_walks", doubt_nats=nats
+        )
+        for result, box, record in shaped_windows(shape):
             evidence = result.cluster_evidence
             roots = _roots(evidence)
             event_rows = numpy.flatnonzero(evidence.syndrome)
@@ -352,10 +355,10 @@ def test_all_walks_mark_the_rows_the_moved_python_walk_marks():
             moved = all_walks_oracle.all_walk_rows(
                 evidence, roots, event_rows, limit_half_ticks
             )
-            root_list = roots.tolist()
-            rows = doubtful_box.doubtful_rows(evidence, root_list, shape, False)
-            assert rows == moved
-            kept_more += len(rows) > record.walk_event_count
+            box_rows = box.event_rows.tolist()
+            assert tuple(box_rows) == moved
+            assert box.doubtful_event_count == len(moved)
+            kept_more += len(moved) > record.walk_event_count
     assert kept_more > 0
 
 

@@ -46,7 +46,7 @@ fewest bits the strong side needs:
     doubt       walk: the clusters the gap's shortest odd walk reaches;
                 all_walks: the clusters that every odd closed walk
                 lighter than doubt_nats reaches, one shortest walk from
-                each node an odd edge leaves (doubtful_rows)
+                each node an odd edge leaves (_doubtful_rows)
 
 Every form takes each cluster with an event inside it whole.
 """
@@ -195,7 +195,7 @@ class BoxPacker:
         roots = numpy.asarray(root_list)
         syndrome = numpy.asarray(evidence.syndrome, dtype=numpy.uint8)
         event_rows = numpy.flatnonzero(syndrome)
-        walk_rows = doubtful_rows(
+        walk_rows = _doubtful_rows(
             evidence, root_list, self.shape, self.closes_buffer_boundary
         )
         chosen, volume = shaped_roots(
@@ -218,39 +218,6 @@ class BoxPacker:
             volume_detectors=volume,
             doubtful_event_count=len(walk_rows),
         )
-
-
-def doubtful_rows(
-    evidence: evidence_records.UnionFindHardEvidence,
-    roots: list,
-    shape: BoxShape,
-    closes_buffer_boundary: bool,
-) -> tuple:
-    """The doubtful clusters' detection events, as window rows, ascending.
-
-    all_walks marks the edges of every walk lighter than doubt_nats, one
-    shortest odd closed walk through each node an odd edge leaves
-    (union_find/cluster_gap.h), and takes the clusters with a detection
-    event those edges reach, as cluster_record does for the shortest.
-    """
-    if shape.doubt == "walk":
-        record = cluster_record.cluster_record(evidence, closes_buffer_boundary)
-        return record.walk_detection_events
-    graph = evidence.graph
-    # the gap's half ticks to nats: nats = half ticks x weight step / 2
-    # (confidence/cluster.py gap_half_ticks_to_natural_log_weight)
-    limit_half_ticks = 2.0 * shape.doubt_nats / graph.weight_step
-    _gap, walk_edges = compiled_decoder.cluster_gap_walk(
-        graph,
-        evidence.edge_intervals,
-        closes_buffer_boundary,
-        limit_half_ticks,
-    )
-    events_by_root = cluster_record.cluster_events(roots, evidence.syndrome)
-    doubtful = cluster_record.walk_roots(
-        graph, walk_edges, roots, events_by_root
-    )
-    return cluster_record.events_of(doubtful, events_by_root)
 
 
 def shaped_roots(
@@ -287,6 +254,39 @@ def check_margin(margin: object) -> None:
         "box_margin must be a whole number of rounds, 0 or more "
         f"(got {margin!r})"
     )
+
+
+def _doubtful_rows(
+    evidence: evidence_records.UnionFindHardEvidence,
+    roots: list,
+    shape: BoxShape,
+    closes_buffer_boundary: bool,
+) -> tuple:
+    """The doubtful clusters' detection events, as window rows, ascending.
+
+    all_walks marks the edges of every walk lighter than doubt_nats, one
+    shortest odd closed walk through each node an odd edge leaves
+    (union_find/cluster_gap.h), and takes the clusters with a detection
+    event those edges reach, as cluster_record does for the shortest.
+    """
+    if shape.doubt == "walk":
+        record = cluster_record.cluster_record(evidence, closes_buffer_boundary)
+        return record.walk_detection_events
+    graph = evidence.graph
+    # the gap's half ticks to nats: nats = half ticks x weight step / 2
+    # (confidence/cluster.py gap_half_ticks_to_natural_log_weight)
+    limit_half_ticks = 2.0 * shape.doubt_nats / graph.weight_step
+    _gap, walk_edges = compiled_decoder.cluster_gap_walk(
+        graph,
+        evidence.edge_intervals,
+        closes_buffer_boundary,
+        limit_half_ticks,
+    )
+    events_by_root = cluster_record.cluster_events(roots, evidence.syndrome)
+    doubtful = cluster_record.walk_roots(
+        graph, walk_edges, roots, events_by_root
+    )
+    return cluster_record.events_of(doubtful, events_by_root)
 
 
 def _check_doubt_nats(doubt: str, doubt_nats: Optional[float]) -> None:

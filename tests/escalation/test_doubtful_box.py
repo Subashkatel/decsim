@@ -111,7 +111,8 @@ def test_the_packing_and_the_wire_are_counted_from_the_box():
         detector_count=100,
     )
     # 100 rows take 7 bits a name, 300 columns 9
-    assert box.wire_bits() == 4 * 7 + 3 * 9
+    expected_wire_bits = 4 * 7 + 3 * 9
+    assert box.wire_bits() == expected_wire_bits
     assert box.packing_cycles() == 2 * 13
     syndrome = box.syndrome()
     assert syndrome.sum() == 4
@@ -119,6 +120,11 @@ def test_the_packing_and_the_wire_are_counted_from_the_box():
         "box_detection_events": 4.0,
         "box_clusters": 2.0,
         "window_detection_events": 13.0,
+        "box_wire_bits": float(expected_wire_bits),
+        "box_outside_corrections": 3.0,
+        "box_volume_detectors": 0.0,
+        "box_doubtful_events": 0.0,
+        "window_detectors": 100.0,
     }
 
 
@@ -260,3 +266,92 @@ def test_every_window_of_a_box_run_has_its_final_answer_latency():
     assert _escalations(shot.machine) > 0
     assert len(latencies) == len(windows)
     assert all(latency > 0 for latency in latencies)
+
+
+# ---- the box's shapes (doubtful_box.BoxShape)
+
+
+def shaped_windows(shape) -> list:
+    """(weak result, box, cluster record) of each window with doubt."""
+    circuit = windows.memory_circuit(DISTANCE, ROUNDS, PROBABILITY)
+    model = windows.whole_circuit_window(circuit, ROUNDS, LINKED)
+    detection_events, _ = windows.sampled_shots(circuit, SHOTS, 11)
+    weak = UNION_FIND.build()
+    packer = doubtful_box.BoxPacker(shape.space_margin, shape)
+    packed = []
+    for shot in detection_events:
+        job = windows.job_for(model, shot)
+        result = weak.decode(job)
+        record = cluster_record.cluster_record(result.cluster_evidence)
+        if record.walk_cluster_count == 0:
+            continue
+        box = packer.pack(job, result)
+        packed.append((result, box, record))
+    return packed
+
+
+def _chosen(result, box) -> set:
+    roots = _roots(result.cluster_evidence)
+    box_roots = roots[box.event_rows]
+    chosen_list = box_roots.tolist()
+    return set(chosen_list)
+
+
+def test_the_shortest_odd_walk_found_again_is_the_gap():
+    """odd_walks prices walks as cluster_gap.c does: the shortest is the gap."""
+    shape = doubtful_box.BoxShape(1, 1)
+    for result, _box, record in shaped_windows(shape):
+        evidence = result.cluster_evidence
+        walks = doubtful_box.odd_walks(evidence.graph, evidence.edge_intervals)
+        assert min(length for length, _edges in walks) == record.walk_half_ticks
+
+
+def test_all_walks_hold_the_shortest_walks_doubtful_events():
+    nats = 40.0  # past every gap here, so every window has its walk kept
+    shape = doubtful_box.BoxShape(0, 0, doubt="all_walks", doubt_nats=nats)
+    for _result, box, record in shaped_windows(shape):
+        box_rows = box.event_rows.tolist()
+        assert set(record.walk_detection_events) <= set(box_rows)
+        assert box.doubtful_event_count >= record.walk_event_count
+
+
+def test_a_graph_shape_of_no_edges_takes_the_doubtful_clusters_alone():
+    shape = doubtful_box.BoxShape(0, 0, form="graph")
+    for result, box, record in shaped_windows(shape):
+        roots = _roots(result.cluster_evidence)
+        walk_rows = list(record.walk_detection_events)
+        walk_root_list = roots[walk_rows].tolist()
+        assert _chosen(result, box) == set(walk_root_list)
+
+
+def test_narrower_shapes_take_no_cluster_the_wider_box_leaves_out():
+    wide_shape = doubtful_box.BoxShape(2, 2)
+    wide = shaped_windows(wide_shape)
+    for shape in (
+        doubtful_box.BoxShape(1, 2),
+        doubtful_box.BoxShape(2, 1),
+        doubtful_box.BoxShape(2, 2, form="per_cluster"),
+    ):
+        narrow = shaped_windows(shape)
+        pairs = zip(narrow, wide, strict=True)
+        for (result, box, _), (_, wide_box, _) in pairs:
+            assert _chosen(result, box) <= _chosen(result, wide_box)
+            assert box.volume_detectors <= wide_box.volume_detectors
+
+
+def test_a_shape_setting_needs_a_box_and_a_graph_one_margin():
+    with pytest.raises(ValueError, match="box_margin"):
+        strong_window_shapes.RedoWindow.Settings(box_form="graph")
+    with pytest.raises(ValueError, match="equal"):
+        strong_window_shapes.RedoWindow.Settings(
+            box_margin=1, box_time_margin=2, box_form="graph"
+        )
+    with pytest.raises(ValueError, match="doubt_nats"):
+        strong_window_shapes.RedoWindow.Settings(
+            box_margin=1, box_doubt="all_walks"
+        )
+    redo = strong_window_shapes.RedoWindow.Settings(
+        box_margin=2, box_time_margin=1
+    )
+    shape = redo.box_shape()
+    assert (shape.time_margin, shape.space_margin) == (1, 2)

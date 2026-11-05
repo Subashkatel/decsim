@@ -164,7 +164,11 @@ class RedoWindow(StrongWindowPorts):
         box widened by that many rounds (escalation/doubtful_box.py),
         and the redo decodes that box alone: it reads no round and pins
         no face (plan_box). The target's row must read the box
-        (box_decoder.py).
+        (box_decoder.py). The box's shape (doubtful_box.BoxShape) can
+        differ: box_time_margin and box_space_margin widen it by rounds
+        and by stabilizer columns on their own (each box_margin when
+        unset), box_form is bounding, per_cluster or graph, and
+        box_doubt is walk or all_walks, the latter with box_doubt_nats.
         """
 
         boundary_policy: ports.BoundaryPolicySettings = (
@@ -173,6 +177,11 @@ class RedoWindow(StrongWindowPorts):
         starts_on_a_guess: bool = False
         guess_backlog_limit: Optional[int] = None
         box_margin: Optional[int] = None
+        box_time_margin: Optional[int] = None
+        box_space_margin: Optional[int] = None
+        box_form: str = "bounding"
+        box_doubt: str = "walk"
+        box_doubt_nats: Optional[float] = None
         # the word the refusals name this row by
         name = "redo_window"
         # it restarts no weak window, so the width the window interaction
@@ -188,6 +197,40 @@ class RedoWindow(StrongWindowPorts):
                 )
             if self.box_margin is not None:
                 doubtful_box.check_margin(self.box_margin)
+                self.box_shape()
+            elif self._shapes_a_box():
+                raise ValueError(
+                    "the box's shape settings (box_time_margin, "
+                    "box_space_margin, box_form, box_doubt, box_doubt_nats) "
+                    "shape a box; set box_margin to pack one"
+                )
+
+        def _shapes_a_box(self) -> bool:
+            unset = (None, None, "bounding", "walk", None)
+            given = (
+                self.box_time_margin,
+                self.box_space_margin,
+                self.box_form,
+                self.box_doubt,
+                self.box_doubt_nats,
+            )
+            return given != unset
+
+        def box_shape(self) -> "doubtful_box.BoxShape":
+            """The shape the chip packs, each margin box_margin unless set."""
+            time_margin = self.box_time_margin
+            if time_margin is None:
+                time_margin = self.box_margin
+            space_margin = self.box_space_margin
+            if space_margin is None:
+                space_margin = self.box_margin
+            return doubtful_box.BoxShape(
+                time_margin=time_margin,
+                space_margin=space_margin,
+                form=self.box_form,
+                doubt=self.box_doubt,
+                doubt_nats=self.box_doubt_nats,
+            )
 
         @property
         def absorbs_weak_windows(self) -> bool:

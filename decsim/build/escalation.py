@@ -382,7 +382,8 @@ def _box_packer(
             f"doubtful box alone; the target's row {row_name!r} reads a "
             "window's rounds (use box_correlated_pymatching)"
         )
-    return doubtful_box.BoxPacker(margin)
+    shape = settings.strong_window.box_shape()
+    return doubtful_box.BoxPacker(margin, shape)
 
 
 def _verdict_costs(

@@ -161,24 +161,12 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         one decode of the empty syndrome takes that outside the timed
         call.
         """
+        backend = hyperedge_belief_propagation(
+            model, self.max_iterations, self.belief_propagation_method
+        )
         physical = model.require_faults(
             fault_models.FaultRepresentation.PHYSICAL
         )
-        projection = model.physical_to_graphlike_detector_projection
-        columns, error_channel = distinct_hyperedges(physical)
-        physical_check = scipy.sparse.csr_matrix(physical.check)
-        hyperedge_check = physical_check[:, columns]
-        belief_propagation = ldpc.BpDecoder(
-            hyperedge_check,
-            error_channel=error_channel,
-            max_iter=self.max_iterations,
-            bp_method=self.belief_propagation_method,
-            input_vector_type="syndrome",
-        )
-        hyperedge_projection = projection[:, columns]
-        hyperedge_projection = hyperedge_projection.astype(numpy.float64)
-        edge_from_hyperedge = scipy.sparse.csr_matrix(hyperedge_projection)
-        backend = (belief_propagation, edge_from_hyperedge)
         detector_count = physical.check.shape[0]
         empty_syndrome = numpy.zeros(detector_count, dtype=numpy.uint8)
         self.decode_window(backend, model, faults, empty_syndrome)
@@ -232,6 +220,37 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         return decoding_records.WindowDecode(
             correction, iterations=iterations, evidence=_MATCHED
         )
+
+
+def hyperedge_belief_propagation(
+    model: fault_models.WindowErrorModel,
+    max_iterations: int,
+    belief_propagation_method: str,
+) -> tuple:
+    """(BP on the window's hyperedges, the hyperedge-to-edge map).
+
+    ldpc's BpDecoder runs on one column per distinct detector set
+    (distinct_hyperedges); the sparse map takes each hyperedge's value
+    onto the graphlike edges of its decomposition, by the window's
+    projection, as beliefmatching's hyperedge_to_edge_matrix does. The
+    belief_matching and belief_find rows both decode on this pair.
+    """
+    physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
+    columns, error_channel = distinct_hyperedges(physical)
+    physical_check = scipy.sparse.csr_matrix(physical.check)
+    hyperedge_check = physical_check[:, columns]
+    belief_propagation = ldpc.BpDecoder(
+        hyperedge_check,
+        error_channel=error_channel,
+        max_iter=max_iterations,
+        bp_method=belief_propagation_method,
+        input_vector_type="syndrome",
+    )
+    projection = model.physical_to_graphlike_detector_projection
+    hyperedge_projection = projection[:, columns]
+    hyperedge_projection = hyperedge_projection.astype(numpy.float64)
+    edge_from_hyperedge = scipy.sparse.csr_matrix(hyperedge_projection)
+    return belief_propagation, edge_from_hyperedge
 
 
 def distinct_hyperedges(physical: fault_models.PlacedFaultModel) -> tuple:

@@ -112,23 +112,10 @@ class BeliefFindDecoder(union_find.UnionFindDecoder):
     ) -> BeliefFindBackend:
         """The window's shared graph and BP decoder over its hyperedges."""
         graph = union_find.UnionFindDecoder.compile(self, faults, model)
-        physical = model.require_faults(
-            fault_models.FaultRepresentation.PHYSICAL
+        belief = belief_matching.hyperedge_belief_propagation(
+            model, self.max_iterations, self.belief_propagation_method
         )
-        columns, error_channel = belief_matching.distinct_hyperedges(physical)
-        physical_check = scipy.sparse.csr_matrix(physical.check)
-        hyperedge_check = physical_check[:, columns]
-        belief_propagation = ldpc.BpDecoder(
-            hyperedge_check,
-            error_channel=error_channel,
-            max_iter=self.max_iterations,
-            bp_method=self.belief_propagation_method,
-            input_vector_type="syndrome",
-        )
-        projection = model.physical_to_graphlike_detector_projection
-        hyperedge_projection = projection[:, columns]
-        hyperedge_projection = hyperedge_projection.astype(numpy.float64)
-        edge_from_hyperedge = scipy.sparse.csr_matrix(hyperedge_projection)
+        belief_propagation, edge_from_hyperedge = belief
         return BeliefFindBackend(graph, belief_propagation, edge_from_hyperedge)
 
     def decode_window(

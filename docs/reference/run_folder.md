@@ -179,6 +179,7 @@ and they are the same names in `shots.csv`, `window_samples.csv` and
 | `buffer0_first_round_to_frame` | the window's first round in that syndrome buffer, to the frame |
 | `qpu_last_round_to_frame` | the last round the committing decode read leaving the QPU, to the frame: a strong region that absorbed later windows reads past its window, and a buffer that runs into the next operation reads that operation's rounds |
 | `qpu_first_round_to_frame` | the window's first round leaving the QPU, to the frame |
+| `window_last_round_to_final_answer` | one sample per window the weak chain sliced, absorbed ones included: the window's last round, its buffer included and cut at the stream's last round, leaving the QPU, to the frame's commit of the answer that covers its commit rounds, its own or, for a window a strong region absorbed, the region's. A switch moves only the end, so every window is timed from the same point (`decsim/experiments/measure.py`, `original_window_latencies_us`) |
 | `end_of_stream_reaction` | one sample a shot: the last round any committing decode read leaving the QPU, to the last correction committed at the frame, whichever window holds it. It is the response time from the final syndrome to the correction (Toshio et al. 2510.25222 lines 357-363) and Riverlane's full decoding response time (2410.05202 lines 74-79) up to the frame; a conditional operation's own legs, `frame_to_controller`, the decision-to-pulse cycles and `controller_to_qpu`, run only for an operation another waits on and are not in it; `conditional_reaction` holds them. The pooled window points hide it: the final window is one sample among many |
 | `conditional_reaction` | one sample per conditional operation, one another's result releases (`blocked_by`), as a teleported T gate's S correction waits on its decoded Z measurement (Skoric et al. 2209.08552 Fig. 1): its blocker's body done on the QPU, the end of the final syndrome round, to its own body starting there, the conditional gate applied. It is Riverlane's full decoding response time (2410.05202 lines 74-79), the response time of Toshio et al. (2510.25222 lines 357-363) and Skoric's tau (lines 74-79): the decode, every hop of the reaction path, the decision-to-pulse cycles and the wait for the next cycle boundary, and any other start gate that opened later, a magic state's among them. A program with no conditional operation has no sample |
 
@@ -427,7 +428,7 @@ value.
 | --- | --- |
 | `task_id`, the swept paths, `algorithm` | the task |
 | `name` | which latency point, from the list above |
-| `tier` | the tier whose decode the frame committed for the windows counted here: `weak` for a kept window and `strong` for an escalated one, when the weak tier decodes the run's windows. Empty for the three `_per_round` latency points, whose samples are rounds, not windows, for `end_of_stream_reaction`, whose samples are shots, and for `conditional_reaction`, whose samples are operations |
+| `tier` | the tier whose decode the frame committed for the windows counted here: `weak` for a kept window and `strong` for an escalated one, when the weak tier decodes the run's windows. Empty for the three `_per_round` latency points, whose samples are rounds, not windows, for `end_of_stream_reaction`, whose samples are shots, for `conditional_reaction`, whose samples are operations, and for `window_last_round_to_final_answer`, whose samples are the weak chain's windows, whichever tier answered each |
 | `value_us` | one microsecond value that occurred |
 | `count` | how many windows, rounds or shots carried it |
 
@@ -499,6 +500,8 @@ text of Stim's 01 format, as in `predictions`.
 | `gap_nats`, `is_escalated` | on a switching run, the gap the verdict read and whether it escalated |
 | `weak_answer`, `weak_label` | on a switching run, the weak decode's prediction of the window's own commit rounds; for an escalated window, also the label of those rounds |
 | `strong_evidence` | on an escalated window, the strong decode's own named numbers as a json object; belief matching writes `{"matched": 1.0}` when its BP did not converge and the matching ran, `{"matched": 0.0}` when BP's own correction was kept |
+| `cluster_count`, `largest_cluster_events`, `largest_cluster_edges`, `growth_step_count` | on a window whose verdict decode left a union-find growth (`decsim/decoders/cluster_record.py`), empty otherwise: its clusters that hold a detection event, the most events one cluster holds, the fully covered edges with an end in that cluster, boundary edges included, and the growth's steps |
+| `walk_cluster_count`, `walk_event_count`, `is_walk_through_boundary`, `walk_detection_events` | on the same windows, the doubtful clusters, those with a detection event that the cluster gap's shortest odd walk reaches: how many, how many events they hold, whether the walk crosses a boundary edge, and those events as json text of window detector indices. The walk leaves the buffer's boundary edges out when the run's confidence does (`closes_buffer_boundary`) |
 
 ### `decode_times.csv`
 

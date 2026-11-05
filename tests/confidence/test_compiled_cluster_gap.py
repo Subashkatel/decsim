@@ -30,6 +30,7 @@ where the walks are compared.
 """
 
 import ctypes.util
+import dataclasses
 import math
 import os
 import pathlib
@@ -71,6 +72,12 @@ CORPUS_POINTS = (
     (7, 0.005, 4),
     (9, 0.005, 2),
 )
+
+# the middle window of a d5 sliding decode, and the shots the Python
+# walk affords on it
+SLIDING_DISTANCE = 5
+SLIDING_PROBABILITY = 0.005
+SLIDING_SHOTS = 20
 
 SANITIZED_GRAPH_COUNT = 40
 SANITIZER_RUNTIME = ctypes.util.find_library("asan")
@@ -152,6 +159,52 @@ def test_the_property_corpus_of_surface_code_windows_matches_both_walks():
     """Eight points of Stim's rotated surface code, walk for walk."""
     for distance, probability, shots in CORPUS_POINTS:
         walk_corpus_point(distance, probability, shots)
+
+
+def test_a_closed_buffer_boundary_walks_the_graph_without_those_edges():
+    """Closing the buffer's boundary is the walk with those edges left out.
+
+    The referents are the compiled walk and the walk decsim ran before
+    (cluster_gap_oracle.py) on the graph without the edges marked
+    buffer_boundary, on sampled shots of the middle window of a d5
+    sliding decode. The scipy reading cannot serve here: a sliding
+    window puts two boundary edges on one detector. Leaving edges out
+    can only lengthen the walk, and on some shot it does. The decode
+    reads no mark, so its correction is the one on the same graph with
+    every mark cleared.
+    """
+    circuit, models = windows.sliding_windows(
+        SLIDING_DISTANCE, SLIDING_PROBABILITY, REQUIREMENT
+    )
+    model = models[1]
+    graph = window_decoder.graph_from_model(
+        model.graphlike_faults,
+        location="middle window",
+        weight_step=WEIGHT_STEP,
+    )
+    unmarked = _with_no_buffer_boundary(graph)
+    sampled, _observables = windows.sampled_shots(
+        circuit, SLIDING_SHOTS, CIRCUIT_SEED
+    )
+    lengthened = 0
+    for shot in sampled:
+        syndrome = windows.row_syndrome(model, shot)
+        result = window_decoder.decode_graph(graph, syndrome)
+        unmarked_result = window_decoder.decode_graph(unmarked, syndrome)
+        intervals = result.edge_intervals
+        open_gap = compiled_decoder.cluster_gap(graph, intervals)
+        closed_gap = compiled_decoder.cluster_gap(
+            graph, intervals, closes_buffer_boundary=True
+        )
+        smaller, kept = _without_buffer_boundary(graph, intervals)
+        smaller_gap = compiled_decoder.cluster_gap(smaller, kept)
+        moved = cluster_gap_oracle._quotient_cluster_gap(smaller, kept)
+        assert closed_gap == smaller_gap
+        assert closed_gap == moved
+        assert closed_gap >= open_gap
+        assert unmarked_result.selected_faults == result.selected_faults
+        lengthened += closed_gap > open_gap
+    assert lengthened > 0
 
 
 def test_the_property_corpus_of_random_small_graphs_matches_the_moved_walk():
@@ -307,6 +360,28 @@ def _require_the_scipy_reading_can_read(graph) -> None:
         ends = (edge.detector_a, edge.detector_b)
         assert ends not in pairs
         pairs.add(ends)
+
+
+def _without_buffer_boundary(graph, edge_intervals) -> tuple:
+    """The graph and its growth with the buffer's boundary edges left out."""
+    kept_edges = []
+    kept_intervals = []
+    for edge, interval in zip(graph.edges, edge_intervals, strict=True):
+        if edge.buffer_boundary:
+            continue
+        kept_edges.append(edge)
+        kept_intervals.append(interval)
+    smaller = dataclasses.replace(graph, edges=tuple(kept_edges))
+    return smaller, tuple(kept_intervals)
+
+
+def _with_no_buffer_boundary(graph):
+    """The same graph with no edge marked as the buffer's boundary."""
+    edges = []
+    for edge in graph.edges:
+        unmarked = dataclasses.replace(edge, buffer_boundary=False)
+        edges.append(unmarked)
+    return dataclasses.replace(graph, edges=tuple(edges))
 
 
 def _random_corpus_shapes(count: int, seed: int) -> dict:

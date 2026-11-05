@@ -59,8 +59,10 @@ class ClusterGap:
         walk_microseconds: Optional[float] = None,
         walk_decodes: Optional[float] = None,
         decode_timing: Optional[cycle_count_module.Timing] = None,
+        closes_buffer_boundary: bool = False,
     ) -> None:
         self.weight_step = evidence_records.normalized_weight_step(weight_step)
+        self.closes_buffer_boundary = closes_buffer_boundary
         # what the walk costs on the weak tier's clock: a card's declared
         # number; walk_decodes times its decode's cycle count on
         # decode_timing; or neither, to measure the call as a measured
@@ -75,11 +77,15 @@ class ClusterGap:
 
         walk_microseconds declares the walk's time. walk_decodes prices
         it as that many of its own decode's cycle counts on the weak
-        unit; 1 is one more decode.
+        unit; 1 is one more decode. closes_buffer_boundary keeps the
+        walk off the buffer's own boundary edges, the window-aware gap.
         """
 
         walk_microseconds: Optional[float] = None
         walk_decodes: Optional[float] = None
+        # the window-aware gap: the walk may not close through the
+        # buffer's own boundary (Mishima et al. 2605.14637 Sec. III B 2)
+        closes_buffer_boundary: bool = False
         # the word the reports name this row by
         name = "cluster_gap"
 
@@ -114,12 +120,14 @@ class ClusterGap:
                     walk_microseconds=walk_microseconds,
                     walk_decodes=walk_decodes,
                     decode_timing=host_time,
+                    closes_buffer_boundary=self.closes_buffer_boundary,
                 )
             return ClusterGap(
                 weight_step=weight_step,
                 walk_microseconds=walk_microseconds,
                 walk_decodes=walk_decodes,
                 decode_timing=weak_algorithm.timing,
+                closes_buffer_boundary=self.closes_buffer_boundary,
             )
 
     def compute(self, solves: tuple) -> decoding_records.SoftOutputComputation:
@@ -140,11 +148,15 @@ class ClusterGap:
     def _walk(self, evidence) -> tuple:
         """The gap and the ticks the walk cost: declared, decodes, measured."""
         if self.walk_microseconds is not None:
-            gap = _cluster_gap(evidence, self.weight_step)
+            gap = _cluster_gap(
+                evidence, self.weight_step, self.closes_buffer_boundary
+            )
             ticks = config.microseconds_to_ticks(self.walk_microseconds)
             return gap, ticks
         started_ns = time.perf_counter_ns()
-        gap = _cluster_gap(evidence, self.weight_step)
+        gap = _cluster_gap(
+            evidence, self.weight_step, self.closes_buffer_boundary
+        )
         finished_ns = time.perf_counter_ns()
         elapsed_ns = finished_ns - started_ns
         if self.walk_decodes is not None:
@@ -198,10 +210,14 @@ def gap_half_ticks_to_natural_log_weight(
 
 
 def _cluster_gap(
-    hard_evidence: evidence_records.UnionFindHardEvidence, weight_step: float
+    hard_evidence: evidence_records.UnionFindHardEvidence,
+    weight_step: float,
+    closes_buffer_boundary: bool = False,
 ) -> float:
     gap_half_ticks = compiled_decoder.cluster_gap(
-        hard_evidence.graph, hard_evidence.edge_intervals
+        hard_evidence.graph,
+        hard_evidence.edge_intervals,
+        closes_buffer_boundary,
     )
     return gap_half_ticks_to_natural_log_weight(gap_half_ticks, weight_step)
 

@@ -13,6 +13,7 @@ same shots: they agree to within the growth's weight step.
 import math
 import statistics
 
+import numpy
 import pytest
 
 import decsim.confidence.cluster as cluster
@@ -36,6 +37,14 @@ HOST_TIME = cycle_count_module.HostMeasuredTime()
 HOST_TIMED_UNION_FIND = union_find.UnionFindDecoder.Settings(timing=HOST_TIME)
 # a clock of ten ticks a cycle, so a cycle count reads off its ticks
 TEST_CLOCK = config.Clock(10)
+# a quiet window at three distances, each buffered d rounds
+QUIET_DISTANCES = (3, 5, 7)
+QUIET_PROBABILITY = 0.003
+# a weak row with a weight step, and one without
+WEAK_ROWS = (
+    HOST_TIMED_UNION_FIND,
+    minimum_weight_perfect_matching.PyMatchingDecoder.Settings(),
+)
 
 
 def _window_model():
@@ -163,6 +172,59 @@ def test_the_walk_has_one_price():
 def test_walk_decodes_refuses_a_negative_count():
     with pytest.raises(ValueError, match="walk_decodes must be finite"):
         cluster.ClusterGap.Settings(walk_decodes=-1.0)
+
+
+def test_a_closed_buffer_boundary_gives_a_quiet_window_a_gap_growing_with_d():
+    """Mishima et al. 2605.14637 Sec. III B 2, on a window with no event.
+
+    A sliding window owns the logical boundary edges of its commit
+    rounds and not those of its buffer, so today's walk crosses the
+    logical in a commit round, climbs one round and leaves through the
+    buffer's own boundary: a few edges at every d. With that boundary
+    closed, the walk must cross the patch or climb the d rounds of the
+    buffer to the open future. So it grows with d, and it equals the gap
+    of the last window, which has no buffer to close.
+    """
+    today = []
+    closed = []
+    for distance in QUIET_DISTANCES:
+        circuit, models = windows.sliding_windows(
+            distance,
+            QUIET_PROBABILITY,
+            fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        )
+        middle = models[1]
+        last = models[2]
+        open_middle = _quiet_gap(circuit, middle, False)
+        closed_middle = _quiet_gap(circuit, middle, True)
+        last_gap = _quiet_gap(circuit, last, False)
+        assert closed_middle == last_gap
+        today.append(open_middle)
+        closed.append(closed_middle)
+    assert today[-1] <= today[0]
+    assert closed[0] < closed[1] < closed[2]
+    assert closed[0] > today[0]
+
+
+@pytest.mark.parametrize("closes", [False, True])
+@pytest.mark.parametrize("weak", WEAK_ROWS)
+def test_the_settings_hand_the_closed_buffer_boundary_to_the_row(weak, closes):
+    record = cluster.ClusterGap.Settings(closes_buffer_boundary=closes)
+
+    built = record.build(weak, None)
+
+    assert built.closes_buffer_boundary is closes
+
+
+def _quiet_gap(circuit, model, closes_buffer_boundary: bool) -> float:
+    """The cluster gap of the window on a shot with no detection event."""
+    row = union_find.UnionFindDecoder(HOST_TIMED_UNION_FIND)
+    signal = cluster.ClusterGap(closes_buffer_boundary=closes_buffer_boundary)
+    quiet = numpy.zeros(circuit.num_detectors, dtype=bool)
+    job = windows.job_for(model, quiet)
+    result = row.decode(job)
+    computation = signal.compute((result,))
+    return computation.soft_output.gap
 
 
 def _oracle_gap(evidence) -> float:

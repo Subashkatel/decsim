@@ -191,6 +191,7 @@ def placed_faults_for_window(
     check = _check_matrix(context, arrays, entries, len(columns))
     observables = _observable_matrix(context, arrays, column_faults)
     priors = arrays.priors[column_faults]
+    open_flips = _open_flips(context, columns, catalog.detector_sets)
     return fault_model_contracts.PlacedFaultModel(
         representation=catalog.representation,
         check=check,
@@ -199,6 +200,7 @@ def placed_faults_for_window(
         owned=owned,
         source_fault_ids=tuple(columns),
         boundary_flips=boundary_flips,
+        open_flips=open_flips,
     )
 
 
@@ -305,6 +307,24 @@ def _owned_columns(
         arrays.entry_rounds, entries, commit_rounds, column_count
     )
     return may_own & in_commit
+
+
+def _open_flips(
+    context: WindowPlacementContext, columns: list, detector_sets: tuple
+) -> dict:
+    """Each column that flips a detector outside the window, to those detectors.
+
+    Earlier windows committed every fault touching their commit rounds,
+    so a sliding window's outside detectors lie in its future: these
+    columns are its open future edge (Mishima et al. 2605.14637 Fig. 3).
+    """
+    inside = context.row_by_detector
+    found = {}
+    for column, fault in enumerate(columns):
+        outside = tuple(d for d in detector_sets[fault] if d not in inside)
+        if outside:
+            found[column] = outside
+    return found
 
 
 def _boundary_flips(

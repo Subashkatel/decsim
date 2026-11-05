@@ -309,3 +309,71 @@ def test_the_property_corpus_of_d5_windows_matches_the_python_placement():
         placement = surface_window(slicer, first_commit, committed)
         compare_one_placement(placement)
         _placed, _expected, committed, _oracle = placed_both_ways(placement)
+
+
+def outside_detectors(placement: dict, placed) -> dict:
+    """Each placed column's catalog detectors that are not window rows."""
+    detector_sets = placement["catalog"].detector_sets
+    row_by_detector = placement["context"].row_by_detector
+    found = {}
+    for column, fault in enumerate(placed.source_fault_ids):
+        detectors = detector_sets[fault]
+        outside = tuple(d for d in detectors if d not in row_by_detector)
+        if outside:
+            found[column] = outside
+    return found
+
+
+def rounds_reached(placed, round_by_detector: dict) -> set:
+    """The rounds of every detector an open column reaches."""
+    reached = set()
+    for detectors in placed.open_flips.values():
+        rounds = [round_by_detector[detector] for detector in detectors]
+        reached.update(rounds)
+    return reached
+
+
+def test_a_column_is_open_when_its_fault_flips_a_detector_outside_the_window():
+    """open_flips maps each such column to its detectors outside the rows.
+
+    The referent is the catalog's own detector sets and the window's
+    rows, on the random corpus above, where a fault may reach past
+    either end of its window.
+    """
+    rng = random.Random(RANDOM_SEED)
+    open_count = 0
+    for _ in range(RANDOM_WINDOW_COUNT):
+        placement = random_placement(rng)
+        placed, _expected, _committed, _oracle = placed_both_ways(placement)
+        expected = outside_detectors(placement, placed)
+        assert dict(placed.open_flips) == expected
+        open_count += len(expected)
+    assert open_count > 0
+
+
+def test_a_sliding_window_is_open_only_to_the_rounds_after_it():
+    """Mishima et al. 2605.14637 Fig. 3: the open edge is the future.
+
+    Earlier windows commit every fault that touches their commit rounds,
+    so a d5 window in time order reaches only rounds after its buffer,
+    and a window whose buffer ends with the memory reaches none.
+    """
+    slicer = surface_slicer()
+    round_by_detector = {}
+    for round_index, detectors in slicer.chronology.detectors_by_round.items():
+        in_round = dict.fromkeys(detectors, round_index)
+        round_by_detector.update(in_round)
+    committed = set()
+    open_windows = 0
+    for first_commit in range(1, SURFACE_ROUNDS, SURFACE_STEP):
+        placement = surface_window(slicer, first_commit, committed)
+        placed, _expected, committed, _oracle = placed_both_ways(placement)
+        rows = placement["context"].rows
+        window_rounds = [round_by_detector[detector] for detector in rows]
+        last_round = max(window_rounds)
+        reached = rounds_reached(placed, round_by_detector)
+        assert all(round_index > last_round for round_index in reached)
+        if last_round == SURFACE_ROUNDS:
+            assert not placed.open_flips
+        open_windows += bool(placed.open_flips)
+    assert open_windows == 2

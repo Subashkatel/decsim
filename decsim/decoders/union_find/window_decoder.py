@@ -15,6 +15,7 @@ are records in decsim/records/decoder_evidence.py.
 """
 
 import collections
+import dataclasses
 import math
 from typing import Optional
 
@@ -91,7 +92,10 @@ def graph_from_model(
     likely = priors > 0.5
     baseline = likely.astype(numpy.uint8)
     baseline_syndrome = decoder_module.parity_product(check, baseline)
-    edges = _edges(check, priors, baseline, observables, weight_step)
+    buffer_boundary = _buffer_boundary_columns(faults)
+    edges = _edges(
+        check, priors, baseline, observables, weight_step, buffer_boundary
+    )
     _refuse_lengths_past_the_counters(edges, weight_step, location)
     logical_columns = _logical_columns(observables, fault_count)
     baseline_faults = decoder_module.int_tuple(baseline)
@@ -184,7 +188,27 @@ def _quantize_weight_ticks(weight: float, weight_step: float) -> int:
     return max(1, ticks)
 
 
-def _edges(check, priors, baseline, observables, weight_step: float) -> list:
+def _buffer_boundary_columns(
+    faults: fault_models.PlacedFaultModel,
+) -> numpy.ndarray:
+    """The columns on the patch's own boundary in the buffer.
+
+    One detector in the window, not owned, and not reaching outside the
+    window: the buffer boundary of Mishima et al. 2605.14637 Fig. 3,
+    which joins the commit boundary to the open future at a cost that
+    does not grow with d or the buffer (Sec. III B 2).
+    """
+    one_detector = numpy.diff(faults.check.indptr) == 1
+    owned = numpy.asarray(faults.owned, dtype=bool)
+    is_open = numpy.zeros(len(owned), dtype=bool)
+    for column in faults.open_flips:
+        is_open[column] = True
+    return one_detector & ~owned & ~is_open
+
+
+def _edges(
+    check, priors, baseline, observables, weight_step: float, buffer_boundary
+) -> list:
     """The edge of every fault column whose residual is not certain."""
     edges = []
     fault_count = check.shape[1]
@@ -192,8 +216,11 @@ def _edges(check, priors, baseline, observables, weight_step: float) -> list:
         edge = _edge_of(
             check, priors, baseline, observables, fault_index, weight_step
         )
-        if edge is not None:
-            edges.append(edge)
+        if edge is None:
+            continue
+        if buffer_boundary[fault_index]:
+            edge = dataclasses.replace(edge, buffer_boundary=True)
+        edges.append(edge)
     return edges
 
 
@@ -347,7 +374,8 @@ def _content_key(faults: fault_models.PlacedFaultModel, weight_step) -> tuple:
     observables = _sparse_key(faults.observables)
     priors = _array_key(faults.priors)
     owned = _array_key(faults.owned)
-    return (weight_step, check, observables, priors, owned)
+    opens = tuple(sorted(faults.open_flips))
+    return (weight_step, check, observables, priors, owned, opens)
 
 
 def _sparse_key(matrix) -> tuple:

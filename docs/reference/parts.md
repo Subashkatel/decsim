@@ -124,12 +124,13 @@ fragments is a folder of the four fragments and physical.json (workload_files.re
 
 `decsim/confidence/cluster.py`. Its settings: what the walk costs, or None for both to measure it.
 
-walk_microseconds declares the walk's time. walk_decodes prices it as that many of its own decode's cycle counts on the weak unit; 1 is one more decode.
+walk_microseconds declares the walk's time. walk_decodes prices it as that many of its own decode's cycle counts on the weak unit; 1 is one more decode. closes_buffer_boundary keeps the walk off the buffer's own boundary edges, the window-aware gap.
 
 | Field | Type | Default |
 | --- | --- | --- |
 | `walk_microseconds` | `Optional[float]` | `None` |
 | `walk_decodes` | `Optional[float]` | `None` |
+| `closes_buffer_boundary` | `bool` | `False` |
 
 ### `ComplementaryGap.Settings`
 

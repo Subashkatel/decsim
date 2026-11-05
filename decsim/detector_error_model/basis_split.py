@@ -121,13 +121,28 @@ class _MergedColumns:
 
     prior_by_key: dict = dataclasses.field(default_factory=dict)
     fault_id_by_key: dict = dataclasses.field(default_factory=dict)
+    open_by_key: dict = dataclasses.field(default_factory=dict)
 
-    def add(self, key: tuple, prior: float, fault_id: int) -> None:
-        """One more fault on this key, its prior merged as odd counts."""
+    def add(
+        self,
+        key: tuple,
+        prior: float,
+        fault_id: int,
+        open_detectors: tuple = (),
+    ) -> None:
+        """One more fault on this key, its prior merged as odd counts.
+
+        The merged column is open when any of its faults is: it reaches
+        the window's future through that fault.
+        """
         current = self.prior_by_key.get(key, 0.0)
         merged = stim_fault_catalog.merge_probability(current, prior)
         self.prior_by_key[key] = merged
         self.fault_id_by_key.setdefault(key, fault_id)
+        if open_detectors:
+            known = self.open_by_key.get(key, ())
+            open_union = set(known) | set(open_detectors)
+            self.open_by_key[key] = tuple(sorted(open_union))
 
     def placed(
         self, row_count: int, observable_count: int
@@ -150,6 +165,7 @@ class _MergedColumns:
         owned = [key[2] for key in keys]
         first_fault_ids = self.fault_id_by_key.values()
         fault_ids = list(first_fault_ids)
+        open_flips = self._open_flips(keys)
         return fault_model_contracts.PlacedFaultModel(
             representation=fault_model_contracts.FaultRepresentation.PHYSICAL,
             check=check,
@@ -158,7 +174,16 @@ class _MergedColumns:
             owned=owned,
             source_fault_ids=fault_ids,
             boundary_flips=flips,
+            open_flips=open_flips,
         )
+
+    def _open_flips(self, keys: list) -> dict:
+        """Each open merged column, by its column, to its outside detectors."""
+        open_flips = {}
+        for column, key in enumerate(keys):
+            if key in self.open_by_key:
+                open_flips[column] = self.open_by_key[key]
+        return open_flips
 
 
 def _data_qubits(circuit: stim.Circuit) -> numpy.ndarray:
@@ -248,7 +273,12 @@ def _part_faults(
             continue
         key = _column_key(model, basis, column, part_rows, kept_observables)
         prior = float(faults.priors[column])
-        merged.add(key, prior, faults.source_fault_ids[column])
+        outside = faults.open_flips.get(column, ())
+        # a detector of unknown type keeps the edge open in both parts
+        part_open = tuple(
+            d for d in outside if model.detector_bases.get(d, basis) == basis
+        )
+        merged.add(key, prior, faults.source_fault_ids[column], part_open)
     observable_count = faults.observables.shape[0]
     return merged.placed(len(rows), observable_count)
 

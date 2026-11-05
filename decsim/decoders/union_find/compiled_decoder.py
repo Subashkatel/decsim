@@ -215,18 +215,34 @@ def decode(
 
 
 def cluster_gap(
-    graph: evidence_records.UnionFindGraph, edge_intervals: tuple
+    graph: evidence_records.UnionFindGraph,
+    edge_intervals: tuple,
+    closes_buffer_boundary: bool = False,
 ) -> Union[int, float]:
     """The shortest odd closed walk of one growth, in half ticks.
 
     Infinite when the growth admits no such walk, which is what a
     window whose logical row the growth never crosses leaves behind.
+    closes_buffer_boundary leaves the buffer's boundary edges out of the
+    walk (Mishima et al. 2605.14637's spatiotemporal complementary gap).
     """
     edge_count = len(graph.edges)
     _require_one_interval_per_edge(edge_count, edge_intervals)
     endpoint_a, endpoint_b, lengths = graph.edge_arrays
     parities = graph.logical_parities
     is_closed, lower_tick, upper_tick = _interval_arrays(edge_intervals)
+    if closes_buffer_boundary:
+        is_kept = [not edge.buffer_boundary for edge in graph.edges]
+        kept = numpy.array(is_kept, dtype=bool)
+        endpoint_a = numpy.ascontiguousarray(endpoint_a[kept])
+        endpoint_b = numpy.ascontiguousarray(endpoint_b[kept])
+        lengths = numpy.ascontiguousarray(lengths[kept])
+        parities = numpy.ascontiguousarray(parities[kept])
+        is_closed = numpy.ascontiguousarray(is_closed[kept])
+        lower_tick = numpy.ascontiguousarray(lower_tick[kept])
+        upper_tick = numpy.ascontiguousarray(upper_tick[kept])
+        kept_count = kept.sum()
+        edge_count = int(kept_count)
     gap = numpy.zeros(1, dtype=numpy.int64)
     walk = cluster_gap_entry_point()
     status = walk(

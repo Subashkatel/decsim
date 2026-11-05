@@ -73,6 +73,11 @@ class UnionFindEdge:
     detector_b: int
     logical_observables: tuple[int, ...]
     length_half_ticks: int
+    # an edge to the patch's own boundary in the buffer, which the
+    # window does not commit and which does not reach its future: a
+    # window-aware gap's walk may not close through it (Mishima et al.
+    # 2605.14637 Sec. III B 2, the buffer boundary closed)
+    buffer_boundary: bool = False
 
 
 @dataclasses.dataclass(frozen=True)

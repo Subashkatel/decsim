@@ -143,6 +143,33 @@ def test_a_placed_model_is_frozen_for_every_reader():
         placed.boundary_flips[1] = (2,)
 
 
+def test_a_placed_model_holds_no_open_column_unless_told():
+    placed = placed_model()
+
+    assert placed.open_flips == {}
+
+
+def test_open_flips_are_frozen_as_ints_and_move_with_the_detectors():
+    """A column that reaches outside the window keeps those detectors.
+
+    They are held as Python ints (numpy 2 prints its own as np.int64)
+    in a read-only mapping, and a moved model reads them later by its
+    detector shift, as it reads its boundary flips.
+    """
+    column = numpy.int64(1)
+    detector = numpy.int64(12)
+    closed = placed_model()
+    placed = dataclasses.replace(closed, open_flips={column: [detector]})
+
+    moved = placed.moved(100, 10)
+
+    assert placed.open_flips == {1: (12,)}
+    assert repr(placed.open_flips[1]) == "(12,)"
+    assert moved.open_flips == {1: (22,)}
+    with pytest.raises(TypeError, match="object does not support item"):
+        placed.open_flips[0] = (3,)
+
+
 def test_a_window_hands_out_the_representation_it_holds():
     graphlike = placed_model()
     check = scipy.sparse.csc_matrix([[1, 1], [0, 1]], dtype=numpy.uint8)

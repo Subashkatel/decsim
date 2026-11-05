@@ -179,23 +179,53 @@ def test_a_detector_of_neither_type_is_refused():
 
 def _restricted_columns(model, faults, basis: str, detectors_of) -> set:
     """Each column as (its type's detectors, observables, owned, flips)."""
-    bases = model.detector_bases
-    kept_observables = _observables_of_basis(model, basis)
     columns = set()
     for column in range(faults.check.shape[1]):
-        detectors = detectors_of(column)
-        typed = _detectors_of_basis(detectors, bases, basis)
-        if not typed:
-            continue
-        flipped = _column(faults.observables, column)
-        kept = kept_observables.intersection(flipped)
-        observables = frozenset(kept)
-        owned = bool(faults.owned[column])
-        flips = faults.boundary_flips.get(column, ())
-        typed_flips = _detectors_of_basis(flips, bases, basis)
-        restricted = (typed, observables, owned, typed_flips)
-        columns.add(restricted)
+        restricted = _restricted(model, faults, basis, column, detectors_of)
+        if restricted is not None:
+            columns.add(restricted)
     return columns
+
+
+def _restricted(model, faults, basis: str, column: int, detectors_of):
+    """One column cut to one type; None when it has no detector of it."""
+    bases = model.detector_bases
+    kept_observables = _observables_of_basis(model, basis)
+    detectors = detectors_of(column)
+    typed = _detectors_of_basis(detectors, bases, basis)
+    if not typed:
+        return None
+    flipped = _column(faults.observables, column)
+    kept = kept_observables.intersection(flipped)
+    observables = frozenset(kept)
+    owned = bool(faults.owned[column])
+    flips = faults.boundary_flips.get(column, ())
+    typed_flips = _detectors_of_basis(flips, bases, basis)
+    return (typed, observables, owned, typed_flips)
+
+
+def _open_by_column(model, faults, basis: str, detectors_of, open_of) -> dict:
+    """Each restricted column to the outside detectors it is open to.
+
+    Columns that restrict to one part column pool their detectors.
+    """
+    opens = collections.defaultdict(set)
+    for column in range(faults.check.shape[1]):
+        restricted = _restricted(model, faults, basis, column, detectors_of)
+        if restricted is None:
+            continue
+        detectors = open_of(column)
+        opens[restricted].update(detectors)
+    return dict(opens)
+
+
+def _not_of_the_other_type(detectors, bases, basis: str) -> set:
+    """The detectors not known to be of the other type."""
+    return {
+        detector
+        for detector in detectors
+        if bases.get(detector, basis) == basis
+    }
 
 
 def _observables_of_basis(model, basis: str) -> set:
@@ -239,3 +269,47 @@ def test_a_windowed_part_keeps_what_its_window_commits_and_hands_on(
     expected = _restricted_columns(model, whole, basis, whole_detectors)
     actual = _restricted_columns(part, faults, basis, part_detectors)
     assert actual == expected
+
+
+@pytest.mark.parametrize("basis", ["X", "Z"])
+@pytest.mark.parametrize("window_entry", [(4, 6, 7), (2, 4, 6, 7)])
+def test_a_part_column_is_open_where_any_fault_it_merges_is_open(
+    window_entry, basis
+):
+    """Each part keeps the outside detectors of its faults, pooled.
+
+    The referent is the whole window's open_flips. A part column is open
+    to every outside detector of the faults it merges, except those the
+    window knows are of the other type; a detector of unknown type keeps
+    the column open in both parts. The buffer ends at round 7 of 9, so
+    the window has a future to be open to.
+    """
+    circuit = _circuit("z", 3, 9)
+    slicer = window_slicer.WindowSlicer(
+        circuit, round_count=9, fault_model_requirement=REQUIREMENT
+    )
+    model = builders.build_single_window_error_model(slicer, window_entry)
+    whole = model.physical_faults
+    parts = basis_split.split_by_basis(model)
+    part = parts[basis]
+    faults = part.physical_faults
+
+    def whole_detectors(column):
+        return [model.detector_ids[row] for row in _column(whole.check, column)]
+
+    def part_detectors(column):
+        return [part.detector_ids[row] for row in _column(faults.check, column)]
+
+    def whole_open(column):
+        outside = whole.open_flips.get(column, ())
+        bases = model.detector_bases
+        return _not_of_the_other_type(outside, bases, basis)
+
+    def part_open(column):
+        return faults.open_flips.get(column, ())
+
+    expected = _open_by_column(model, whole, basis, whole_detectors, whole_open)
+    actual = _open_by_column(part, faults, basis, part_detectors, part_open)
+    open_sets = expected.values()
+    assert actual == expected
+    assert any(open_sets)

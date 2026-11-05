@@ -360,3 +360,68 @@ def test_models_of_the_same_columns_share_one_graph_and_others_do_not():
     assert again == afresh
     assert other is not first
     assert other.edges != first.edges
+
+
+def _placed_pair(open_flips) -> fault_models.PlacedFaultModel:
+    """Two detectors, one column between them and four on the boundary.
+
+    Column 0 is owned, on detector 0. Column 1 joins the two detectors.
+    Columns 2 and 3 are on detector 1 and column 4 on detector 0, none
+    of them owned.
+    """
+    check = numpy.asarray(((1, 1, 0, 0, 1), (0, 1, 1, 1, 0)), numpy.uint8)
+    priors = numpy.full(5, 0.1)
+    observables = numpy.asarray(((1, 0, 0, 0, 0),), numpy.uint8)
+    owned = numpy.asarray((True, False, False, False, False))
+    return fault_models.PlacedFaultModel(
+        representation=GRAPHLIKE,
+        check=check,
+        priors=priors,
+        observables=observables,
+        owned=owned,
+        source_fault_ids=(0, 1, 2, 3, 4),
+        boundary_flips={},
+        open_flips=open_flips,
+    )
+
+
+def _buffer_boundary_faults(graph) -> set:
+    """The fault of every edge the graph marks as the buffer's boundary."""
+    marked = set()
+    for edge in graph.edges:
+        if edge.buffer_boundary:
+            marked.add(edge.fault_index)
+    return marked
+
+
+def test_the_buffer_boundary_is_each_unowned_boundary_edge_that_stays_inside():
+    """Mishima et al. 2605.14637 Fig. 3: the patch's boundary in the buffer.
+
+    An owned boundary edge is the commit boundary, and an edge whose
+    fault also flips a detector past the window (column 3, open to
+    detector 7) is the open future, so neither is the buffer's own
+    boundary; an edge between two detectors is no boundary at all.
+    """
+    placed = _placed_pair({3: (7,)})
+
+    graph = window_decoder.graph_from_model(
+        placed, location="pair", weight_step=0.1
+    )
+
+    assert _buffer_boundary_faults(graph) == {2, 4}
+
+
+def test_models_open_to_different_detectors_share_no_graph():
+    """The open columns choose the buffer boundary, so they key the graph."""
+    open_one = _placed_pair({3: (7,)})
+    open_two = _placed_pair({2: (7,)})
+
+    first = window_decoder.shared_graph(
+        open_one, location="pair", weight_step=0.1
+    )
+    second = window_decoder.shared_graph(
+        open_two, location="pair", weight_step=0.1
+    )
+
+    assert second is not first
+    assert _buffer_boundary_faults(second) == {3, 4}

@@ -114,7 +114,10 @@ class PlacedFaultModel:
     in the source's fault catalog. Finite sources use catalog positions;
     growing sources preserve identities when their catalog order changes.
     A moved model (moved) holds both as MovedIds and MovedFlips, which
-    read as the tuple and the mapping they stand for.
+    read as the tuple and the mapping they stand for. `open_flips` maps
+    each column that flips a detector outside the window's rows to
+    those detectors: the window's open future edge (Mishima et al.
+    2605.14637 Fig. 3, the virtual boundary).
     """
 
     representation: FaultRepresentation
@@ -124,6 +127,7 @@ class PlacedFaultModel:
     owned: object
     source_fault_ids: Sequence[int]
     boundary_flips: Mapping[int, tuple[int, ...]]
+    open_flips: Mapping[int, tuple[int, ...]] = types.MappingProxyType({})
 
     def __post_init__(self) -> None:
         frozen_priors = _frozen_array(self.priors)
@@ -145,6 +149,12 @@ class PlacedFaultModel:
             flips_by_column[int(column)] = flips
         frozen_flips = types.MappingProxyType(flips_by_column)
         object.__setattr__(self, "boundary_flips", frozen_flips)
+        open_by_column = {}
+        for column, detector_ids in self.open_flips.items():
+            ints = map(int, detector_ids)
+            open_by_column[int(column)] = tuple(ints)
+        frozen_open = types.MappingProxyType(open_by_column)
+        object.__setattr__(self, "open_flips", frozen_open)
         _check_column_counts(self)
 
     def moved(self, name_shift: int, detector_shift: int) -> "PlacedFaultModel":
@@ -161,6 +171,8 @@ class PlacedFaultModel:
         flips = MovedFlips(self.boundary_flips, detector_shift)
         object.__setattr__(moved, "source_fault_ids", names)
         object.__setattr__(moved, "boundary_flips", flips)
+        open_flips = MovedFlips(self.open_flips, detector_shift)
+        object.__setattr__(moved, "open_flips", open_flips)
         return moved
 
 
@@ -199,7 +211,7 @@ class MovedIds(Sequence):
 
 
 class MovedFlips(Mapping):
-    """Each owned column's detectors, each later by one amount when read.
+    """Each column's detectors, each later by one amount when read.
 
     It equals the mapping it stands for (Mapping's own equality).
     """

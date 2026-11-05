@@ -136,6 +136,13 @@ class Decoders:
                 units.append(pool.unit)
         return tuple(units)
 
+    def units_of(self, pool: window_records.PoolId) -> PoolUnits:
+        """The unit and the plan one pool's manager is built over."""
+        for units in self.pools:
+            if units.plan.pool == pool:
+                return units
+        raise KeyError(pool)
+
     def manager_of(
         self, pool: window_records.PoolId
     ) -> decoder_manager_module.DecoderManager:

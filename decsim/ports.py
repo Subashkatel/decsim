@@ -1329,7 +1329,9 @@ class Decoder(Protocol):
     reads_fired_errors says the decoder decodes on the shot's fired
     errors (decsim/decoders/truth.py); such a decoder answers
     errors_sampled(operation, fired_errors), which the machine connects
-    to the syndrome source's errors_sampled.
+    to the syndrome source's errors_sampled. reads_doubtful_box says it
+    decodes the chip's doubtful box (decsim/escalation/doubtful_box.py)
+    instead of a window's rounds, as a box redo's target must.
     """
 
     fault_model_requirement: fault_models.DecoderFaultModelRequirement
@@ -1341,6 +1343,7 @@ class Decoder(Protocol):
     decoder_evidence: frozenset
     missing_evidence_reasons: dict
     reads_fired_errors: bool
+    reads_doubtful_box: bool
 
     def decode(
         self, job: decoding_records.DecodeJob

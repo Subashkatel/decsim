@@ -59,6 +59,9 @@ class DecoderBase(abc.ABC):
     # whether the row decodes on the shot's fired errors, which the
     # machine connects to its errors_sampled
     reads_fired_errors = False
+    # whether the row decodes the chip's doubtful box, which a redo
+    # window packs under box_margin, instead of a window's rounds
+    reads_doubtful_box = False
     # whether the device the row submits to prices each decode (a strong
     # backend row), so neither the host clock nor a latency is its time
     priced_by_its_backend = False

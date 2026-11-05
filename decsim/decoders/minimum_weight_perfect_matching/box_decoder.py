@@ -34,6 +34,10 @@ CORRELATED = matching.CorrelatedPyMatchingDecoder
 class BoxCorrelatedPyMatchingDecoder(CORRELATED):
     """Correlated matching on the chip's doubtful box; union-find else."""
 
+    # it decodes the chip's doubtful box, which a redo window packs
+    # under box_margin (escalation/strong_window_shapes.py)
+    reads_doubtful_box = True
+
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """timing is the fitted law at the box's detection events.
@@ -47,9 +51,6 @@ class BoxCorrelatedPyMatchingDecoder(CORRELATED):
         join_microseconds: float = 0.0
         # the word the reports name this row by
         name = "box_correlated_pymatching"
-        # it decodes the chip's doubtful box, which a redo window packs
-        # under box_margin (escalation/strong_window_shapes.py)
-        reads_doubtful_box = True
 
         def __post_init__(self) -> None:
             config.check_microseconds(

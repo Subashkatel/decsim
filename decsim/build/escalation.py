@@ -106,7 +106,7 @@ class Switching:
         )
         if settings.deadline is not None:
             strong_redecode.deadline = settings.deadline.build(engine)
-        strong_redecode.packer = _box_packer(settings, target.settings)
+        strong_redecode.packer = _box_packer(settings)
         return cls(
             edge=edge,
             target_store=target.store,
@@ -126,6 +126,7 @@ class Switching:
         decoders: "decoders_part.Decoders",
     ) -> None:
         """Wire the redo side, then bind it on the ports left empty."""
+        self._check_the_target_reads_the_box(decoders)
         self._wire_the_strong_side(plan, windows)
         strong_redecode = self.strong_redecode
         carried = readout.store_parts(self.edge.carried_from)
@@ -179,6 +180,23 @@ class Switching:
         if deadline is not None:
             parts.append((f"{name}.deadline", deadline))
         return tuple(parts)
+
+    def _check_the_target_reads_the_box(
+        self, decoders: "decoders_part.Decoders"
+    ) -> None:
+        """A redo that packs the box needs a target row that reads it."""
+        strong_redecode = self.strong_redecode
+        if strong_redecode.packer is None:
+            return
+        target = decoders.units_of(strong_redecode.target)
+        if target.unit.decoder.reads_doubtful_box:
+            return
+        algorithm = target.plan.settings.algorithm
+        raise ValueError(
+            "switching.strong_window.box_margin sends the strong side the "
+            f"doubtful box alone; the target's row {algorithm.name!r} reads "
+            "a window's rounds (use box_correlated_pymatching)"
+        )
 
     def seed_roots(self) -> tuple:
         """The policy, at the edge's seed root."""
@@ -363,16 +381,16 @@ def escalate_edges_of(switching_parts: tuple) -> escalate_edges.EscalateEdges:
 
 
 def _box_packer(
-    settings: escalation_settings.SwitchingSettings, target_settings
+    settings: escalation_settings.SwitchingSettings,
 ) -> Optional[doubtful_box.BoxPacker]:
     """The chip's packer of the doubtful box, when the redo decodes one.
 
     The box is packed from the verdict's own result, so a strong decode
     that starts before the verdict (run_both_at_once, a deadline) has
-    none; and the target's row must read the box, not the rounds.
+    none.
     """
-    margin = getattr(settings.strong_window, "box_margin", None)
-    if margin is None:
+    shape = settings.strong_window.box_shape()
+    if shape is None:
         return None
     if settings.run_both_at_once or settings.deadline is not None:
         raise ValueError(
@@ -380,16 +398,6 @@ def _box_packer(
             "verdict's result; run_both_at_once and a deadline start the "
             "strong decode before it (the policies contradict; pick one)"
         )
-    algorithm = target_settings.algorithm
-    if not getattr(algorithm, "reads_doubtful_box", False):
-        algorithm_class = type(algorithm)
-        row_name = getattr(algorithm, "name", algorithm_class.__name__)
-        raise ValueError(
-            "switching.strong_window.box_margin sends the strong side the "
-            f"doubtful box alone; the target's row {row_name!r} reads a "
-            "window's rounds (use box_correlated_pymatching)"
-        )
-    shape = settings.strong_window.box_shape()
     return doubtful_box.BoxPacker(shape)
 
 

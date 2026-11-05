@@ -216,8 +216,13 @@ class RedoWindow(StrongWindowPorts):
             )
             return given != unset
 
-        def box_shape(self) -> "doubtful_box.BoxShape":
-            """The shape the chip packs, each margin box_margin unless set."""
+        def box_shape(self) -> Optional["doubtful_box.BoxShape"]:
+            """The shape the chip packs, each margin box_margin unless set.
+
+            None when box_margin is unset: the redo reads the rounds.
+            """
+            if self.box_margin is None:
+                return None
             time_margin = self.box_time_margin
             if time_margin is None:
                 time_margin = self.box_margin
@@ -386,6 +391,10 @@ class DoubleWindow(StrongWindowPorts):
 
         def __post_init__(self) -> None:
             _check_restart_reread(self.restart_reread_buffer_regions)
+
+        def box_shape(self) -> None:
+            """None: the double window reads the rounds, never a box."""
+            return None
 
         @property
         def absorbs_weak_windows(self) -> bool:

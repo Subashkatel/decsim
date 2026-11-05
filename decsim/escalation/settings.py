@@ -12,6 +12,7 @@ from typing import Optional, Protocol
 import decsim.config as config
 import decsim.engine as engine_module
 import decsim.escalation.deadlines as deadlines
+import decsim.escalation.doubtful_box as doubtful_box
 import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.escalation.verdicts as verdicts
@@ -118,7 +119,8 @@ class StrongWindowSettings(Protocol):
     restart_reread_buffer_regions is the double window's re-read width;
     starts_on_a_guess whether a window escalates on a provisional input,
     and guess_backlog_limit the strong queue's waiting jobs below which
-    it does, None for always.
+    it does, None for always. box_shape is the doubtful box the chip
+    packs for the redo (doubtful_box.py), None when it reads the rounds.
     """
 
     name: str
@@ -127,6 +129,9 @@ class StrongWindowSettings(Protocol):
     restart_reread_buffer_regions: int
     starts_on_a_guess: bool
     guess_backlog_limit: Optional[int]
+
+    def box_shape(self) -> Optional[doubtful_box.BoxShape]:
+        """The box the chip packs; None when the redo reads the rounds."""
 
     def build(
         self, engine: engine_module.Engine

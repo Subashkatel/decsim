@@ -720,7 +720,7 @@ slack_microseconds is the budget from the source job's arrival.
 
 `decsim/escalation/settings.py`. A strong window row's settings record (strong_window_shapes.py).
 
-restart_reread_buffer_regions is the double window's re-read width; starts_on_a_guess whether a window escalates on a provisional input, and guess_backlog_limit the strong queue's waiting jobs below which it does, None for always.
+restart_reread_buffer_regions is the double window's re-read width; starts_on_a_guess whether a window escalates on a provisional input, and guess_backlog_limit the strong queue's waiting jobs below which it does, None for always. box_shape is the doubtful box the chip packs for the redo (doubtful_box.py), None when it reads the rounds.
 
 | Member | Type |
 | --- | --- |
@@ -730,6 +730,7 @@ restart_reread_buffer_regions is the double window's re-read width; starts_on_a_
 | `restart_reread_buffer_regions` | `int` |
 | `starts_on_a_guess` | `bool` |
 | `guess_backlog_limit` | `Optional[int]` |
+| `box_shape(self)` | `Optional[doubtful_box.BoxShape]` |
 | `build(self, engine: engine_module.Engine)` | `strong_window_shapes.StrongWindowShape` |
 
 ### `SwitchingSettings`

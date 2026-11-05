@@ -380,6 +380,9 @@ class _OutsideShape:
         starts_on_a_guess = False
         guess_backlog_limit = None
 
+        def box_shape(self) -> None:
+            return None
+
         def build(self, engine) -> "_OutsideShape":
             return _OutsideShape(engine)
 

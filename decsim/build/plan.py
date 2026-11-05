@@ -466,8 +466,8 @@ def _edge_run_shape(
 ) -> decoding_records.RunShape:
     """The run as one edge checks it: with its own strong window row."""
     strong_window = edge_settings.strong_window
-    box_margin = getattr(strong_window, "box_margin", None)
-    reads_no_round = box_margin is not None
+    box_shape = strong_window.box_shape()
+    reads_no_round = box_shape is not None
     return dataclasses.replace(
         run_shape,
         strong_window=strong_window.name,

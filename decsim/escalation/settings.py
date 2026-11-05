@@ -56,13 +56,15 @@ class VerdictSettings(Protocol):
     threshold; reads_consensus whether it decides on an ensemble's
     agreement, the consensus row's soft output; reads_source_queue
     whether it reads the source pool's waiting jobs, a port the build
-    binds.
+    binds; reads_fired_errors whether it decides on the shot's fired
+    errors, which the machine connects to the verdict's errors_sampled.
     """
 
     name: str
     reads_threshold: bool
     reads_consensus: bool
     reads_source_queue: bool
+    reads_fired_errors: bool
 
     def build(self) -> ports.EscalationVerdict:
         """A fresh verdict."""

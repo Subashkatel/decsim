@@ -37,7 +37,6 @@ class TruthDecoder(decoder_module.WindowDecoderBase):
 
     fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
     fault_representation = fault_models.FaultRepresentation.PHYSICAL
-    # the build connects the source's errors_sampled to a row that reads it
     reads_fired_errors = True
 
     @dataclasses.dataclass(frozen=True)

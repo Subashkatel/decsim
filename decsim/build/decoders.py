@@ -50,7 +50,7 @@ class PoolUnits:
     """
 
     plan: layout_module.PoolPlan
-    unit: Optional[ports.Decoder]
+    unit: Optional[staged_decoder.StagedDecoder]
     settings: decoder_pool_module.PoolSettings
 
 
@@ -174,6 +174,19 @@ class Decoders:
             manager.check_decode_work_settled()
         for _plan, slots in self.devices:
             slots.check_settled()
+
+    def fired_error_readers(self) -> tuple:
+        """(name, errors_sampled) of each pool's row that reads fired errors."""
+        readers = []
+        for pool in self.pools:
+            if pool.unit is None:
+                continue
+            decoder = pool.unit.decoder
+            if not decoder.reads_fired_errors:
+                continue
+            name = f"{pool.plan.names.seat}'s decoder"
+            readers.append((name, decoder.errors_sampled))
+        return tuple(readers)
 
     def seed_roots(self) -> tuple:
         """This part's stochastic owners, each by the name its seed hashes.

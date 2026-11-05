@@ -1325,6 +1325,11 @@ class Decoder(Protocol):
     another answers run_seed_children (decsim/seeding.py
     RunSeedComposite), or the one inside it is hidden from the trace,
     the stage ledger and the referee audit.
+
+    reads_fired_errors says the decoder decodes on the shot's fired
+    errors (decsim/decoders/truth.py); such a decoder answers
+    errors_sampled(operation, fired_errors), which the machine connects
+    to the syndrome source's errors_sampled.
     """
 
     fault_model_requirement: fault_models.DecoderFaultModelRequirement
@@ -1335,6 +1340,7 @@ class Decoder(Protocol):
     ]
     decoder_evidence: frozenset
     missing_evidence_reasons: dict
+    reads_fired_errors: bool
 
     def decode(
         self, job: decoding_records.DecodeJob

@@ -184,6 +184,13 @@ class Switching:
         """The policy, at the edge's seed root."""
         return ((self.edge.policy_seed, self.policy),)
 
+    def fired_error_readers(self) -> tuple:
+        """(name, errors_sampled) of the verdict, when it reads fired errors."""
+        if not self.edge.settings.verdict.reads_fired_errors:
+            return ()
+        verdict = self.policy.verdict
+        return (("switching.verdict", verdict.errors_sampled),)
+
     def check_settled(self) -> None:
         """No strong escalation is pending, and no source solve unjoined."""
         strong_redecode = self.strong_redecode

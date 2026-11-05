@@ -57,6 +57,7 @@ class GapThreshold:
         reads_threshold = True
         reads_consensus = False
         reads_source_queue = False
+        reads_fired_errors = False
 
         def build(self) -> "GapThreshold":
             """A verdict on the gap against the threshold."""
@@ -92,6 +93,7 @@ class Status:
         reads_threshold = False
         reads_consensus = False
         reads_source_queue = False
+        reads_fired_errors = False
 
         def build(self) -> "Status":
             """A verdict on the backend's reported status."""
@@ -135,6 +137,7 @@ class Agreement:
         reads_threshold = False
         reads_consensus = True
         reads_source_queue = False
+        reads_fired_errors = False
 
         def __post_init__(self) -> None:
             if not 0.0 < self.minimum <= 1.0:
@@ -177,6 +180,7 @@ class Always:
         reads_threshold = False
         reads_consensus = False
         reads_source_queue = False
+        reads_fired_errors = False
 
         def build(self) -> "Always":
             """A verdict that escalates every window."""
@@ -204,6 +208,7 @@ class Never:
         reads_threshold = False
         reads_consensus = False
         reads_source_queue = False
+        reads_fired_errors = False
 
         def build(self) -> "Never":
             """A verdict that keeps every window."""
@@ -243,6 +248,7 @@ class Bernoulli(seeding.GeneratorSeedConsumer):
         reads_threshold = False
         reads_consensus = False
         reads_source_queue = False
+        reads_fired_errors = False
 
         def __post_init__(self) -> None:
             _check_rate(self.rate, "rate")
@@ -311,6 +317,7 @@ class BacklogBernoulli(seeding.GeneratorSeedConsumer):
         reads_threshold = False
         reads_consensus = False
         reads_source_queue = True
+        reads_fired_errors = False
 
         def build(self) -> "BacklogBernoulli":
             """A verdict at the loop's start share."""
@@ -364,6 +371,7 @@ class Replay:
         reads_threshold = False
         reads_consensus = False
         reads_source_queue = False
+        reads_fired_errors = False
 
         def build(self) -> "Replay":
             """A verdict over the recorded decisions."""
@@ -431,9 +439,6 @@ class Truth(sampled_error_records.FiredErrors):
     it holds are this shot's.
     """
 
-    # the build connects the source's errors_sampled to a row that reads it
-    reads_fired_errors = True
-
     @dataclasses.dataclass(frozen=True)
     class Settings:
         """No settings: the shot's errors decide."""
@@ -442,6 +447,7 @@ class Truth(sampled_error_records.FiredErrors):
         reads_threshold = False
         reads_consensus = False
         reads_source_queue = False
+        reads_fired_errors = True
 
         def build(self) -> "Truth":
             """A fresh verdict, which holds no errors until a shot fires."""

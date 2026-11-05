@@ -56,6 +56,9 @@ class DecoderBase(abc.ABC):
     # per evidence this row does not produce but a reader would expect
     # of it, the sentence the build's refusal quotes
     missing_evidence_reasons: dict = {}
+    # whether the row decodes on the shot's fired errors, which the
+    # machine connects to its errors_sampled
+    reads_fired_errors = False
     # whether the device the row submits to prices each decode (a strong
     # backend row), so neither the host clock nor a latency is its time
     priced_by_its_backend = False

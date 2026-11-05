@@ -237,6 +237,7 @@ class PortOnlyDecoder:
     fault_model_requirement = None
     decoder_evidence = frozenset()
     missing_evidence_reasons: dict = {}
+    reads_fired_errors = False
 
     def __init__(self, latency_ticks: int) -> None:
         self.latency_ticks = latency_ticks

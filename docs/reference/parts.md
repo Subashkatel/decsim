@@ -667,7 +667,7 @@ The facts at_task and for_task read are the machine's task facts (topology/graph
 
 `decsim/escalation/settings.py`. A verdict row's settings record (verdicts.py).
 
-reads_threshold says whether the verdict decides on the edge's threshold; reads_consensus whether it decides on an ensemble's agreement, the consensus row's soft output; reads_source_queue whether it reads the source pool's waiting jobs, a port the build binds.
+reads_threshold says whether the verdict decides on the edge's threshold; reads_consensus whether it decides on an ensemble's agreement, the consensus row's soft output; reads_source_queue whether it reads the source pool's waiting jobs, a port the build binds; reads_fired_errors whether it decides on the shot's fired errors, which the machine connects to the verdict's errors_sampled.
 
 | Member | Type |
 | --- | --- |
@@ -675,6 +675,7 @@ reads_threshold says whether the verdict decides on the edge's threshold; reads_
 | `reads_threshold` | `bool` |
 | `reads_consensus` | `bool` |
 | `reads_source_queue` | `bool` |
+| `reads_fired_errors` | `bool` |
 | `build(self)` | `ports.EscalationVerdict` |
 
 ### `ReplaceRuleSettings`

@@ -68,7 +68,9 @@ a verdict's at its edge's, `switching.verdict`.
 ## 5. Write the verdict
 
 A verdict decides on each result its edge's source pool returns. Its
-record says whether it reads the edge's threshold:
+record says what it reads besides the result: the edge's threshold, an
+ensemble's agreement, the source pool's waiting jobs, or the shot's
+fired errors:
 
 ```python tests/plugin_lab/parts.py
     @dataclasses.dataclass(frozen=True)
@@ -79,6 +81,7 @@ record says whether it reads the edge's threshold:
         reads_threshold = False
         reads_consensus = False
         reads_source_queue = False
+        reads_fired_errors = False
         cut: float = 0.0
 
         def build(self) -> "WeightCut":

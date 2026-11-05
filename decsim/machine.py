@@ -247,9 +247,8 @@ class Machine:
             retention=windows.retention,
             router=windows.router,
         )
-        _connect_fired_errors(
-            qpu.syndrome_source, decoders.pools, switching_parts
-        )
+        fired_error_readers = _fired_error_readers(decoders, switching_parts)
+        _connect_fired_errors(qpu.syndrome_source, fired_error_readers)
         input_fold = decoders.decoder_manager.input_fold()
         entry_sides = _entry_sides(layout, readout, decoders, windows)
         windows.connect(
@@ -563,35 +562,36 @@ def _entry_side(
     )
 
 
-def _connect_fired_errors(
-    source: ports.SyndromeSource, pools: tuple, switching_parts: tuple
-) -> None:
-    """A row that reads the shot's fired errors hears them from the source.
+def _fired_error_readers(
+    decoders: decoders_part.Decoders, switching_parts: tuple
+) -> tuple:
+    """Every part's readers of the shot's fired errors, the pools first.
 
     The truth decoder (decoders/truth.py) and the truth verdict
-    (escalation/verdicts.py) are the rows that do. A source that keeps
-    no errors cannot serve them, so the build refuses the pair.
+    (escalation/verdicts.py) are the rows that read them.
     """
-    readers = [
-        (
-            f"{pool.plan.names.seat}'s decoder",
-            getattr(pool.unit, "decoder", None),
-        )
-        for pool in pools
-    ]
-    readers += [
-        ("switching.verdict", getattr(part.policy, "verdict", None))
-        for part in switching_parts
-    ]
-    for name, reader in readers:
-        if not getattr(reader, "reads_fired_errors", False):
-            continue
+    readers = []
+    pool_readers = decoders.fired_error_readers()
+    readers.extend(pool_readers)
+    for part in switching_parts:
+        part_readers = part.fired_error_readers()
+        readers.extend(part_readers)
+    return tuple(readers)
+
+
+def _connect_fired_errors(source: ports.SyndromeSource, readers: tuple) -> None:
+    """Each reader of the shot's fired errors hears them from the source.
+
+    A source that keeps no errors cannot serve them, so the build
+    refuses the pair.
+    """
+    for name, errors_sampled in readers:
         if source.errors_sampled is trace_source.SILENT:
             raise ValueError(
                 f"{name} reads the shot's fired errors and the QPU source "
                 "keeps none; name qpu.source.type=error_model_stim"
             )
-        source.errors_sampled.connect(reader.errors_sampled)
+        source.errors_sampled.connect(errors_sampled)
 
 
 def _root_seed(value) -> Optional[int]:

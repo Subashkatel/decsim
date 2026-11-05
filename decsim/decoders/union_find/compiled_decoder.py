@@ -81,7 +81,8 @@ _DECODE_ARGUMENT_TYPES = [
     _INDEX_ARRAY,
     _INDEX_ARRAY,
 ]
-# the growth's arrays; the walk's edges, or null, follow (_BitArrayOrNull)
+# the growth's arrays, the walk limit and the gap; the walk's edges, or
+# null, follow (_BitArrayOrNull)
 _CLUSTER_GAP_ARGUMENT_TYPES = [
     ctypes.c_int32,
     ctypes.c_int32,
@@ -92,8 +93,11 @@ _CLUSTER_GAP_ARGUMENT_TYPES = [
     _BIT_ARRAY,
     _TICK_ARRAY,
     _TICK_ARRAY,
+    ctypes.c_double,
     _TICK_ARRAY,
 ]
+# the walk limit that marks the shortest walk alone (cluster_gap.h)
+_SHORTEST_WALK_ALONE = -1.0
 _EXTRA_GROWTH_ARGUMENT_TYPES = [
     ctypes.c_int32,
     ctypes.c_int32,
@@ -225,7 +229,11 @@ def cluster_gap(
     walk (Mishima et al. 2605.14637's spatiotemporal complementary gap).
     """
     half_ticks, _walk_edges = _walk_growth(
-        graph, edge_intervals, closes_buffer_boundary, marks_walk=False
+        graph,
+        edge_intervals,
+        closes_buffer_boundary,
+        marks_walk=False,
+        walk_limit_half_ticks=_SHORTEST_WALK_ALONE,
     )
     return half_ticks
 
@@ -234,15 +242,25 @@ def cluster_gap_walk(
     graph: evidence_records.UnionFindGraph,
     edge_intervals: tuple,
     closes_buffer_boundary: bool = False,
+    walk_limit_half_ticks: Optional[float] = None,
 ) -> tuple:
     """The cluster gap in half ticks, and the edges of the walk that sets it.
 
     The edges come back as indices into graph.edges, ascending; none
     when the growth admits no odd walk. The gap and closes_buffer_boundary
-    are cluster_gap's.
+    are cluster_gap's. walk_limit_half_ticks, when given, returns instead
+    the edges of every walk shorter than it: the shortest odd closed walk
+    through each node an odd edge leaves (cluster_gap.h).
     """
+    limit = _SHORTEST_WALK_ALONE
+    if walk_limit_half_ticks is not None:
+        limit = walk_limit_half_ticks
     return _walk_growth(
-        graph, edge_intervals, closes_buffer_boundary, marks_walk=True
+        graph,
+        edge_intervals,
+        closes_buffer_boundary,
+        marks_walk=True,
+        walk_limit_half_ticks=limit,
     )
 
 
@@ -359,6 +377,7 @@ def _walk_growth(
     edge_intervals: tuple,
     closes_buffer_boundary: bool,
     marks_walk: bool,
+    walk_limit_half_ticks: float,
 ) -> tuple:
     """(gap, walk edges) of one growth; no edges unless marks_walk.
 
@@ -373,7 +392,14 @@ def _walk_growth(
     if marks_walk:
         walk_edge = numpy.zeros(len(kept), dtype=numpy.uint8)
     walk = cluster_gap_entry_point()
-    status = walk(graph.detector_count, len(kept), *arrays, gap, walk_edge)
+    status = walk(
+        graph.detector_count,
+        len(kept),
+        *arrays,
+        walk_limit_half_ticks,
+        gap,
+        walk_edge,
+    )
     _refuse_failure(status)
     walk_edges = ()
     if marks_walk:

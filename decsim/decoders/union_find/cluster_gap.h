@@ -39,8 +39,16 @@ enum { union_find_cluster_gap_unreachable = -1 };
  * odd closed walk crosses any segment of and zero elsewhere: all zero
  * when no walk exists. When several walks share the shortest length,
  * the one the search meets first is marked; the gap is the same for
- * all of them. A null walk_edge asks for the gap alone. The return
- * value is an enum union_find_status, and on anything but
+ * all of them. A null walk_edge asks for the gap alone.
+ *
+ * walk_limit_half_ticks, when not negative and walk_edge is not null,
+ * marks instead every edge of each walk shorter than it: from each
+ * node an odd edge leaves, the shortest odd closed walk through that
+ * node. Those searches pop two states at one distance in the order of
+ * (node, parity), so the walks are the ones a heap of (distance, node,
+ * parity) tuples finds. A negative limit marks the shortest walk alone.
+ *
+ * The return value is an enum union_find_status, and on anything but
  * union_find_ok gap_half_ticks holds the unreachable sentinel.
  */
 int32_t union_find_cluster_gap(
@@ -48,6 +56,7 @@ int32_t union_find_cluster_gap(
     const int32_t *endpoint_b, const int64_t *length_half_ticks,
     const uint8_t *logical_parity, const uint8_t *interval_is_closed,
     const int64_t *interval_lower_tick, const int64_t *interval_upper_tick,
-    int64_t *gap_half_ticks, uint8_t *walk_edge);
+    double walk_limit_half_ticks, int64_t *gap_half_ticks,
+    uint8_t *walk_edge);
 
 #endif

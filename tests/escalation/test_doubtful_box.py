@@ -37,6 +37,7 @@ import decsim.presets.machines as machines
 import decsim.records.fault_model_contracts as fault_models
 import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.parallel as parallel_scheme
+import tests.escalation.all_walks_oracle as all_walks_oracle
 import tests.escalation.test_switching_mode as switching_mode
 from tests.decoders import windows
 
@@ -318,7 +319,9 @@ def test_the_shortest_odd_walk_found_again_is_the_gap():
     shape = doubtful_box.BoxShape(1, 1)
     for result, _box, record in shaped_windows(shape):
         evidence = result.cluster_evidence
-        walks = doubtful_box.odd_walks(evidence.graph, evidence.edge_intervals)
+        walks = all_walks_oracle.odd_walks(
+            evidence.graph, evidence.edge_intervals
+        )
         assert min(length for length, _edges in walks) == record.walk_half_ticks
 
 
@@ -329,6 +332,37 @@ def test_all_walks_hold_the_shortest_walks_doubtful_events():
         box_rows = box.event_rows.tolist()
         assert set(record.walk_detection_events) <= set(box_rows)
         assert box.doubtful_event_count >= record.walk_event_count
+
+
+def test_all_walks_mark_the_rows_the_moved_python_walk_marks():
+    """The compiled walks under each limit are all_walks_oracle.py's.
+
+    The limits run from below every gap here to past every gap, so the
+    corpus holds windows with no walk kept, the shortest alone, and
+    walks from several sources, ties included.
+    """
+    kept_more = 0
+    for nats in (0.5, 2.0, 4.605170, 40.0):
+        shape = doubtful_box.BoxShape(0, 0, doubt="all_walks", doubt_nats=nats)
+        for result, _box, record in shaped_windows(shape):
+            evidence = result.cluster_evidence
+            roots = _roots(evidence)
+            event_rows = numpy.flatnonzero(evidence.syndrome)
+            limit_half_ticks = 2.0 * nats / evidence.graph.weight_step
+            moved = all_walks_oracle.all_walk_rows(
+                evidence, roots, event_rows, limit_half_ticks
+            )
+            root_list = roots.tolist()
+            rows = doubtful_box.doubtful_rows(evidence, root_list, shape, False)
+            assert rows == moved
+            kept_more += len(rows) > record.walk_event_count
+    assert kept_more > 0
+
+
+@pytest.mark.parametrize("nats", [0.0, -1.0, float("nan")])
+def test_doubt_nats_is_a_walk_weight_above_zero(nats):
+    with pytest.raises(ValueError, match="above zero"):
+        doubtful_box.BoxShape(0, 0, doubt="all_walks", doubt_nats=nats)
 
 
 def test_a_graph_shape_of_no_edges_takes_the_doubtful_clusters_alone():

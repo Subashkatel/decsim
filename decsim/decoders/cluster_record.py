@@ -60,8 +60,8 @@ def cluster_record(
         graph, evidence.edge_intervals, closes_buffer_boundary
     )
     walk_half_ticks, walk_edges = walk
-    walk_roots = _walk_roots(graph, walk_edges, roots, events_by_root)
-    walk_events = _events_of(walk_roots, events_by_root)
+    doubtful_roots = walk_roots(graph, walk_edges, roots, events_by_root)
+    walk_events = events_of(doubtful_roots, events_by_root)
     is_through_boundary = _crosses_boundary(graph, walk_edges)
     return ClusterRecord(
         cluster_count=len(events_by_root),
@@ -69,7 +69,7 @@ def cluster_record(
         largest_cluster_edges=largest_edges,
         growth_step_count=len(evidence.growth_steps),
         walk_half_ticks=walk_half_ticks,
-        walk_cluster_count=len(walk_roots),
+        walk_cluster_count=len(doubtful_roots),
         walk_event_count=len(walk_events),
         is_walk_through_boundary=is_through_boundary,
         walk_detection_events=walk_events,
@@ -105,6 +105,37 @@ def cluster_events(roots: list, residual_syndrome: tuple) -> dict:
         events = events_by_root.setdefault(root, [])
         events.append(detector)
     return events_by_root
+
+
+def walk_roots(
+    graph: evidence_records.UnionFindGraph,
+    walk_edges: tuple,
+    roots: list,
+    events_by_root: dict,
+) -> tuple:
+    """The clusters holding an event that the walk's edges reach, ascending."""
+    found = set()
+    for edge_index in walk_edges:
+        edge = graph.edges[edge_index]
+        detectors = detectors_of(edge)
+        edge_roots = [roots[detector] for detector in detectors]
+        found.update(edge_roots)
+    held = found.intersection(events_by_root)
+    return tuple(sorted(held))
+
+
+def detectors_of(edge: evidence_records.UnionFindEdge) -> tuple:
+    """The edge's ends that are detectors, the boundary left out."""
+    ends = (edge.detector_a, edge.detector_b)
+    return tuple(end for end in ends if end != window_decoder.BOUNDARY)
+
+
+def events_of(cluster_roots: tuple, events_by_root: dict) -> tuple:
+    """The detection events of the given clusters, ascending."""
+    events = []
+    for root in cluster_roots:
+        events.extend(events_by_root[root])
+    return tuple(sorted(events))
 
 
 def _join(parents: list, first: int, second: int) -> None:
@@ -149,37 +180,10 @@ def _closed_edge_count(graph, evidence, roots: list, cluster_root: int) -> int:
 
 
 def _has_end_in(edge, roots: list, cluster_root: int) -> bool:
-    for detector in _detectors_of(edge):
+    for detector in detectors_of(edge):
         if roots[detector] == cluster_root:
             return True
     return False
-
-
-def _walk_roots(
-    graph, walk_edges: tuple, roots: list, events_by_root: dict
-) -> tuple:
-    """The clusters holding an event that the walk's edges reach, ascending."""
-    found = set()
-    for edge_index in walk_edges:
-        edge = graph.edges[edge_index]
-        detectors = _detectors_of(edge)
-        edge_roots = [roots[detector] for detector in detectors]
-        found.update(edge_roots)
-    held = found.intersection(events_by_root)
-    return tuple(sorted(held))
-
-
-def _detectors_of(edge) -> tuple:
-    """The edge's ends that are detectors, the boundary left out."""
-    ends = (edge.detector_a, edge.detector_b)
-    return tuple(end for end in ends if end != window_decoder.BOUNDARY)
-
-
-def _events_of(cluster_roots: tuple, events_by_root: dict) -> tuple:
-    events = []
-    for root in cluster_roots:
-        events.extend(events_by_root[root])
-    return tuple(sorted(events))
 
 
 def _crosses_boundary(graph, walk_edges: tuple) -> bool:

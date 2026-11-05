@@ -9,8 +9,9 @@
  * Meister et al. arXiv:2405.07433 Definition 9 asks for.
  *
  * Each source is a Dijkstra with a binary heap over those states,
- * cut off at the best walk found so far. A minimum over sources does
- * not depend on the order the sources are visited nor on the cutoff.
+ * cut off at the best walk found so far, or run to its own walk when
+ * every source's walk is marked. A minimum over sources does not
+ * depend on the order the sources are visited nor on the cutoff.
  * An odd closed walk crosses a segment of odd parity, and a closed walk
  * may start at any node it passes, so the minimum over every node is
  * the minimum over the node each odd segment leaves from: the sources
@@ -78,7 +79,10 @@ struct workspace {
   uint8_t *source_walked;
 };
 
-/* One source's search over the workspace's arrays. */
+/* One source's search over the workspace's arrays. orders_ties_by_state
+ * pops two states at one distance in state order, as a heap of
+ * (distance, node, parity) tuples does; otherwise the heap's own layout
+ * decides. */
 struct search {
   int64_t *heap_distance;
   int32_t *heap_state;
@@ -89,6 +93,7 @@ struct search {
   int32_t *predecessor_state;
   int32_t *predecessor_slot;
   int32_t generation;
+  int32_t orders_ties_by_state;
 };
 
 static void release_workspace(struct workspace *workspace) {
@@ -353,6 +358,17 @@ static void search_over(struct search *search, struct workspace *workspace,
   search->predecessor_state = workspace->predecessor_state;
   search->predecessor_slot = workspace->predecessor_slot;
   search->generation = 0;
+  search->orders_ties_by_state = 0;
+}
+
+/* Whether the first entry pops before the second. */
+static int32_t heap_before(const struct search *search, int64_t distance,
+                           int32_t state, int64_t other_distance,
+                           int32_t other_state) {
+  if (distance != other_distance) {
+    return distance < other_distance;
+  }
+  return search->orders_ties_by_state && state < other_state;
 }
 
 /* A state is pushed only when its distance falls, and a state is
@@ -367,7 +383,8 @@ static void heap_push(struct search *search, int64_t distance,
   search->heap_size += 1;
   while (place > 0) {
     int32_t parent = (place - 1) / 2;
-    if (search->heap_distance[parent] <= distance) {
+    if (!heap_before(search, distance, state, search->heap_distance[parent],
+                     search->heap_state[parent])) {
       break;
     }
     search->heap_distance[place] = search->heap_distance[parent];
@@ -388,12 +405,14 @@ static int64_t heap_pop(struct search *search, int32_t *state) {
   int32_t child = 1;
   while (child < search->heap_size) {
     int32_t right = child + 1;
-    int64_t left_distance = search->heap_distance[child];
     if (right < search->heap_size &&
-        search->heap_distance[right] < left_distance) {
+        heap_before(search, search->heap_distance[right],
+                    search->heap_state[right], search->heap_distance[child],
+                    search->heap_state[child])) {
       child = right;
     }
-    if (search->heap_distance[child] >= distance) {
+    if (!heap_before(search, search->heap_distance[child],
+                     search->heap_state[child], distance, moved)) {
       break;
     }
     search->heap_distance[place] = search->heap_distance[child];
@@ -477,13 +496,10 @@ static int64_t shortest_odd_walk_from(struct search *search,
 /* The edges one source's shortest odd walk crosses, read back from its
  * target state along the predecessors this source's search set. Every
  * state on that chain was reached in this search and popped before it
- * was relaxed from, so the chain ends at the source. A shorter walk
- * replaces the marks of a longer one. */
+ * was relaxed from, so the chain ends at the source. */
 static void mark_walk_edges(const struct search *search,
                             const struct workspace *workspace,
-                            int32_t edge_count, int32_t reference_node,
-                            uint8_t *walk_edge) {
-  memset(walk_edge, 0, (size_t)edge_count);
+                            int32_t reference_node, uint8_t *walk_edge) {
   int32_t source_state = 2 * reference_node;
   int32_t state = source_state + 1;
   while (state != source_state) {
@@ -494,14 +510,45 @@ static void mark_walk_edges(const struct search *search,
   }
 }
 
+/* What walk_edge receives (cluster_gap.h): nothing when it is null, the
+ * shortest walk alone, or every source's walk under the limit. */
+struct walk_marks {
+  uint8_t *walk_edge;
+  double limit_half_ticks;
+  int32_t marks_every_walk;
+};
+
+/* Mark one source's walk, found at length found. Under the limit every
+ * source's walk under it adds its edges; otherwise a shorter walk
+ * replaces the marks of a longer one. */
+static void mark_found_walk(const struct search *search,
+                            const struct workspace *workspace,
+                            const struct walk_marks *marks,
+                            int32_t edge_count, int32_t reference_node,
+                            int64_t found, int64_t shortest) {
+  if (marks->marks_every_walk) {
+    int32_t is_under = found != unreachable_distance &&
+                       (double)found < marks->limit_half_ticks;
+    if (is_under) {
+      mark_walk_edges(search, workspace, reference_node, marks->walk_edge);
+    }
+    return;
+  }
+  if (found < shortest && marks->walk_edge != NULL) {
+    memset(marks->walk_edge, 0, (size_t)edge_count);
+    mark_walk_edges(search, workspace, reference_node, marks->walk_edge);
+  }
+}
+
 /* The odd parity rides an edge's first segment (place_edge_segments),
  * which leaves from the edge's endpoint_a, so those endpoints of the
- * odd edges are the only sources the minimum needs. A null walk_edge
- * asks for the length alone. */
+ * odd edges are the only sources the minimum needs. Each search is cut
+ * off at the shortest walk so far, except when every source's walk is
+ * marked: that search runs to its own walk. */
 static int64_t walk_from_odd_segments(struct search *search,
                                       const struct gap_inputs *inputs,
                                       struct workspace *workspace,
-                                      uint8_t *walk_edge) {
+                                      const struct walk_marks *marks) {
   int64_t shortest = unreachable_distance;
   for (int32_t edge = 0; edge < inputs->edge_count; ++edge) {
     if (!inputs->logical_parity[edge]) {
@@ -513,11 +560,16 @@ static int64_t walk_from_odd_segments(struct search *search,
       continue;
     }
     workspace->source_walked[node] = 1;
-    int64_t found = shortest_odd_walk_from(search, workspace, node, shortest);
-    if (found < shortest && walk_edge != NULL) {
-      mark_walk_edges(search, workspace, inputs->edge_count, node, walk_edge);
+    int64_t bound = shortest;
+    if (marks->marks_every_walk) {
+      bound = unreachable_distance;
     }
-    shortest = found;
+    int64_t found = shortest_odd_walk_from(search, workspace, node, bound);
+    mark_found_walk(search, workspace, marks, inputs->edge_count, node, found,
+                    shortest);
+    if (found < shortest) {
+      shortest = found;
+    }
   }
   return shortest;
 }
@@ -527,7 +579,8 @@ int32_t union_find_cluster_gap(
     const int32_t *endpoint_b, const int64_t *length_half_ticks,
     const uint8_t *logical_parity, const uint8_t *interval_is_closed,
     const int64_t *interval_lower_tick, const int64_t *interval_upper_tick,
-    int64_t *gap_half_ticks, uint8_t *walk_edge) {
+    double walk_limit_half_ticks, int64_t *gap_half_ticks,
+    uint8_t *walk_edge) {
   struct gap_inputs inputs;
   inputs.detector_count = detector_count;
   inputs.edge_count = edge_count;
@@ -556,10 +609,15 @@ int32_t union_find_cluster_gap(
   count_node_degrees(&inputs, &workspace);
   offsets_from_degrees(&workspace, node_count);
   place_segments(&inputs, &workspace, node_count);
+  struct walk_marks marks;
+  marks.walk_edge = walk_edge;
+  marks.limit_half_ticks = walk_limit_half_ticks;
+  marks.marks_every_walk = walk_edge != NULL && walk_limit_half_ticks >= 0;
   struct search search;
   search_over(&search, &workspace, slot_count);
+  search.orders_ties_by_state = marks.marks_every_walk;
   int64_t shortest =
-      walk_from_odd_segments(&search, &inputs, &workspace, walk_edge);
+      walk_from_odd_segments(&search, &inputs, &workspace, &marks);
   release_workspace(&workspace);
   if (shortest != unreachable_distance) {
     *gap_half_ticks = shortest;

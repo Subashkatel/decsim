@@ -46,20 +46,19 @@ fewest bits the strong side needs:
     doubt       walk: the clusters the gap's shortest odd walk reaches;
                 all_walks: the clusters that every odd closed walk
                 lighter than doubt_nats reaches, one shortest walk from
-                each node an odd edge leaves (all_walk_rows)
+                each node an odd edge leaves (doubtful_rows)
 
 Every form takes each cluster with an event inside it whole.
 """
 
 import dataclasses
-import heapq
 import weakref
-from typing import Optional, Union
+from typing import Optional
 
 import numpy
 
 import decsim.decoders.cluster_record as cluster_record
-import decsim.decoders.union_find.window_decoder as window_decoder
+import decsim.decoders.union_find.compiled_decoder as compiled_decoder
 import decsim.records.decoder_evidence as evidence_records
 import decsim.records.decoding as decoding_records
 
@@ -107,11 +106,7 @@ class BoxShape:
                 f"margins (got {self.time_margin} rounds, "
                 f"{self.space_margin} columns)"
             )
-        if (self.doubt == "all_walks") != (self.doubt_nats is not None):
-            raise ValueError(
-                "doubt_nats is the walk weight all_walks keeps, and only "
-                "all_walks reads it"
-            )
+        _check_doubt_nats(self.doubt, self.doubt_nats)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -201,11 +196,7 @@ class BoxPacker:
         syndrome = numpy.asarray(evidence.syndrome, dtype=numpy.uint8)
         event_rows = numpy.flatnonzero(syndrome)
         walk_rows = doubtful_rows(
-            evidence,
-            roots,
-            event_rows,
-            self.shape,
-            self.closes_buffer_boundary,
+            evidence, root_list, self.shape, self.closes_buffer_boundary
         )
         chosen, volume = shaped_roots(
             graph, coordinates, roots, event_rows, walk_rows, self.shape
@@ -230,19 +221,35 @@ class BoxPacker:
 
 def doubtful_rows(
     evidence: evidence_records.UnionFindHardEvidence,
-    roots: numpy.ndarray,
-    event_rows: numpy.ndarray,
+    roots: list,
     shape: BoxShape,
     closes_buffer_boundary: bool,
 ) -> tuple:
-    """The doubtful clusters' detection events, as window rows, ascending."""
+    """The doubtful clusters' detection events, as window rows, ascending.
+
+    all_walks marks the edges of every walk lighter than doubt_nats, one
+    shortest odd closed walk through each node an odd edge leaves
+    (union_find/cluster_gap.h), and takes the clusters with a detection
+    event those edges reach, as cluster_record does for the shortest.
+    """
     if shape.doubt == "walk":
         record = cluster_record.cluster_record(evidence, closes_buffer_boundary)
         return record.walk_detection_events
+    graph = evidence.graph
     # the gap's half ticks to nats: nats = half ticks x weight step / 2
     # (confidence/cluster.py gap_half_ticks_to_natural_log_weight)
-    limit_half_ticks = 2.0 * shape.doubt_nats / evidence.graph.weight_step
-    return all_walk_rows(evidence, roots, event_rows, limit_half_ticks)
+    limit_half_ticks = 2.0 * shape.doubt_nats / graph.weight_step
+    _gap, walk_edges = compiled_decoder.cluster_gap_walk(
+        graph,
+        evidence.edge_intervals,
+        closes_buffer_boundary,
+        limit_half_ticks,
+    )
+    events_by_root = cluster_record.cluster_events(roots, evidence.syndrome)
+    doubtful = cluster_record.walk_roots(
+        graph, walk_edges, roots, events_by_root
+    )
+    return cluster_record.events_of(doubtful, events_by_root)
 
 
 def shaped_roots(
@@ -270,53 +277,6 @@ def shaped_roots(
     return _bounding_roots(coordinates, roots, event_rows, boxes, shape)
 
 
-def all_walk_rows(
-    evidence: evidence_records.UnionFindHardEvidence,
-    roots: numpy.ndarray,
-    event_rows: numpy.ndarray,
-    limit_half_ticks: float,
-) -> tuple:
-    """The events of the clusters that odd closed walks under the limit reach.
-
-    The walks are the cluster gap's (union_find/cluster_gap.c): each
-    edge a chain of segments split at its interval's ticks, a covered
-    segment free and an uncovered one its length, the logical parity on
-    the first segment. From each node an odd segment leaves, a Dijkstra
-    on the parity-doubled nodes finds the shortest odd closed walk
-    through it (odd_walks); each walk shorter than the limit marks the
-    clusters with a detection event that its edges reach, as
-    cluster_record does for the shortest walk alone.
-    """
-    event_roots = {int(root) for root in roots[event_rows]}
-    found = set()
-    walks = odd_walks(evidence.graph, evidence.edge_intervals)
-    for length, edges in walks:
-        if length >= limit_half_ticks:
-            continue
-        reached = _walk_roots(evidence.graph, edges, roots)
-        doubtful = reached & event_roots
-        found.update(doubtful)
-    rows = [int(row) for row in event_rows if int(roots[row]) in found]
-    return tuple(sorted(rows))
-
-
-def odd_walks(
-    graph: evidence_records.UnionFindGraph, edge_intervals: tuple
-) -> list:
-    """(length, edges) of the shortest odd closed walk from each source.
-
-    A source is the node an odd segment leaves. The shortest of the
-    walks is the cluster gap, in half ticks.
-    """
-    adjacency, sources = _segment_graph(graph, edge_intervals)
-    walks = []
-    for source in sources:
-        found = _odd_walk_from(adjacency, source)
-        if found is not None:
-            walks.append(found)
-    return walks
-
-
 def check_margin(margin: object) -> None:
     """A margin is a whole number of rounds, 0 or more."""
     is_whole = isinstance(margin, int) and not isinstance(margin, bool)
@@ -326,6 +286,19 @@ def check_margin(margin: object) -> None:
         "box_margin must be a whole number of rounds, 0 or more "
         f"(got {margin!r})"
     )
+
+
+def _check_doubt_nats(doubt: str, doubt_nats: Optional[float]) -> None:
+    """A weight above zero for all_walks, and none for the walk."""
+    if (doubt == "all_walks") != (doubt_nats is not None):
+        raise ValueError(
+            "doubt_nats is the walk weight all_walks keeps, and only "
+            "all_walks reads it"
+        )
+    if doubt_nats is not None and not doubt_nats > 0:
+        raise ValueError(
+            f"doubt_nats is a walk weight above zero (got {doubt_nats!r})"
+        )
 
 
 def _rows_by_cluster(roots: numpy.ndarray, walk_rows: tuple) -> list:
@@ -416,193 +389,12 @@ def _neighbour_lists(graph: evidence_records.UnionFindGraph) -> list:
     """Each detector's neighbours, ascending; the boundary joins none."""
     found = [set() for _ in range(graph.detector_count)]
     for edge in graph.edges:
-        ends = (edge.detector_a, edge.detector_b)
-        if window_decoder.BOUNDARY in ends:
+        detectors = cluster_record.detectors_of(edge)
+        if len(detectors) < 2:
             continue
-        found[ends[0]].add(ends[1])
-        found[ends[1]].add(ends[0])
+        found[detectors[0]].add(detectors[1])
+        found[detectors[1]].add(detectors[0])
     return [tuple(sorted(each)) for each in found]
-
-
-def _walk_roots(
-    graph: evidence_records.UnionFindGraph, edges: tuple, roots: numpy.ndarray
-) -> set:
-    """The clusters the walk's edges reach; the boundary is none."""
-    reached = set()
-    for edge_index in edges:
-        edge = graph.edges[edge_index]
-        ends = (edge.detector_a, edge.detector_b)
-        detectors = [end for end in ends if end != window_decoder.BOUNDARY]
-        for end in detectors:
-            reached.add(int(roots[end]))
-    return reached
-
-
-def _segment_graph(
-    graph: evidence_records.UnionFindGraph, edge_intervals: tuple
-) -> tuple:
-    """(adjacency, sources): the cluster gap's segment graph.
-
-    adjacency maps a node to its (neighbour, weight, parity, edge)
-    slots, in the order the segments are laid; sources holds each node
-    an odd segment leaves, in that order too.
-    """
-    adjacency: dict = {}
-    sources: dict = {}
-    segments = _segments(graph, edge_intervals)
-    for left, right, weight, parity, edge_index in segments:
-        left_slots = adjacency.setdefault(left, [])
-        left_slots.append((right, weight, parity, edge_index))
-        right_slots = adjacency.setdefault(right, [])
-        right_slots.append((left, weight, parity, edge_index))
-        if parity:
-            sources[left] = True
-    return adjacency, sources
-
-
-def _segments(
-    graph: evidence_records.UnionFindGraph, edge_intervals: tuple
-) -> list:
-    """(left, right, weight, parity, edge) of every segment, edge by edge.
-
-    The boundary is one node, numbered detector_count, and an edge's
-    inner nodes are numbered past it, edge by edge.
-    """
-    endpoint_a, endpoint_b, lengths = graph.edge_arrays
-    parities = graph.logical_parities
-    boundary = graph.detector_count
-    next_node = boundary + 1
-    segments = []
-    for edge_index, interval in enumerate(edge_intervals):
-        length = int(lengths[edge_index])
-        cuts = _segment_cuts(interval, length)
-        first = _node(int(endpoint_a[edge_index]), boundary)
-        last = _node(int(endpoint_b[edge_index]), boundary)
-        inner_count = len(cuts) - 2
-        inner_end = next_node + inner_count
-        inner = range(next_node, inner_end)
-        chain = [first, *inner, last]
-        next_node = inner_end
-        parity = int(parities[edge_index])
-        edge_segments = _edge_segments(chain, cuts, interval, parity)
-        for left, right, weight, segment_parity in edge_segments:
-            segments.append((left, right, weight, segment_parity, edge_index))
-    return segments
-
-
-def _segment_cuts(
-    interval: Union[evidence_records.Open, evidence_records.Closed], length: int
-) -> list:
-    """The ticks an edge splits at: its ends, and an open interval's two."""
-    if isinstance(interval, evidence_records.Closed):
-        return [0, length]
-    ticks = {0, int(interval.lower_tick), int(interval.upper_tick), length}
-    return sorted(ticks)
-
-
-def _node(end: int, boundary: int) -> int:
-    """A detector's own node; the boundary's one node for the boundary."""
-    if end == window_decoder.BOUNDARY:
-        return boundary
-    return end
-
-
-def _edge_segments(
-    chain: list,
-    cuts: list,
-    interval: Union[evidence_records.Open, evidence_records.Closed],
-    parity: int,
-) -> list:
-    """(left, right, weight, parity) of each segment along one edge.
-
-    An uncovered segment weighs its length and a covered one nothing;
-    the edge's logical parity rides its first segment.
-    """
-    segments = []
-    segment_count = len(cuts) - 1
-    for segment in range(segment_count):
-        lower = cuts[segment]
-        upper = cuts[segment + 1]
-        weight = _segment_weight(interval, lower, upper)
-        segment_parity = 0
-        if segment == 0:
-            segment_parity = parity
-        left = chain[segment]
-        right = chain[segment + 1]
-        segments.append((left, right, weight, segment_parity))
-    return segments
-
-
-def _segment_weight(
-    interval: Union[evidence_records.Open, evidence_records.Closed],
-    lower: int,
-    upper: int,
-) -> int:
-    """The segment's length when the growth left it uncovered; else zero."""
-    if isinstance(interval, evidence_records.Closed):
-        return 0
-    is_uncovered = lower < interval.upper_tick and upper > interval.lower_tick
-    if is_uncovered:
-        return upper - lower
-    return 0
-
-
-def _odd_walk_from(adjacency: dict, source: int) -> Optional[tuple]:
-    """(length, edges) of the shortest walk from (source, 0) to (source, 1).
-
-    The second number is the walk's parity so far: Dijkstra's search on
-    the parity-doubled nodes, as cluster_gap.c runs it.
-    """
-    start = (source, 0)
-    goal = (source, 1)
-    distance = {start: 0}
-    previous = {}
-    heap = [(0, source, 0)]
-    while heap:
-        length, node, parity = heapq.heappop(heap)
-        state = (node, parity)
-        if length > distance[state]:
-            continue
-        if state == goal:
-            edges = _walk_edges(previous, start, goal)
-            return length, edges
-        slots = adjacency.get(node, ())
-        _relax_neighbours(slots, state, length, distance, previous, heap)
-    return None
-
-
-def _relax_neighbours(
-    slots: tuple,
-    state: tuple,
-    length: int,
-    distance: dict,
-    previous: dict,
-    heap: list,
-) -> None:
-    """Push each neighbour state this state reaches more cheaply."""
-    _node_index, parity = state
-    for neighbour, weight, edge_parity, edge_index in slots:
-        following_parity = parity ^ edge_parity
-        following = (neighbour, following_parity)
-        candidate = length + weight
-        is_shorter = (
-            following not in distance or candidate < distance[following]
-        )
-        if not is_shorter:
-            continue
-        distance[following] = candidate
-        previous[following] = (state, edge_index)
-        heapq.heappush(heap, (candidate, neighbour, following_parity))
-
-
-def _walk_edges(previous: dict, start: tuple, goal: tuple) -> tuple:
-    """The edges of the walk read back from the goal, ascending."""
-    edges = set()
-    state = goal
-    while state != start:
-        state, edge_index = previous[state]
-        edges.add(edge_index)
-    return tuple(sorted(edges))
 
 
 def _box_columns(
@@ -632,8 +424,7 @@ def _fault_rows(graph: evidence_records.UnionFindGraph) -> numpy.ndarray:
         return entry[1]
     rows = numpy.full(graph.fault_count, -1, dtype=numpy.int64)
     for edge in graph.edges:
-        ends = (edge.detector_a, edge.detector_b)
-        touched = [row for row in ends if row != window_decoder.BOUNDARY]
+        touched = cluster_record.detectors_of(edge)
         rows[edge.fault_index] = touched[0]
     rows.setflags(write=False)
     reference = weakref.ref(

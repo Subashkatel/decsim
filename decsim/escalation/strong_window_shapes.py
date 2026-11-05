@@ -289,9 +289,12 @@ class RedoWindow(StrongWindowPorts):
         window escalated on a final input or on the guess its redo would
         pin. So the job reads no round, waits for none in the strong
         syndrome buffer, and pins no face. Its window and model are the
-        redo's own, the chip's window's rows and columns.
+        chip's own, the graph the box was packed on: on a sliding window
+        the redo's region and model, on a parallel block (Skoric et al.
+        2209.08552) its buffers on both sides as well.
         """
-        region, _faces, model = _redo_of(self, weak_job)
+        window = weak_job.window
+        model = weak_job.detector_error_model
         key = (weak_job.stream_id, weak_job.window_id)
         request_key = self.builder.new_request_key(
             key[0], key[1], self.edge.target
@@ -299,7 +302,7 @@ class RedoWindow(StrongWindowPorts):
         job = _strong_redecode_job(
             self,
             weak_job,
-            region.window,
+            window,
             model,
             [],
             request_key,
@@ -310,7 +313,7 @@ class RedoWindow(StrongWindowPorts):
             request_key,
             job,
             round_count=job.round_count,
-            first_round=region.window.start_round,
+            first_round=window.start_round,
         )
 
     def release_conditions(

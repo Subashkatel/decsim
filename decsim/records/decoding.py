@@ -943,3 +943,7 @@ class RunShape:
     has_static_decode_plan: bool
     leaves_an_entry_pool: bool = True
     batches_each_member: bool = False
+    # the edge's strong redo decodes the box the chip packed: it reads no
+    # round and pins no face (escalation/doubtful_box.py), so a window
+    # decoded before its past neighbour can be redone
+    reads_no_round: bool = False

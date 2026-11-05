@@ -7,7 +7,14 @@ window takes every event. The packing reads each event twice, and the
 wire names the box's events by row and the outside's corrections by
 column. In a run, a box wide enough for every cluster answers as the
 whole-window redo does, and the escalation carries the box and no round.
+
+On parallel blocks (Skoric et al. 2209.08552) every joined correction,
+of every shape, explains its window's syndrome; checked boundaries
+commit what held ones do; and one stream's strong decodes can overlap,
+which the sliding chain never lets them do.
 """
+
+import dataclasses
 
 import numpy
 import pytest
@@ -28,6 +35,8 @@ import decsim.machine as machine_module
 import decsim.presets.clocks as clocks
 import decsim.presets.machines as machines
 import decsim.records.fault_model_contracts as fault_models
+import decsim.windows.boundary_policies as boundary_policies
+import decsim.windows.schemes.parallel as parallel_scheme
 import tests.escalation.test_switching_mode as switching_mode
 from tests.decoders import windows
 
@@ -213,8 +222,12 @@ def _redo_card():
     return union_find_card.with_settings(machines.STRONG_POOL, algorithm=strong)
 
 
-def _box_card(margin: int):
-    """The box redo: the chip packs, the host's matching reads the box."""
+def _box_card(margin: int, **redo_fields):
+    """The box redo: the chip packs, the host's matching reads the box.
+
+    redo_fields are the redo window's other settings: the box's shape
+    and the boundary row.
+    """
     law = event_time.DetectionEventTime(
         intercept_microseconds=5.0,
         coefficient_microseconds=0.5,
@@ -225,7 +238,9 @@ def _box_card(margin: int):
     strong = box_decoder.BoxCorrelatedPyMatchingDecoder.Settings(
         timing=law, join_microseconds=0.5
     )
-    redo = strong_window_shapes.RedoWindow.Settings(box_margin=margin)
+    redo = strong_window_shapes.RedoWindow.Settings(
+        box_margin=margin, **redo_fields
+    )
     union_find_card = _union_find_card()
     card = switching_mode.with_switching(union_find_card, strong_window=redo)
     return card.with_settings(machines.STRONG_POOL, algorithm=strong)
@@ -355,3 +370,248 @@ def test_a_shape_setting_needs_a_box_and_a_graph_one_margin():
     )
     shape = redo.box_shape()
     assert (shape.time_margin, shape.space_margin) == (1, 2)
+
+
+# ---- the box on parallel blocks (Skoric et al. 2209.08552)
+
+
+def _on_parallel_blocks(card):
+    scheme = parallel_scheme.ParallelWindowScheme.Settings()
+    return card.with_settings(machines.WINDOWS, scheme=scheme)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 3])
+def test_on_parallel_blocks_each_seam_commits_after_both_its_blocks(seed):
+    """A box redo pins no face, so an A block can escalate.
+
+    A B block reconciles the seam between two A blocks; its final
+    correction rests on theirs, so it commits only once both have,
+    their strong answers included.
+    """
+    box_card = _box_card(2)
+    card = _on_parallel_blocks(box_card)
+    machine, _result = switching_mode.run_shot(card, seed)
+    commits = _commit_ticks_by_window(machine)
+    seams = [index for index in commits if index % 2 == 1]
+    early = _seams_committed_early(commits, seams)
+    assert seams
+    assert early == []
+
+
+def test_parallel_blocks_escalate_to_the_box():
+    box_card = _box_card(2)
+    card = _on_parallel_blocks(box_card)
+    escalations = 0
+    for seed in range(4):
+        machine, _result = switching_mode.run_shot(card, seed)
+        escalations += _escalations(machine)
+    assert escalations > 0
+
+
+def test_a_whole_window_redo_on_parallel_blocks_is_still_refused():
+    """It reads its commit and one buffer: an A block's past would be lost."""
+    redo_card = _redo_card()
+    card = _on_parallel_blocks(redo_card)
+    with pytest.raises(NotImplementedError, match="pins its past face"):
+        machine_module.Machine.build(card, 0)
+
+
+def _commit_ticks_by_window(machine) -> dict:
+    """Each decoded window's commit tick, by its window index."""
+    commits = {}
+    for window, frame in measure.decoded_windows(machine.observation):
+        commits[window.window_index] = frame.committed_ticks
+    return commits
+
+
+def _seams_committed_early(commits: dict, seams: list) -> list:
+    """(seam, block) of each seam that committed before a block beside it."""
+    pairs = [(seam, block) for seam in seams for block in (seam - 1, seam + 1)]
+    return [
+        (seam, block)
+        for seam, block in pairs
+        if block in commits and commits[seam] < commits[block]
+    ]
+
+
+# the box's shapes the joined correction is checked for, as redo settings
+SHAPES = {
+    "margin 2": {},
+    "margin 0": {"box_time_margin": 0, "box_space_margin": 0},
+    "1 round, 2 columns": {"box_time_margin": 1},
+    "per cluster": {"box_form": "per_cluster"},
+    "graph, 1 edge": {
+        "box_time_margin": 1,
+        "box_space_margin": 1,
+        "box_form": "graph",
+    },
+    "all walks": {"box_doubt": "all_walks", "box_doubt_nats": 4.605170},
+}
+
+
+@pytest.mark.parametrize("shape", list(SHAPES))
+def test_on_parallel_blocks_every_joined_correction_explains_its_window(
+    shape, monkeypatch
+):
+    """Each cluster's correction explains its own events, so the join does.
+
+    The chip's window syndrome is kept for each box it packs, and each
+    joined correction the host returns is checked against it. A window
+    decoded again packs a new box, so each box is checked on its own.
+    """
+    syndromes = _kept_window_syndromes(monkeypatch)
+    checked = _checked_joins(monkeypatch, syndromes)
+    box_card = _box_card(2, **SHAPES[shape])
+    card = _on_parallel_blocks(box_card)
+    for seed in range(4):
+        switching_mode.run_shot(card, seed)
+    assert checked["joins"] > 0
+    assert checked["unexplained"] == []
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_on_parallel_blocks_checked_boundaries_answer_as_held_ones(seed):
+    """A block read on a provisional face is decoded again if it changes.
+
+    Each B block reads its A blocks' faces as they are first answered
+    and checks them when they are final (windows/input_checks.py), so
+    its final answer is the one it gives when it waits for them.
+    """
+    held = _parallel_box_card(HELD)
+    checked = _parallel_box_card(CHECKED)
+    _held_machine, held_result = switching_mode.run_shot(held, seed)
+    _checked_machine, checked_result = switching_mode.run_shot(checked, seed)
+    assert switching_mode.predictions(
+        checked_result
+    ) == switching_mode.predictions(held_result)
+
+
+def test_on_parallel_blocks_a_changed_face_is_decoded_again():
+    """The check is not idle: a B block reads a face the strong side changes."""
+    checked = _parallel_box_card(CHECKED)
+    again = 0
+    for seed in range(6):
+        machine, _result = switching_mode.run_shot(checked, seed)
+        again += _statistic(machine, "decoded_again")
+    assert again > 0
+
+
+def test_one_streams_strong_decodes_overlap_on_parallel_blocks_alone():
+    """Two strong units: parallel blocks use both, the sliding chain one.
+
+    On the sliding chain a window's escalation waits for the window
+    before it to be final, so one stream has one strong decode at a
+    time. On parallel blocks the A blocks rest on no other block, so
+    their strong decodes can run at once.
+    """
+    box_card = _box_card(2)
+    sliding = _with_boundary_policy(box_card, CHECKED)
+    sliding = sliding.with_settings(machines.STRONG_POOL, unit_count=2)
+    parallel = _on_parallel_blocks(sliding)
+    sliding_overlaps = 0
+    parallel_overlaps = 0
+    for seed in range(6):
+        sliding_machine, _ = switching_mode.run_shot(sliding, seed)
+        parallel_machine, _ = switching_mode.run_shot(parallel, seed)
+        sliding_overlaps += _overlapping_strong_decodes(sliding_machine)
+        parallel_overlaps += _overlapping_strong_decodes(parallel_machine)
+    assert sliding_overlaps == 0
+    assert parallel_overlaps > 0
+
+
+HELD = boundary_policies.Held.Settings()
+CHECKED = boundary_policies.Checked.Settings()
+
+
+def _parallel_box_card(policy):
+    """The box redo of margin 2 on parallel blocks, on one boundary row."""
+    box_card = _box_card(2)
+    on_policy = _with_boundary_policy(box_card, policy)
+    return _on_parallel_blocks(on_policy)
+
+
+def _with_boundary_policy(card, policy):
+    """The card with its windows and its redo window on one boundary row."""
+    switching_part = card.part(machines.SWITCHING)
+    switching = switching_part.settings
+    redo = dataclasses.replace(switching.strong_window, boundary_policy=policy)
+    card = switching_mode.with_switching(card, strong_window=redo)
+    return card.with_settings(machines.WINDOWS, boundary_policy=policy)
+
+
+def _statistic(machine, name: str) -> float:
+    for row in machine.observation.statistics.rows():
+        if row.statistic == name:
+            return row.value
+    raise KeyError(name)
+
+
+def _kept_window_syndromes(monkeypatch) -> dict:
+    """Each packed box's window syndrome, by the box's identity."""
+    syndromes = {}
+    pack = doubtful_box.BoxPacker.pack
+
+    def keeping_pack(packer, weak_job, weak_result):
+        box = pack(packer, weak_job, weak_result)
+        syndrome = weak_result.cluster_evidence.syndrome
+        syndromes[id(box)] = (box, numpy.asarray(syndrome, dtype=int))
+        return box
+
+    monkeypatch.setattr(doubtful_box.BoxPacker, "pack", keeping_pack)
+    return syndromes
+
+
+def _checked_joins(monkeypatch, syndromes: dict) -> dict:
+    """Each joined correction against its window's syndrome."""
+    checked = {"joins": 0, "unexplained": []}
+    row = box_decoder.BoxCorrelatedPyMatchingDecoder
+    answer = row.window_answer
+
+    def checking_answer(decoder, job, backend, model, faults, syndrome):
+        result = answer(decoder, job, backend, model, faults, syndrome)
+        _box, window_syndrome = syndromes[id(job.request)]
+        dense_check = faults.check.toarray()
+        check = dense_check.astype(int)
+        selected = numpy.asarray(result.selected_faults, dtype=int)
+        explained = check @ selected % 2
+        checked["joins"] += 1
+        if not numpy.array_equal(explained, window_syndrome):
+            checked["unexplained"].append(job.label)
+        return result
+
+    monkeypatch.setattr(row, "window_answer", checking_answer)
+    return checked
+
+
+def _overlapping_strong_decodes(machine) -> int:
+    """Pairs of one stream's strong decodes of two windows that overlap."""
+    spans = _strong_spans(machine)
+    keys = sorted(spans)
+    pairs = [
+        (first, second)
+        for index, first in enumerate(keys)
+        for second in keys[index + 1 :]
+        if first[0] == second[0]
+    ]
+    overlaps = 0
+    for first, second in pairs:
+        first_start, first_end = spans[first]
+        second_start, second_end = spans[second]
+        overlaps += first_start < second_end and second_start < first_end
+    return overlaps
+
+
+def _strong_spans(machine) -> dict:
+    """(first start, last end) of each window's strong decodes, by window."""
+    strong_unit = f"{machines.STRONG_POOL}#"
+    spans = {}
+    for record in machine.observation.stages.records:
+        if not record.unit_name.startswith(strong_unit):
+            continue
+        key = (record.stream_id, record.window_id)
+        start, end = spans.get(key, (record.start_ticks, record.end_ticks))
+        spans[key] = (
+            min(start, record.start_ticks),
+            max(end, record.end_ticks),
+        )
+    return spans

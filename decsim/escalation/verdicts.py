@@ -23,6 +23,9 @@ learns from by the windows it escalates.
     replay         escalate exactly the windows a recorded run
                    escalated, shot by shot, read from its
                    window_outcomes.csv
+    truth          escalate exactly the windows whose weak answer is
+                   wrong on its label: the perfect switching decision
+                   of a speed-of-light study
 """
 
 import dataclasses
@@ -31,7 +34,9 @@ from typing import Optional
 import decsim.escalation.target_steps as target_steps
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.program as program_records
 import decsim.records.recorded_rows as recorded_rows
+import decsim.records.sampled_errors as sampled_error_records
 import decsim.seeding as seeding
 
 KEEP = decoding_records.Verdict.KEEP
@@ -407,6 +412,78 @@ class Replay:
                 "from the recorded run's"
             )
         if self.shot_decisions[key]:
+            return ESCALATE
+        return KEEP
+
+
+class Truth:
+    """Escalate exactly the windows whose weak answer is wrong.
+
+    The perfect switching decision of a speed-of-light study: how close
+    to the strong decoder can switching come, and at what share and
+    load, if the verdict always knew? It reads the shot's fired errors
+    from a source that keeps them (qpu/stim_device.py,
+    ErrorModelStimDevice), as the truth decoder does, and escalates a
+    window when the weak answer differs from the window's label: the
+    parity of the fired errors whose first round lies in its commit
+    rounds (records/sampled_errors.py label_of_errors), the label
+    window_outcomes.csv records beside the weak answer. It reads no gap
+    and no threshold. A machine is built for each shot, so the errors
+    it holds are this shot's.
+    """
+
+    # the build connects the source's errors_sampled to a row that reads it
+    reads_fired_errors = True
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """No settings: the shot's errors decide."""
+
+        name = "truth"
+        reads_threshold = False
+        reads_consensus = False
+        reads_source_queue = False
+
+        def build(self) -> "Truth":
+            """A fresh verdict, which holds no errors until a shot fires."""
+            return Truth()
+
+    def __init__(self) -> None:
+        # operation id -> the errors its shot fired
+        self.errors_by_operation: dict = {}
+
+    def errors_sampled(
+        self, operation: program_records.Operation, fired_errors: tuple
+    ) -> None:
+        """The source drew an operation's shot; these errors fired."""
+        self.errors_by_operation[operation.id] = fired_errors
+
+    def decide(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        threshold: ports.ThresholdSource,
+    ) -> decoding_records.Verdict:
+        """Escalate when the weak answer is off the window's label."""
+        del threshold
+        window = job.window
+        fired_errors = self.errors_by_operation.get(window.stream_id)
+        if fired_errors is None:
+            raise RuntimeError(
+                "switching.verdict truth holds no fired errors for "
+                f"{window.stream_id!r}: its source keeps none (name "
+                "qpu.source.type=error_model_stim)"
+            )
+        answer = result.logical_observables
+        if answer is None:
+            raise ValueError(
+                f"switching.verdict truth: window {window.key} has no weak "
+                "answer to judge (a timing-only decode)"
+            )
+        label = sampled_error_records.label_of_errors(
+            fired_errors, window.commit_lo, window.commit_hi, len(answer)
+        )
+        if tuple(answer) != label:
             return ESCALATE
         return KEEP
 

@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 import decsim.records.decoding as decoding_records
 import decsim.records.program as program_records
+import decsim.records.sampled_errors as sampled_error_records
 
 
 @dataclasses.dataclass(frozen=True)
@@ -75,12 +76,9 @@ class WindowOutcomes:
         fired_errors = self.errors_by_operation.get(operation_id)
         if fired_errors is None:
             return None
-        label = [0] * arity
-        for error in fired_errors:
-            if not commit_lo <= error.first_round <= commit_hi:
-                continue
-            _fold_bits(label, error.logical_observables)
-        return tuple(label)
+        return sampled_error_records.label_of_errors(
+            fired_errors, commit_lo, commit_hi, arity
+        )
 
     def _outcome_of(
         self,
@@ -104,9 +102,3 @@ class WindowOutcomes:
             answer=answer,
             label=label,
         )
-
-
-def _fold_bits(bits: list[int], flipped: tuple[int, ...]) -> None:
-    """XOR flipped into bits, observable by observable."""
-    for observable_index, bit in enumerate(flipped):
-        bits[observable_index] ^= bit

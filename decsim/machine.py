@@ -247,7 +247,9 @@ class Machine:
             retention=windows.retention,
             router=windows.router,
         )
-        _connect_fired_errors(qpu.syndrome_source, decoders.pools)
+        _connect_fired_errors(
+            qpu.syndrome_source, decoders.pools, switching_parts
+        )
         input_fold = decoders.decoder_manager.input_fold()
         entry_sides = _entry_sides(layout, readout, decoders, windows)
         windows.connect(
@@ -561,23 +563,35 @@ def _entry_side(
     )
 
 
-def _connect_fired_errors(source: ports.SyndromeSource, pools: tuple) -> None:
+def _connect_fired_errors(
+    source: ports.SyndromeSource, pools: tuple, switching_parts: tuple
+) -> None:
     """A row that reads the shot's fired errors hears them from the source.
 
-    The truth decoder (decoders/truth.py) is the one such row. A source
-    that keeps no errors cannot serve it, so the build refuses the pair.
+    The truth decoder (decoders/truth.py) and the truth verdict
+    (escalation/verdicts.py) are the rows that do. A source that keeps
+    no errors cannot serve them, so the build refuses the pair.
     """
-    for pool in pools:
-        decoder = getattr(pool.unit, "decoder", None)
-        if not getattr(decoder, "reads_fired_errors", False):
+    readers = [
+        (
+            f"{pool.plan.names.seat}'s decoder",
+            getattr(pool.unit, "decoder", None),
+        )
+        for pool in pools
+    ]
+    readers += [
+        ("switching.verdict", getattr(part.policy, "verdict", None))
+        for part in switching_parts
+    ]
+    for name, reader in readers:
+        if not getattr(reader, "reads_fired_errors", False):
             continue
         if source.errors_sampled is trace_source.SILENT:
             raise ValueError(
-                f"{pool.plan.names.seat}'s decoder reads the shot's fired "
-                "errors and the QPU source keeps none; name "
-                "qpu.source.type=error_model_stim"
+                f"{name} reads the shot's fired errors and the QPU source "
+                "keeps none; name qpu.source.type=error_model_stim"
             )
-        source.errors_sampled.connect(decoder.errors_sampled)
+        source.errors_sampled.connect(reader.errors_sampled)
 
 
 def _root_seed(value) -> Optional[int]:

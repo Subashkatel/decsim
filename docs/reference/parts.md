@@ -901,6 +901,10 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 | --- | --- | --- |
 | `decisions_path` | `str` | required |
 
+### `Truth.Settings`
+
+`decsim/escalation/verdicts.py`. No settings: the shot's errors decide.
+
 ## decsim/frontends
 
 ### `WorkloadSettings`

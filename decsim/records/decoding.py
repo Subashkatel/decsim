@@ -711,6 +711,9 @@ class DecoderStageRecord:
     # XRay record carries the thread it ran on
     # (tools/llvm-xray/xray-converter.cc:232-245)
     unit_name: str
+    # the pool that unit belongs to (DecodeJob.pool), by which a
+    # decode-time replay keys the decode
+    pool: str
     # the (stream, round) identities a formation stage turned into
     # detection events here; empty for every stage that forms none
     round_keys: tuple = ()

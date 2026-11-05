@@ -1497,8 +1497,8 @@ def _shot_decode_times(
 ) -> Optional[tuple]:
     """Each finished decode's algorithm ticks, None unless the run asks.
 
-    A unit is named pool#index (decoders/decoder_unit.py), and a replay
-    keys a decode by its pool, so a pool's units share their times.
+    A replay keys a decode by its pool, so a pool's units share their
+    times.
     """
     if not graph.observation.record_decode_times:
         return None
@@ -1506,10 +1506,10 @@ def _shot_decode_times(
     for record in observation.stages.records:
         if record.stage != staged_decoder.ALGORITHM_STAGE or record.cancelled:
             continue
-        name_parts = record.unit_name.split("#")
-        pool = name_parts[0]
         ticks = record.end_ticks - record.start_ticks
-        row = DecodeTimeRow(pool, record.stream_id, record.window_id, ticks)
+        row = DecodeTimeRow(
+            record.pool, record.stream_id, record.window_id, ticks
+        )
         rows.append(row)
     return tuple(rows)
 

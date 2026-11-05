@@ -308,6 +308,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             running.open_start_ticks,
             running.engine.now,
             job.decoding_unit_name,
+            job.pool,
             step.round_keys,
             sequences,
             cancelled,

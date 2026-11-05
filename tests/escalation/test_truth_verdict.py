@@ -15,11 +15,8 @@ import pytest
 
 import decsim.escalation.verdicts as verdicts
 import decsim.experiments.collect as collect
-import decsim.experiments.measure as measure
-import decsim.parameters.assignments as assignments_module
-import decsim.parameters.tree as tree
 import decsim.records.decoding as decoding_records
-import tests.experiments.run_files as run_files
+import tests.escalation.recording_machine as recording_machine
 
 KEEP = decoding_records.Verdict.KEEP
 ESCALATE = decoding_records.Verdict.ESCALATE
@@ -64,36 +61,8 @@ def _decided(fired_errors, answer, commit=(3, 5)):
     return verdict.decide(job, result, None)
 
 
-def _machine(*pairs, source="error_model_stim"):
-    """The test switching machine on Toshio's double window, recording."""
-    machine = run_files.switching_machine(rounds_per_shot=30)
-    base = (
-        ("qpu.source.type", source),
-        ("observation.record_window_outcomes", "true"),
-        ("switching.strong_window.type", "double_window"),
-        ("windows.boundary_policy.type", "Eager"),
-        ("windows.terminal_policy", "lookahead"),
-        ("workload.arguments.physical_error_probability", "0.01"),
-        ("weak.algorithm.type", "union_find"),
-        ("weak.algorithm.timing.type", "PresetTime"),
-        ("weak.algorithm.timing.latency", "0.3us"),
-        ("switching.confidence.type", "cluster_gap"),
-        ("switching.confidence.walk", "1us"),
-    )
-    texts = [f"{path}={value}" for path, value in base + pairs]
-    written = assignments_module.from_texts(texts, "a test")
-    applied = tree.apply(machine, written)
-    return applied.settings
-
-
 def _measured(machine):
-    task = collect.Task("truth_verdict", machine)
-    return [_measured_shot(task, seed) for seed in SEEDS]
-
-
-def _measured_shot(task, seed):
-    shot = collect.run_shot(task, seed)
-    return measure.measure_shot(shot)
+    return recording_machine.measured_shots("truth_verdict", machine, SEEDS)
 
 
 def _decided_rows(measurements):
@@ -116,8 +85,10 @@ def _weak_is_wrong(row) -> bool:
 @pytest.fixture(scope="module")
 def runs():
     """The gap's run and the truth verdict's run, on the same seeds."""
-    gap_machine = _machine()
-    truth_machine = _machine(("switching.verdict.type", "truth"))
+    gap_machine = recording_machine.switching_machine()
+    truth_machine = recording_machine.switching_machine(
+        ("switching.verdict.type", "truth")
+    )
     gap = _measured(gap_machine)
     truth = _measured(truth_machine)
     return gap, truth
@@ -186,7 +157,7 @@ def test_the_truth_verdict_decodes_the_same_shots_as_the_gap(runs):
 
 
 def test_a_truth_verdict_on_a_source_that_keeps_no_errors_is_refused():
-    machine = _machine(
+    machine = recording_machine.switching_machine(
         ("switching.verdict.type", "truth"), source="stim_device"
     )
     task = collect.Task("truth_verdict", machine)

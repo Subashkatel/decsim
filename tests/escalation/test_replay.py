@@ -13,49 +13,21 @@ decision and every latency, and changes only the answers.
 import pytest
 
 import decsim.experiments.collect as collect
-import decsim.experiments.measure as measure
 import decsim.experiments.report as report
-import decsim.parameters.assignments as assignments_module
-import decsim.parameters.tree as tree
-import tests.experiments.run_files as run_files
+import tests.escalation.recording_machine as recording_machine
 
 SEEDS = range(8)
 LATENCY_POINT = "qpu_last_round_to_frame"
+RECORDS_DECODE_TIMES = ("observation.record_decode_times", "true")
 
 
 def _machine(*pairs):
-    """The test switching machine on Toshio's double window, recording."""
-    machine = run_files.switching_machine(rounds_per_shot=30)
-    base = (
-        ("qpu.source.type", "error_model_stim"),
-        ("observation.record_window_outcomes", "true"),
-        ("observation.record_decode_times", "true"),
-        ("switching.strong_window.type", "double_window"),
-        ("windows.boundary_policy.type", "Eager"),
-        ("windows.terminal_policy", "lookahead"),
-        ("workload.arguments.physical_error_probability", "0.01"),
-        # union-find at a stated time, its gap at a stated time, so the
-        # recorded run's own times repeat
-        ("weak.algorithm.type", "union_find"),
-        ("weak.algorithm.timing.type", "PresetTime"),
-        ("weak.algorithm.timing.latency", "0.3us"),
-        ("switching.confidence.type", "cluster_gap"),
-        ("switching.confidence.walk", "1us"),
-    )
-    texts = [f"{path}={value}" for path, value in base + pairs]
-    written = assignments_module.from_texts(texts, "a test")
-    applied = tree.apply(machine, written)
-    return applied.settings
+    """The recording machine, which records its decode times too."""
+    return recording_machine.switching_machine(RECORDS_DECODE_TIMES, *pairs)
 
 
 def _measured(machine):
-    task = collect.Task("replay", machine)
-    return [_measured_shot(task, seed) for seed in SEEDS]
-
-
-def _measured_shot(task, seed):
-    shot = collect.run_shot(task, seed)
-    return measure.measure_shot(shot)
+    return recording_machine.measured_shots("replay", machine, SEEDS)
 
 
 @pytest.fixture(scope="module")

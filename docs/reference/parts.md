@@ -843,7 +843,9 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 
 ### `RateThreshold.Settings`
 
-`decsim/escalation/threshold_sources.py`. The start in decibels, the target share and the step.
+`decsim/escalation/threshold_sources.py`. The start in decibels, the target share, the step, a ceiling.
+
+ceiling_decibels is the highest threshold the tracker may hold; None leaves the recursion unclipped.
 
 | Field | Type | Default |
 | --- | --- | --- |
@@ -851,6 +853,7 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 | `target_escalation_rate` | `float` | required |
 | `step_decibels` | `float` | `0.25` |
 | `steps` | `Optional[target_steps.TargetSteps.Settings]` | `None` |
+| `ceiling_decibels` | `Optional[float]` | `None` |
 
 ### `GapThreshold.Settings`
 

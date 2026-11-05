@@ -211,15 +211,24 @@ class EscalationRateTracker:
     around alpha with no assumption on the gap distribution, and the
     bound needs the recursion unclipped (Lemma 4.1, lines 303-308): the
     threshold may dip below zero, where nothing escalates until kept
-    windows raise it again.
+    windows raise it again. A ceiling clips it from above on purpose:
+    the target is then a cap the share stays under, not a share it holds.
     """
 
     def __init__(
-        self, target_escalation_rate: float, threshold: float, step: float
+        self,
+        target_escalation_rate: float,
+        threshold: float,
+        step: float,
+        ceiling: Optional[float] = None,
     ) -> None:
         self.target_escalation_rate = target_escalation_rate
         self.threshold = threshold
         self.step = step
+        # a ceiling makes the target a cap: the threshold rests there
+        # while fewer windows than the target fall under it, and falls
+        # only to hold the cap (a risk threshold under a load cap)
+        self.ceiling = ceiling
         self.window_count = 0
         self.escalated_count = 0
 
@@ -230,6 +239,8 @@ class EscalationRateTracker:
         self.escalated_count += int(escalated)
         move = self.target_escalation_rate - float(escalated)
         self.threshold += self.step * move
+        if self.ceiling is not None:
+            self.threshold = min(self.threshold, self.ceiling)
         return escalated
 
     def escalation_rate(self) -> float:
@@ -560,15 +571,24 @@ class RateThreshold:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The start in decibels, the target share and the step."""
+        """The start in decibels, the target share, the step, a ceiling.
+
+        ceiling_decibels is the highest threshold the tracker may hold;
+        None leaves the recursion unclipped.
+        """
 
         threshold_decibels: float
         target_escalation_rate: float
         step_decibels: float = 0.25
         steps: Optional[target_steps.TargetSteps.Settings] = None
+        # the highest threshold the tracker may hold; the target share
+        # is then a cap the threshold falls to hold, not a share it holds
+        ceiling_decibels: Optional[float] = None
 
         def __post_init__(self) -> None:
             checked_decibels(self.threshold_decibels, "threshold_decibels")
+            if self.ceiling_decibels is not None:
+                checked_decibels(self.ceiling_decibels, "ceiling_decibels")
             rate = self.target_escalation_rate
             if not config.is_number(rate) or not 0.0 < rate < 1.0:
                 raise ValueError(
@@ -594,10 +614,14 @@ class RateThreshold:
             """The one instance a task's shots share."""
             del facts
             step_nats = decibels_to_nats(self.step_decibels)
+            ceiling = None
+            if self.ceiling_decibels is not None:
+                ceiling = decibels_to_nats(self.ceiling_decibels)
             tracker = EscalationRateTracker(
                 target_escalation_rate=self.target_escalation_rate,
                 threshold=self.threshold_nats,
                 step=step_nats,
+                ceiling=ceiling,
             )
             steps = None
             if self.steps is not None:

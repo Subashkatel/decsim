@@ -285,6 +285,80 @@ def _observe_each(tracker, gaps: list) -> None:
         tracker.observe(gap)
 
 
+def test_a_ceiling_holds_the_threshold_down_while_every_window_is_kept():
+    """Target 0.25, start 1.0, step 0.5, ceiling 1.25, by hand.
+
+    A kept window raises the threshold 0.125: 1.125, then 1.25, and
+    there it rests however many more windows are kept.
+    """
+    tracker = threshold_sources.EscalationRateTracker(
+        target_escalation_rate=0.25, threshold=1.0, step=0.5, ceiling=1.25
+    )
+    thresholds = []
+    for _ in range(4):
+        tracker.observe(10.0)
+        thresholds.append(tracker.threshold)
+
+    assert thresholds == [1.125, 1.25, 1.25, 1.25]
+
+
+def test_under_a_low_ceiling_the_target_is_a_cap_and_not_a_share_property():
+    """Uniform gaps on [0, 10], target 0.2, ceiling 1.0.
+
+    Unclipped, the tracker holds the share at the target (Gibbs and
+    Candes, arXiv:2106.00170 lines 309-317). Under the ceiling only a
+    gap below 1.0 escalates, a tenth of the windows, so the share stays
+    under the target and the threshold never passes the ceiling.
+    """
+    capped = threshold_sources.EscalationRateTracker(
+        target_escalation_rate=0.2, threshold=1.0, step=0.05, ceiling=1.0
+    )
+    free = threshold_sources.EscalationRateTracker(
+        target_escalation_rate=0.2, threshold=1.0, step=0.05
+    )
+    gaps = _uniform_gaps(31, 20000)
+
+    _observe_each(capped, gaps)
+    _observe_each(free, gaps)
+
+    assert free.escalation_rate() == pytest.approx(0.2, abs=0.01)
+    assert capped.escalation_rate() == pytest.approx(0.1, abs=0.01)
+    assert capped.threshold <= 1.0
+
+
+def _uniform_gaps(seed: int, count: int) -> list:
+    """Count gaps drawn uniformly on [0, 10]."""
+    stream = random.Random(seed)
+    gaps = []
+    for _ in range(count):
+        gap = stream.uniform(0.0, 10.0)
+        gaps.append(gap)
+    return gaps
+
+
+def test_a_rate_thresholds_ceiling_is_read_in_decibels():
+    """20 dB is a likelihood ratio of one hundred, its weight ln 100."""
+    capped = threshold_sources.RateThreshold.Settings(
+        15.0, 0.1, ceiling_decibels=20.0
+    )
+    free = threshold_sources.RateThreshold.Settings(15.0, 0.1)
+
+    capped_rate = capped.for_task({})
+    free_rate = free.for_task({})
+
+    weight = math.log(100.0)
+    assert capped_rate.tracker.ceiling == pytest.approx(weight)
+    assert free_rate.tracker.ceiling is None
+
+
+@pytest.mark.parametrize("ceiling", [float("nan"), math.inf, -1.0])
+def test_a_ceiling_that_is_no_nonnegative_number_is_refused(ceiling):
+    with pytest.raises(ValueError, match="ceiling_decibels must be finite"):
+        threshold_sources.RateThreshold.Settings(
+            15.0, 0.1, ceiling_decibels=ceiling
+        )
+
+
 def test_a_likelihood_ratio_of_one_hundred_is_twenty_decibels():
     """Decibels are 10 log10 of the ratio, the weight its natural log."""
     weight_nats = math.log(100.0)

@@ -1,7 +1,8 @@
 """The program records of decsim/records/program.py.
 
-An operation's magic-state need, its planning view's feedback mode,
-and a segment's rounds folded into its stream.
+An operation's magic-state need, its planning view's feedback mode, a
+segment's rounds folded into its stream, and the operations whose
+outcome is needed.
 """
 
 import decsim.records.program as program_records
@@ -68,3 +69,14 @@ def test_a_segments_rounds_fold_into_its_stream_at_its_offset():
     assert program_records.global_round(standalone, 3) == 3
     assert program_records.decode_identity(segment) == "stream"
     assert program_records.global_round(segment, 3) == 9
+
+
+def test_the_decisions_are_each_blocker_and_each_returned_result_once():
+    """In program order: a blocker named twice, and a returned blocker, once."""
+    merge = make_operation(id=1, requires_result_return_to_qpu=True)
+    first_s = make_operation(id=2, blocked_by=1)
+    second_s = make_operation(id=3, blocked_by=1)
+    measure = make_operation(id=4, requires_result_return_to_qpu=True)
+    late = make_operation(id=5, blocked_by=7)
+    operations = (merge, first_s, second_s, measure, late)
+    assert program_records.decision_ids(operations) == (1, 4, 7)

@@ -275,6 +275,21 @@ def patches_of(operation: Operation) -> tuple:
     return (0,)
 
 
+def decision_ids(operations: tuple) -> tuple:
+    """The operations whose outcome is needed, each once, in program order.
+
+    An outcome is needed when another operation is blocked_by it or the
+    QPU needs it returned (requires_result_return_to_qpu).
+    """
+    found = {}
+    for operation in operations:
+        if operation.blocked_by is not None:
+            found[operation.blocked_by] = True
+        if operation.requires_result_return_to_qpu:
+            found[operation.id] = True
+    return tuple(found)
+
+
 def decode_identity(operation: Operation) -> Any:  # an opaque identity
     """The decode stream an operation's rounds fold into.
 

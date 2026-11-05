@@ -120,7 +120,8 @@ def earlier_decisions(operations: tuple) -> dict:
     The operations come in the lowered program's order, each after its
     parents, so one pass fills every operation's nearest decisions.
     """
-    decision_ids = _decision_ids(operations)
+    ordered_ids = program_records.decision_ids(operations)
+    decision_ids = set(ordered_ids)
     nearest_by_operation = {}
     for operation in operations:
         nearest = set()
@@ -134,21 +135,10 @@ def earlier_decisions(operations: tuple) -> dict:
             nearest.update(reached)
         nearest_by_operation[operation.id] = frozenset(nearest)
     earlier_by_decision = {}
-    for decision_id in decision_ids:
+    for decision_id in ordered_ids:
         nearest = nearest_by_operation[decision_id]
         earlier_by_decision[decision_id] = tuple(sorted(nearest))
     return earlier_by_decision
-
-
-def _decision_ids(operations: tuple) -> set:
-    """The operations whose outcome is needed."""
-    decision_ids = set()
-    for operation in operations:
-        if operation.blocked_by is not None:
-            decision_ids.add(operation.blocked_by)
-        if operation.requires_result_return_to_qpu:
-            decision_ids.add(operation.id)
-    return decision_ids
 
 
 def _parents(operation: program_records.Operation) -> list:

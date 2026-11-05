@@ -30,6 +30,8 @@ branch, and some instructions that cannot flip the outcome.
 import dataclasses
 from typing import Protocol
 
+import decsim.records.program as program_records
+
 
 class ReleaseRule(Protocol):
     """Which segments a blocker's release waits for, both ways."""
@@ -92,11 +94,9 @@ class DecodedAncestors:
         self.awaited_by_blocker: dict = {}
         # operation id -> the blockers whose release waits for it
         self.blockers_by_awaited: dict = {}
-        for operation in operations:
-            if operation.blocked_by is not None:
-                self._await(operation.blocked_by, operation_by_id)
-            if operation.requires_result_return_to_qpu:
-                self._await(operation.id, operation_by_id)
+        blocker_ids = program_records.decision_ids(operations)
+        for blocker_id in blocker_ids:
+            self._await(blocker_id, operation_by_id)
 
     def awaited_by(self, operation_id: int) -> tuple:
         """The operations whose segments the blocker's release waits for."""

@@ -17,7 +17,6 @@ holds the unit.
 """
 
 import dataclasses
-import math
 from typing import Optional
 
 import numpy
@@ -53,7 +52,9 @@ class BoxCorrelatedPyMatchingDecoder(CORRELATED):
         reads_doubtful_box = True
 
         def __post_init__(self) -> None:
-            _check_join(self.join_microseconds)
+            config.check_microseconds(
+                "join_microseconds", self.join_microseconds
+            )
 
         def build(self) -> "BoxCorrelatedPyMatchingDecoder":
             """A fresh decoder of these settings."""
@@ -155,15 +156,4 @@ def _refuse_a_forced_class(job: decoding_records.DecodeJob) -> None:
         return
     raise ValueError(
         f"{job.label}: box_correlated_pymatching answers no forced-class solve"
-    )
-
-
-def _check_join(join_microseconds: object) -> None:
-    is_number = config.is_number(join_microseconds)
-    is_finite = is_number and math.isfinite(join_microseconds)
-    if is_finite and join_microseconds >= 0:
-        return
-    raise ValueError(
-        "join_microseconds must be a finite number, 0 or more "
-        f"(got {join_microseconds!r})"
     )

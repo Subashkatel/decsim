@@ -119,7 +119,7 @@ def test_a_negative_iteration_time_is_refused():
         )
 
     message = str(refused.value)
-    assert "iteration_microseconds must be a finite nonnegative" in message
+    assert "iteration_microseconds must be finite and not negative" in message
 
 
 def _referee(circuit) -> beliefmatching.BeliefMatching:

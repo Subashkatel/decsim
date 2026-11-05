@@ -21,7 +21,6 @@ growth's own cycles. Relay-BP's FPGA runs one iteration in 24 ns
 """
 
 import dataclasses
-import math
 from typing import Optional
 
 import ldpc
@@ -76,12 +75,9 @@ class BeliefFindDecoder(union_find.UnionFindDecoder):
 
         def __post_init__(self) -> None:
             union_find.UnionFindDecoder.Settings.__post_init__(self)
-            microseconds = self.iteration_microseconds
-            if not math.isfinite(microseconds) or microseconds < 0:
-                raise ValueError(
-                    "iteration_microseconds must be a finite nonnegative "
-                    f"number of microseconds (got {microseconds!r})"
-                )
+            config.check_microseconds(
+                "iteration_microseconds", self.iteration_microseconds
+            )
 
         def build(self) -> "BeliefFindDecoder":
             """A fresh decoder of these settings."""

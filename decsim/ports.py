@@ -990,6 +990,17 @@ class EscalateEdge(Protocol):
     ) -> Optional[decoding_records.Submission]:
         """The source job's last boundary arrived: its speculative decode."""
 
+    def pack_request(
+        self,
+        weak_job: decoding_records.DecodeJob,
+        weak_result: decoding_records.DecodeResult,
+    ) -> int:
+        """Pack what the escalation sends in place of rounds; its cycles.
+
+        Asked as the verdict switches to escalate; zero on an edge whose
+        target reads the window's rounds.
+        """
+
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
         """Ask the target pool to re-decode the source job's window."""
 
@@ -1136,8 +1147,13 @@ class DecoderOutput(Protocol):
         weak_job: decoding_records.DecodeJob,
         strong_request_key: window_records.DecoderRequestKey,
         on_delivered: Callable[[], None],
+        request_bits: int = 0,
     ) -> int:
-        """Send one window's escalation; returns the delay the link expects."""
+        """Send one window's escalation; returns the delay the link expects.
+
+        request_bits are what the chip packed for the target in place
+        of rounds, riding the escalation.
+        """
 
     def send_region(
         self,

@@ -113,16 +113,20 @@ class DecoderOutput:
         weak_job: decoding_records.DecodeJob,
         strong_request_key: window_records.DecoderRequestKey,
         on_delivered: Callable[[], None],
+        request_bits: int = 0,
     ) -> int:
         """Send one window's escalation on its edge's forward hop.
 
         The send is in the source job's name for the target request it
         selects; returns the delay the link expects. A selection is the
         request's name (records/windows.py REQUEST_KEY_WIRE_BITS), and
-        the source's crossing commit when the target joins it, so a
-        bounded hop serializes those bits and its header.
+        the source's crossing commit when the target joins it, and
+        request_bits the chip packed for the target in place of rounds
+        (escalation/doubtful_box.py), so a bounded hop serializes those
+        bits and its header.
         """
-        payload_bits = self._selection_bits(weak_job, strong_request_key)
+        selection_bits = self._selection_bits(weak_job, strong_request_key)
+        payload_bits = selection_bits + request_bits
         return self.transfers.send_for_job(
             path,
             weak_job,

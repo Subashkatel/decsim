@@ -298,8 +298,7 @@ class StagedDecoder(decoder_module.DecoderBase):
         running.open_stage = None
         job = running.job
         sequences = _run_sequences(job)
-        fragments = _fragments_read(job)
-        last_rounds_read = decoding_records.last_round_by_stream(fragments)
+        last_rounds_read = _last_rounds_read(job)
         served_windows = _served_windows(job)
         record = decoding_records.DecoderStageRecord(
             job.stream_id,
@@ -404,6 +403,19 @@ def _fragments_read(job: decoding_records.DecodeJob) -> list:
         member_fragments = _fragments_of(member)
         fragments.extend(member_fragments)
     return fragments
+
+
+def _last_rounds_read(job: decoding_records.DecodeJob) -> tuple:
+    """(stream, last round) of what the decode read.
+
+    A job that carries a packed request reads no round: its answer rests
+    on the rounds its source read to pack it (escalation/doubtful_box.py
+    DoubtfulBox.last_rounds_read).
+    """
+    if job.request is not None:
+        return job.request.last_rounds_read
+    fragments = _fragments_read(job)
+    return decoding_records.last_round_by_stream(fragments)
 
 
 def _served_windows(job: decoding_records.DecodeJob) -> tuple:

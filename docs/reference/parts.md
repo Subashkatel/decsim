@@ -478,6 +478,17 @@ It extends `measurements.RelaySettings`, and holds its fields.
 
 ## decsim/decoders/minimum_weight_perfect_matching
 
+### `BoxCorrelatedPyMatchingDecoder.Settings`
+
+`decsim/decoders/minimum_weight_perfect_matching/box_decoder.py`. timing is the fitted law at the box's detection events.
+
+join_microseconds is the host's join of the strong correction to union-find's outside the box. With no timing, the host's own time around the call holds the unit.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `timing` | `Optional[event_time.DetectionEventTime]` | `None` |
+| `join_microseconds` | `float` | `0.0` |
+
 ### `PyMatchingDecoder.Settings`
 
 `decsim/decoders/minimum_weight_perfect_matching/decoder.py`. The row as a run names it: measured, or at a preset latency.
@@ -754,11 +765,14 @@ boundary_policy is the boundary row the windows take: held, the default, where t
 
 starts_on_a_guess, under checked boundaries only, lets a window whose decode read a provisional boundary escalate at once, its past face pinned on that boundary, instead of when it is final. guess_backlog_limit, when set, starts on a guess only while the strong queue holds fewer waiting jobs than it, so redos that may be withdrawn never crowd a busy pool; the window then waits for its final boundary, as without a guess.
 
+box_margin, when set, has the chip pack the doubtful clusters' box widened by that many rounds (escalation/doubtful_box.py), and the redo decodes that box alone: it reads no round and pins no face (plan_box). The target's row must read the box (box_decoder.py).
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `boundary_policy` | `ports.BoundaryPolicySettings` | `boundary_policies.Held.Settings()` |
 | `starts_on_a_guess` | `bool` | `False` |
 | `guess_backlog_limit` | `Optional[int]` | `None` |
+| `box_margin` | `Optional[int]` | `None` |
 
 ### `DoubleWindow.Settings`
 

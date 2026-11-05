@@ -31,6 +31,7 @@ import dataclasses
 from typing import Optional, Protocol, Union, runtime_checkable
 
 import decsim.engine as engine_module
+import decsim.escalation.doubtful_box as doubtful_box
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_regions as strong_regions
 import decsim.ports as ports
@@ -158,6 +159,12 @@ class RedoWindow(StrongWindowPorts):
         strong queue holds fewer waiting jobs than it, so redos that may
         be withdrawn never crowd a busy pool; the window then waits for
         its final boundary, as without a guess.
+
+        box_margin, when set, has the chip pack the doubtful clusters'
+        box widened by that many rounds (escalation/doubtful_box.py),
+        and the redo decodes that box alone: it reads no round and pins
+        no face (plan_box). The target's row must read the box
+        (box_decoder.py).
         """
 
         boundary_policy: ports.BoundaryPolicySettings = (
@@ -165,6 +172,7 @@ class RedoWindow(StrongWindowPorts):
         )
         starts_on_a_guess: bool = False
         guess_backlog_limit: Optional[int] = None
+        box_margin: Optional[int] = None
         # the word the refusals name this row by
         name = "redo_window"
         # it restarts no weak window, so the width the window interaction
@@ -178,6 +186,8 @@ class RedoWindow(StrongWindowPorts):
                 _check_backlog_limit(
                     self.guess_backlog_limit, self.starts_on_a_guess
                 )
+            if self.box_margin is not None:
+                doubtful_box.check_margin(self.box_margin)
 
         @property
         def absorbs_weak_windows(self) -> bool:
@@ -223,6 +233,42 @@ class RedoWindow(StrongWindowPorts):
             chip_faces,
         )
         return _assignment_of(self, held)
+
+    def plan_box(
+        self,
+        weak_job: decoding_records.DecodeJob,
+        box: object,  # the chip's doubtful_box.DoubtfulBox
+    ) -> pending_strong_windows.StrongAssignment:
+        """The job on the chip's doubtful box, built now.
+
+        The box holds the chip's own detection events, the earlier
+        neighbour's committed boundary folded in already, since the
+        window escalated on a final input or on the guess its redo would
+        pin. So the job reads no round, waits for none in the strong
+        syndrome buffer, and pins no face. Its window and model are the
+        redo's own, the chip's window's rows and columns.
+        """
+        region, _faces, model = _redo_of(self, weak_job)
+        key = (weak_job.stream_id, weak_job.window_id)
+        request_key = self.builder.new_request_key(
+            key[0], key[1], self.edge.target
+        )
+        job = _strong_redecode_job(
+            self,
+            weak_job,
+            region.window,
+            model,
+            [],
+            request_key,
+            self.engine.now,
+        )
+        job.request = box
+        return pending_strong_windows.StrongAssignment(
+            request_key,
+            job,
+            round_count=job.round_count,
+            first_round=region.window.start_round,
+        )
 
     def release_conditions(
         self, assignment: pending_strong_windows.StrongAssignment

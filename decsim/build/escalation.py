@@ -18,6 +18,7 @@ import decsim.confidence.gap_join as gap_join_module
 import decsim.confidence.no_signal as no_signal
 import decsim.config as config
 import decsim.engine as engine_module
+import decsim.escalation.doubtful_box as doubtful_box
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.settings as escalation_settings
 import decsim.escalation.strong_redecode as strong_redecode_module
@@ -105,6 +106,7 @@ class Switching:
         )
         if settings.deadline is not None:
             strong_redecode.deadline = settings.deadline.build(engine)
+        strong_redecode.packer = _box_packer(settings, target.settings)
         return cls(
             edge=edge,
             target_store=target.store,
@@ -351,6 +353,36 @@ def escalate_edges_of(switching_parts: tuple) -> escalate_edges.EscalateEdges:
     for part in switching_parts:
         edges.append(part.strong_redecode)
     return escalate_edges.EscalateEdges(tuple(edges))
+
+
+def _box_packer(
+    settings: escalation_settings.SwitchingSettings, target_settings
+) -> Optional[doubtful_box.BoxPacker]:
+    """The chip's packer of the doubtful box, when the redo decodes one.
+
+    The box is packed from the verdict's own result, so a strong decode
+    that starts before the verdict (run_both_at_once, a deadline) has
+    none; and the target's row must read the box, not the rounds.
+    """
+    margin = getattr(settings.strong_window, "box_margin", None)
+    if margin is None:
+        return None
+    if settings.run_both_at_once or settings.deadline is not None:
+        raise ValueError(
+            "switching.strong_window.box_margin packs the box from the "
+            "verdict's result; run_both_at_once and a deadline start the "
+            "strong decode before it (the policies contradict; pick one)"
+        )
+    algorithm = target_settings.algorithm
+    if not getattr(algorithm, "reads_doubtful_box", False):
+        algorithm_class = type(algorithm)
+        row_name = getattr(algorithm, "name", algorithm_class.__name__)
+        raise ValueError(
+            "switching.strong_window.box_margin sends the strong side the "
+            f"doubtful box alone; the target's row {row_name!r} reads a "
+            "window's rounds (use box_correlated_pymatching)"
+        )
+    return doubtful_box.BoxPacker(margin)
 
 
 def _verdict_costs(

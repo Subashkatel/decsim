@@ -243,7 +243,7 @@ class WindowDecoderBase(DecoderBase):
                 job.stream_id, job.window_id
             ), 0
         faults = model.require_faults(self.fault_representation)
-        syndrome = payload_syndrome(job)
+        syndrome = self.job_syndrome(job, faults)
         check_syndrome_size(job, syndrome, faults)
         # the result carries these events, so no backend may write them
         syndrome.setflags(write=False)
@@ -265,6 +265,28 @@ class WindowDecoderBase(DecoderBase):
         result.no_correction_reason = answer.no_correction_reason
         result.evidence = answer.evidence
         return result, finished_ns - started_ns
+
+    def job_syndrome(
+        self,
+        job: decoding_records.DecodeJob,
+        faults: fault_models.PlacedFaultModel,
+    ) -> numpy.ndarray:
+        """The detection events the job's input holds: its landed rounds.
+
+        A row that reads a request its source packed instead of rounds
+        (records/decoding.py DecodeJob.request) says so by its own
+        job_syndrome; any other row refuses such a job.
+        """
+        del faults
+        if job.request is not None:
+            row = type(self)
+            request_class = type(job.request)
+            raise ValueError(
+                f"{job.label}: {row.__name__} reads a window's rounds, and "
+                f"this job carries a packed {request_class.__name__} "
+                "instead; give the edge a strong row that reads it"
+            )
+        return payload_syndrome(job)
 
     def window_answer(
         self,

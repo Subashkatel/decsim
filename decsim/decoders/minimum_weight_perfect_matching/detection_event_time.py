@@ -55,6 +55,10 @@ class DetectionEventTime:
         if detection_events is None:
             return 0
         events = numpy.count_nonzero(detection_events)
+        return self.ticks_for_events(events)
+
+    def ticks_for_events(self, events: int) -> int:
+        """The ticks of a decode that matches this many detection events."""
         growth = events**self.exponent
         event_microseconds = self.coefficient_microseconds * growth
         law_microseconds = self.intercept_microseconds + event_microseconds

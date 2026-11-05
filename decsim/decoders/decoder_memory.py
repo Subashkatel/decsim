@@ -288,10 +288,12 @@ def _check_detector_row_layout(
 
     The operation, the round order and the dense positions in each round
     must match; a wrong layout would decode the wrong syndrome silently.
-    Every model that reaches a job is a WindowErrorModel.
+    Every model that reaches a job is a WindowErrorModel. A job that
+    carries a packed request lands no round: the row that reads the
+    request checks its rows against the model (box_decoder.py).
     """
     model = job.detector_error_model
-    if model is None:
+    if model is None or job.request is not None:
         return
     input_rows = _input_row_identities(job, rounds)
     model_rows = _model_row_identities(

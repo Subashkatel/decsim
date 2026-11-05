@@ -144,6 +144,11 @@ class _Fixture:
         self.courier = _RecordingCourier()
         self.results = _RecordingResults()
         self.escalated = []
+        self.escalation_ticks = []
+        # the cycles the edge's chip packs an escalation's box in, and the
+        # jobs it packed for
+        self.packing_cycles = 0
+        self.packed = []
         self.after_weak = []
         self.kept = []
         self.resolved = []
@@ -173,7 +178,8 @@ class _Fixture:
             target=window_records.STRONG_POOL_ID,
             policy=self.policy,
             decode_queue=self.decode_queue,
-            escalate=self.escalated.append,
+            escalate=self._escalate,
+            pack_request=self._pack,
             submit_if_commit_releases=self.after_weak.append,
             cancel_strong_request=self.kept.append,
             note_source_result=self.noted.append,
@@ -218,6 +224,14 @@ class _Fixture:
         if self.verdicts[job.request_key]:
             return decoding_records.Verdict.ESCALATE
         return decoding_records.Verdict.KEEP
+
+    def _escalate(self, job) -> None:
+        self.escalated.append(job)
+        self.escalation_ticks.append(self.engine.now)
+
+    def _pack(self, job, _result) -> int:
+        self.packed.append(job)
+        return self.packing_cycles
 
     def _is_unavailable(self, job) -> bool:
         return job.request_key in self.unavailable
@@ -484,6 +498,53 @@ def test_a_verdict_without_confidence_pays_no_threshold_cycles():
 
     assert fixture.engine.idle
     assert fixture.reads == [(1, job.request_key)]
+
+
+def test_the_chips_packing_cycles_join_the_switch():
+    """A box redo's packing is the chip's, priced on the switching clock.
+
+    The edge packs as the verdict switches (escalation/doubtful_box.py),
+    so its cycles add to switch_cycles before the escalation leaves.
+    """
+    clock = config.Clock(10)
+    fixture = _Fixture(clock=clock, switch_cycles=3)
+    fixture.packing_cycles = 4
+    fixture.engine.now = 1
+    job = fixture.job(window_records.WEAK_POOL_ID, 0, awaiting=True)
+    result = decoding_records.DecodeResult(4, 1)
+
+    fixture.verdict.accept_revision(job, result)
+    fixture.engine.run()
+
+    assert fixture.packed == [job]
+    assert fixture.escalated == [job]
+    switch_and_packing_cycles = 3 + 4
+    escalation_tick = clock.edge(switch_and_packing_cycles, 1)
+    assert fixture.escalation_ticks == [escalation_tick]
+
+
+def test_a_kept_verdict_packs_nothing():
+    clock = config.Clock(10)
+    fixture = _Fixture(clock=clock)
+    fixture.packing_cycles = 4
+    job = fixture.job(window_records.WEAK_POOL_ID, 0)
+    result = decoding_records.DecodeResult(4, 1, logical_observables=(1, 0))
+
+    fixture.verdict.accept_revision(job, result)
+    fixture.engine.run()
+
+    assert fixture.packed == []
+    assert fixture.escalated == []
+
+
+def test_packing_cycles_with_no_clock_to_count_them_stop_the_run():
+    fixture = _Fixture()
+    fixture.packing_cycles = 4
+    job = fixture.job(window_records.WEAK_POOL_ID, 0, awaiting=True)
+    result = decoding_records.DecodeResult(4, 1)
+
+    with pytest.raises(ValueError, match="switching.clock"):
+        fixture.verdict.accept_revision(job, result)
 
 
 def test_threshold_and_switch_cycles_are_charged_in_sequence():

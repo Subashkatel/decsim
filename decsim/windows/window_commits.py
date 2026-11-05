@@ -440,10 +440,13 @@ class WindowVerdict:
             self._apply_verdict(job, result, verdict, edge)
             return
         costs = edge.rules.costs
-        if costs.switch_cycles == 0:
+        packing_cycles = edge.pack_request(job, result)
+        switch_cycles = costs.switch_cycles + packing_cycles
+        if switch_cycles == 0:
             self._apply_verdict(job, result, verdict, edge)
             return
-        tick = costs.clock.edge(costs.switch_cycles, self.engine.now)
+        _refuse_cycles_without_a_clock(costs.clock, switch_cycles)
+        tick = costs.clock.edge(switch_cycles, self.engine.now)
         delay = tick - self.engine.now
         apply = functools.partial(
             self._apply_verdict, job, result, verdict, edge
@@ -782,3 +785,14 @@ class _TraceSources:
 
     window_committed: trace_source.TraceSource = trace_source.new_source()
     window_final: trace_source.TraceSource = trace_source.new_source()
+
+
+def _refuse_cycles_without_a_clock(clock, cycles: int) -> None:
+    """A switch that takes cycles needs the switching clock to count them."""
+    if clock is not None:
+        return
+    raise ValueError(
+        f"the escalation switch takes {cycles} cycles (switch_cycles and "
+        "the chip's packing of the doubtful box), and neither "
+        "switching.clock nor the machine names a clock to count them on"
+    )

@@ -43,8 +43,8 @@ def cluster_record(
 ) -> ClusterRecord:
     """The counts of one growth and the doubtful clusters of its walk."""
     graph = evidence.graph
-    roots = _cluster_roots(graph, evidence.edge_intervals)
-    events_by_root = _events_by_root(roots, evidence.residual_syndrome)
+    roots = detector_roots(graph, evidence.edge_intervals)
+    events_by_root = cluster_events(roots, evidence.residual_syndrome)
     largest_root = _largest_root(events_by_root)
     largest_events = 0
     largest_edges = 0
@@ -69,7 +69,7 @@ def cluster_record(
     )
 
 
-def _cluster_roots(
+def detector_roots(
     graph: evidence_records.UnionFindGraph, edge_intervals: tuple
 ) -> list:
     """Each detector's cluster, as the lowest detector of that cluster."""
@@ -88,6 +88,18 @@ def _cluster_roots(
     return roots
 
 
+def cluster_events(roots: list, residual_syndrome: tuple) -> dict:
+    """The detection events of each cluster that holds one, keyed by root."""
+    events_by_root = {}
+    for detector, bit in enumerate(residual_syndrome):
+        if not bit:
+            continue
+        root = roots[detector]
+        events = events_by_root.setdefault(root, [])
+        events.append(detector)
+    return events_by_root
+
+
 def _join(parents: list, first: int, second: int) -> None:
     first_root = _root(parents, first)
     second_root = _root(parents, second)
@@ -103,18 +115,6 @@ def _root(parents: list, detector: int) -> int:
         parents[detector] = grandparent
         detector = grandparent
     return detector
-
-
-def _events_by_root(roots: list, residual_syndrome: tuple) -> dict:
-    """The detection events of each cluster that holds one, keyed by root."""
-    events_by_root = {}
-    for detector, bit in enumerate(residual_syndrome):
-        if not bit:
-            continue
-        root = roots[detector]
-        events = events_by_root.setdefault(root, [])
-        events.append(detector)
-    return events_by_root
 
 
 def _largest_root(events_by_root: dict):

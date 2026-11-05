@@ -29,6 +29,7 @@ BUILD_COMMAND = "tools/build_union_find.sh"
 LIBRARY_VARIABLE = "DECSIM_UNION_FIND_LIBRARY"
 _DECODE_SYMBOL = "union_find_decode"
 _CLUSTER_GAP_SYMBOL = "union_find_cluster_gap"
+_CLUSTER_GAP_WALK_SYMBOL = "union_find_cluster_gap_walk"
 _EXTRA_GROWTH_SYMBOL = "union_find_extra_growth"
 
 _OK = 0
@@ -93,6 +94,8 @@ _CLUSTER_GAP_ARGUMENT_TYPES = [
     _TICK_ARRAY,
     _TICK_ARRAY,
 ]
+# the gap's arguments, and the walk's edges
+_CLUSTER_GAP_WALK_ARGUMENT_TYPES = _CLUSTER_GAP_ARGUMENT_TYPES + [_BIT_ARRAY]
 _EXTRA_GROWTH_ARGUMENT_TYPES = [
     ctypes.c_int32,
     ctypes.c_int32,
@@ -245,6 +248,43 @@ def cluster_gap(
     return half_ticks
 
 
+def cluster_gap_walk(
+    graph: evidence_records.UnionFindGraph, edge_intervals: tuple
+) -> tuple:
+    """The cluster gap in half ticks, and the edges of the walk that sets it.
+
+    The edges come back as indices into graph.edges, ascending; none
+    when the growth admits no odd walk. The gap equals cluster_gap's.
+    """
+    edge_count = len(graph.edges)
+    _require_one_interval_per_edge(edge_count, edge_intervals)
+    endpoint_a, endpoint_b, lengths = graph.edge_arrays
+    parities = graph.logical_parities
+    is_closed, lower_tick, upper_tick = _interval_arrays(edge_intervals)
+    gap = numpy.zeros(1, dtype=numpy.int64)
+    walk_edge = numpy.zeros(edge_count, dtype=numpy.uint8)
+    walk = cluster_gap_walk_entry_point()
+    status = walk(
+        graph.detector_count,
+        edge_count,
+        endpoint_a,
+        endpoint_b,
+        lengths,
+        parities,
+        is_closed,
+        lower_tick,
+        upper_tick,
+        gap,
+        walk_edge,
+    )
+    _refuse_failure(status)
+    walk_edges = _selected_edges(walk_edge)
+    half_ticks = int(gap[0])
+    if half_ticks == _UNREACHABLE_GAP:
+        return math.inf, walk_edges
+    return half_ticks, walk_edges
+
+
 def extra_growth(
     graph: evidence_records.UnionFindGraph,
     edge_intervals: tuple,
@@ -314,6 +354,12 @@ def entry_point() -> Callable[..., int]:
 def cluster_gap_entry_point() -> Callable[..., int]:
     """The cluster gap walk, bound once per process."""
     return _bound(_CLUSTER_GAP_SYMBOL, _CLUSTER_GAP_ARGUMENT_TYPES)
+
+
+@functools.cache
+def cluster_gap_walk_entry_point() -> Callable[..., int]:
+    """The cluster gap walk that marks its edges, bound once per process."""
+    return _bound(_CLUSTER_GAP_WALK_SYMBOL, _CLUSTER_GAP_WALK_ARGUMENT_TYPES)
 
 
 @functools.cache

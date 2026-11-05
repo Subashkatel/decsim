@@ -19,6 +19,7 @@ from typing import Any, Optional, Union
 import decsim.build.decoders as decoders_part
 import decsim.build.layout as layout_module
 import decsim.config as config_module
+import decsim.decoders.cluster_record as cluster_record
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.experiments.collect as collect
 import decsim.experiments.refusal as refusal
@@ -204,6 +205,11 @@ class WindowOutcomeRow:
     equals the label. strong_evidence is the escalated window's strong
     decode's own named numbers as json text, belief matching's
     {"matched": 1.0} when its BP did not converge and the matching ran.
+    The cluster columns are the verdict's union-find growth read by
+    decoders/cluster_record.py, on a window whose verdict
+    decode left one: its clusters, and the doubtful clusters the gap's
+    walk crosses, whose detection events are json text of window
+    detector indices.
     """
 
     stream_id: Any  # an opaque identity
@@ -222,6 +228,14 @@ class WindowOutcomeRow:
     weak_answer: Optional[str]
     weak_label: Optional[str]
     strong_evidence: Optional[str]
+    cluster_count: Optional[int] = None
+    largest_cluster_events: Optional[int] = None
+    largest_cluster_edges: Optional[int] = None
+    growth_step_count: Optional[int] = None
+    walk_cluster_count: Optional[int] = None
+    walk_event_count: Optional[int] = None
+    is_walk_through_boundary: Optional[bool] = None
+    walk_detection_events: Optional[str] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1571,7 +1585,7 @@ def _window_outcome_row(
     weak_answer = _bit_cell(verdict.weak_answer)
     weak_label = _bit_cell(verdict.weak_label)
     strong_evidence = _evidence_cell(verdict.strong_evidence)
-    return WindowOutcomeRow(
+    row = WindowOutcomeRow(
         stream_id=stream_id,
         window_index=window_index,
         ownership_kind=outcome.ownership_kind,
@@ -1589,6 +1603,28 @@ def _window_outcome_row(
         weak_label=weak_label,
         strong_evidence=strong_evidence,
     )
+    return _with_cluster_record(row, verdict.clusters)
+
+
+def _with_cluster_record(
+    row: WindowOutcomeRow, clusters: Optional[cluster_record.ClusterRecord]
+) -> WindowOutcomeRow:
+    """The row with its verdict growth's cluster columns, when it left one."""
+    if clusters is None:
+        return row
+    walk_events = list(clusters.walk_detection_events)
+    walk_events_cell = json.dumps(walk_events)
+    return dataclasses.replace(
+        row,
+        cluster_count=clusters.cluster_count,
+        largest_cluster_events=clusters.largest_cluster_events,
+        largest_cluster_edges=clusters.largest_cluster_edges,
+        growth_step_count=clusters.growth_step_count,
+        walk_cluster_count=clusters.walk_cluster_count,
+        walk_event_count=clusters.walk_event_count,
+        is_walk_through_boundary=clusters.is_walk_through_boundary,
+        walk_detection_events=walk_events_cell,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1600,6 +1636,7 @@ class _Verdict:
     weak_answer: Optional[tuple] = None
     weak_label: Optional[tuple] = None
     strong_evidence: Optional[Mapping] = None
+    clusters: Optional[cluster_record.ClusterRecord] = None
 
 
 def _verdict_of(
@@ -1627,9 +1664,24 @@ def _verdict_of(
             len(weak_answer),
         )
     strong_evidence = ledger.strong_evidence.get(window.key)
+    clusters = _clusters_of(weak_result)
     return _Verdict(
-        gap_nats, is_escalated, weak_answer, weak_label, strong_evidence
+        gap_nats,
+        is_escalated,
+        weak_answer,
+        weak_label,
+        strong_evidence,
+        clusters,
     )
+
+
+def _clusters_of(
+    weak_result: decoding_records.DecodeResult,
+) -> Optional[cluster_record.ClusterRecord]:
+    """The verdict decode's cluster record; None when it left no growth."""
+    if weak_result.cluster_evidence is None:
+        return None
+    return cluster_record.cluster_record(weak_result.cluster_evidence)
 
 
 def _window_statuses(observation: observation_module.Observation) -> dict:

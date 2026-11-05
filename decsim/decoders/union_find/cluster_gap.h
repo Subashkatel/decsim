@@ -45,4 +45,19 @@ int32_t union_find_cluster_gap(
     const int64_t *interval_lower_tick, const int64_t *interval_upper_tick,
     int64_t *gap_half_ticks);
 
+/* The same walk, and the edges it crosses.
+ *
+ * The arguments are union_find_cluster_gap's, and walk_edge, sized at
+ * edge_count, receives one for every edge the shortest odd closed walk
+ * crosses any segment of and zero elsewhere: all zero when no walk
+ * exists. When several walks share the shortest length, the one the
+ * search meets first is marked; the gap is the same for all of them.
+ */
+int32_t union_find_cluster_gap_walk(
+    int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
+    const int32_t *endpoint_b, const int64_t *length_half_ticks,
+    const uint8_t *logical_parity, const uint8_t *interval_is_closed,
+    const int64_t *interval_lower_tick, const int64_t *interval_upper_tick,
+    int64_t *gap_half_ticks, uint8_t *walk_edge);
+
 #endif

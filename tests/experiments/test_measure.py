@@ -42,6 +42,7 @@ from typing import Optional
 import numpy
 import pytest
 
+import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.config as config_module
 import decsim.decoders.backend_outcome as backend_outcome
@@ -54,6 +55,7 @@ import decsim.decoders.measured_table.decoder as measured_table
 import decsim.decoders.relay_belief_propagation.decoder as relay_decoder
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.tesseract.decoder as tesseract
+import decsim.decoders.union_find.cycle_count as cycle_count
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.verify_windows as verify_windows
 import decsim.escalation.settings as escalation_settings
@@ -3178,6 +3180,56 @@ def test_a_shot_fails_exactly_when_its_window_answers_miss_their_labels():
     assert "1" in weak_labels
     assert all(row.detection_events is not None for row in rows)
     assert "window_outcomes" not in shot_row
+
+
+def cluster_gap_switching(gap_threshold_db: float) -> graph.Machine:
+    """switching_settings with union-find as the weak row and the cluster gap.
+
+    Union-find on its cycle count and a walk priced at no time, as the
+    escalation tests' gate runs it, so the verdict's decode leaves the
+    growth the cluster columns read.
+    """
+    settings = switching_settings(
+        gap_threshold_db, observation=("record_window_outcomes",)
+    )
+    cycle_count_law = cycle_count.CycleCount(clock=clocks.FRIDGE_CLOCK)
+    union_find_decoder = union_find.UnionFindDecoder.Settings(
+        timing=cycle_count_law
+    )
+    on_union_find = settings.with_settings(
+        machines.WEAK_POOL, algorithm=union_find_decoder
+    )
+    cluster_gap = cluster.ClusterGap.Settings(walk_microseconds=0.0)
+    return on_union_find.with_settings(
+        machines.SWITCHING, confidence=cluster_gap
+    )
+
+
+def test_every_window_the_verdict_read_records_its_clusters():
+    """The verdict's union-find growth gives each row its cluster columns.
+
+    At 20 dB some windows escalate and some are kept; both carry the
+    columns (decoders/cluster_record.py), the doubtful
+    clusters are among the window's clusters, and their detection events
+    are listed.
+    """
+    settings = cluster_gap_switching(20.0)
+    task = task_at(settings, SWITCHING_ERROR_PROBABILITY)
+    decided = []
+    for seed in range(4):
+        measurement = measured(task, seed=seed)
+        rows = measurement.window_outcomes
+        decided.extend(row for row in rows if row.is_escalated is not None)
+    escalated = [row.is_escalated for row in decided]
+    assert True in escalated
+    assert False in escalated
+    for row in decided:
+        walk_events = json.loads(row.walk_detection_events)
+        assert row.cluster_count is not None
+        assert row.growth_step_count is not None
+        assert row.walk_event_count == len(walk_events)
+        assert row.walk_cluster_count <= row.cluster_count
+        assert row.largest_cluster_events <= row.largest_cluster_edges + 1
 
 
 def test_an_escalated_window_records_whether_belief_matching_matched():

@@ -55,7 +55,9 @@ struct gap_inputs {
  * edge_split_base upward, one per coordinate between the first and the
  * last. A segment holds two adjacency slots, one at each of its ends.
  * A search state is 2 * node + parity. source_walked marks the nodes a
- * search has already started from.
+ * search has already started from. adjacency_edge is the edge a slot's
+ * segment belongs to, and a state's predecessor is the state and the
+ * slot it was last reached by, so the edges of a walk can be read back.
  */
 struct workspace {
   int64_t *edge_coordinates;
@@ -66,8 +68,11 @@ struct workspace {
   int32_t *adjacency_neighbor;
   int64_t *adjacency_weight;
   uint8_t *adjacency_parity;
+  int32_t *adjacency_edge;
   int64_t *distance;
   int32_t *distance_stamp;
+  int32_t *predecessor_state;
+  int32_t *predecessor_slot;
   int64_t *heap_distance;
   int32_t *heap_state;
   uint8_t *source_walked;
@@ -81,6 +86,8 @@ struct search {
   int32_t heap_capacity;
   int64_t *distance;
   int32_t *distance_stamp;
+  int32_t *predecessor_state;
+  int32_t *predecessor_slot;
   int32_t generation;
 };
 
@@ -93,8 +100,11 @@ static void release_workspace(struct workspace *workspace) {
   free(workspace->adjacency_neighbor);
   free(workspace->adjacency_weight);
   free(workspace->adjacency_parity);
+  free(workspace->adjacency_edge);
   free(workspace->distance);
   free(workspace->distance_stamp);
+  free(workspace->predecessor_state);
+  free(workspace->predecessor_slot);
   free(workspace->heap_distance);
   free(workspace->heap_state);
   free(workspace->source_walked);
@@ -141,8 +151,14 @@ static int32_t take_quotient_graph(struct workspace *workspace,
       allocate_array(slot_count, sizeof(int64_t), &taken);
   workspace->adjacency_parity =
       allocate_array(slot_count, sizeof(uint8_t), &taken);
+  workspace->adjacency_edge =
+      allocate_array(slot_count, sizeof(int32_t), &taken);
   workspace->distance = allocate_array(state_count, sizeof(int64_t), &taken);
   workspace->distance_stamp =
+      allocate_array(state_count, sizeof(int32_t), &taken);
+  workspace->predecessor_state =
+      allocate_array(state_count, sizeof(int32_t), &taken);
+  workspace->predecessor_slot =
       allocate_array(state_count, sizeof(int32_t), &taken);
   workspace->heap_distance =
       allocate_array(heap_capacity, sizeof(int64_t), &taken);
@@ -283,12 +299,14 @@ static void offsets_from_degrees(struct workspace *workspace,
 }
 
 static void place_slot(struct workspace *workspace, int32_t node,
-                       int32_t neighbor, int64_t weight, uint8_t parity) {
+                       int32_t neighbor, int64_t weight, uint8_t parity,
+                       int32_t edge) {
   int32_t slot = workspace->adjacency_cursor[node];
   workspace->adjacency_cursor[node] = slot + 1;
   workspace->adjacency_neighbor[slot] = neighbor;
   workspace->adjacency_weight[slot] = weight;
   workspace->adjacency_parity[slot] = parity;
+  workspace->adjacency_edge[slot] = edge;
 }
 
 /* One edge's chain: the logical parity rides the first segment, so a
@@ -309,8 +327,8 @@ static void place_edge_segments(const struct gap_inputs *inputs,
     }
     int32_t left = path_node(inputs, workspace, edge, segment, segment_count);
     int32_t right = path_node(inputs, workspace, edge, next, segment_count);
-    place_slot(workspace, left, right, weight, parity);
-    place_slot(workspace, right, left, weight, parity);
+    place_slot(workspace, left, right, weight, parity, edge);
+    place_slot(workspace, right, left, weight, parity, edge);
   }
 }
 
@@ -332,6 +350,8 @@ static void search_over(struct search *search, struct workspace *workspace,
   search->heap_capacity = heap_capacity_for(slot_count);
   search->distance = workspace->distance;
   search->distance_stamp = workspace->distance_stamp;
+  search->predecessor_state = workspace->predecessor_state;
+  search->predecessor_slot = workspace->predecessor_slot;
   search->generation = 0;
 }
 
@@ -418,6 +438,8 @@ static void relax_neighbors(struct search *search,
       continue;
     }
     set_state_distance(search, neighbor_state, candidate);
+    search->predecessor_state[neighbor_state] = state;
+    search->predecessor_slot[neighbor_state] = slot;
     heap_push(search, candidate, neighbor_state);
   }
 }
@@ -452,12 +474,34 @@ static int64_t shortest_odd_walk_from(struct search *search,
   return shortest;
 }
 
+/* The edges one source's shortest odd walk crosses, read back from its
+ * target state along the predecessors this source's search set. Every
+ * state on that chain was reached in this search and popped before it
+ * was relaxed from, so the chain ends at the source. A shorter walk
+ * replaces the marks of a longer one. */
+static void mark_walk_edges(const struct search *search,
+                            const struct workspace *workspace,
+                            int32_t edge_count, int32_t reference_node,
+                            uint8_t *walk_edge) {
+  memset(walk_edge, 0, (size_t)edge_count);
+  int32_t source_state = 2 * reference_node;
+  int32_t state = source_state + 1;
+  while (state != source_state) {
+    int32_t slot = search->predecessor_slot[state];
+    int32_t edge = workspace->adjacency_edge[slot];
+    walk_edge[edge] = 1;
+    state = search->predecessor_state[state];
+  }
+}
+
 /* The odd parity rides an edge's first segment (place_edge_segments),
  * which leaves from the edge's endpoint_a, so those endpoints of the
- * odd edges are the only sources the minimum needs. */
+ * odd edges are the only sources the minimum needs. A null walk_edge
+ * asks for the length alone. */
 static int64_t walk_from_odd_segments(struct search *search,
                                       const struct gap_inputs *inputs,
-                                      struct workspace *workspace) {
+                                      struct workspace *workspace,
+                                      uint8_t *walk_edge) {
   int64_t shortest = unreachable_distance;
   for (int32_t edge = 0; edge < inputs->edge_count; ++edge) {
     if (!inputs->logical_parity[edge]) {
@@ -469,17 +513,23 @@ static int64_t walk_from_odd_segments(struct search *search,
       continue;
     }
     workspace->source_walked[node] = 1;
-    shortest = shortest_odd_walk_from(search, workspace, node, shortest);
+    int64_t found = shortest_odd_walk_from(search, workspace, node, shortest);
+    if (found < shortest && walk_edge != NULL) {
+      mark_walk_edges(search, workspace, inputs->edge_count, node, walk_edge);
+    }
+    shortest = found;
   }
   return shortest;
 }
 
-int32_t union_find_cluster_gap(
+/* The gap of one growth and, when walk_edge is not null, the edges of
+ * the walk that sets it. */
+static int32_t walk_growth(
     int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
     const int32_t *endpoint_b, const int64_t *length_half_ticks,
     const uint8_t *logical_parity, const uint8_t *interval_is_closed,
     const int64_t *interval_lower_tick, const int64_t *interval_upper_tick,
-    int64_t *gap_half_ticks) {
+    int64_t *gap_half_ticks, uint8_t *walk_edge) {
   struct gap_inputs inputs;
   inputs.detector_count = detector_count;
   inputs.edge_count = edge_count;
@@ -507,10 +557,36 @@ int32_t union_find_cluster_gap(
   place_segments(&inputs, &workspace, node_count);
   struct search search;
   search_over(&search, &workspace, slot_count);
-  int64_t shortest = walk_from_odd_segments(&search, &inputs, &workspace);
+  int64_t shortest =
+      walk_from_odd_segments(&search, &inputs, &workspace, walk_edge);
   release_workspace(&workspace);
   if (shortest != unreachable_distance) {
     *gap_half_ticks = shortest;
   }
   return union_find_ok;
+}
+
+int32_t union_find_cluster_gap(
+    int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
+    const int32_t *endpoint_b, const int64_t *length_half_ticks,
+    const uint8_t *logical_parity, const uint8_t *interval_is_closed,
+    const int64_t *interval_lower_tick, const int64_t *interval_upper_tick,
+    int64_t *gap_half_ticks) {
+  return walk_growth(detector_count, edge_count, endpoint_a, endpoint_b,
+                     length_half_ticks, logical_parity, interval_is_closed,
+                     interval_lower_tick, interval_upper_tick, gap_half_ticks,
+                     NULL);
+}
+
+int32_t union_find_cluster_gap_walk(
+    int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
+    const int32_t *endpoint_b, const int64_t *length_half_ticks,
+    const uint8_t *logical_parity, const uint8_t *interval_is_closed,
+    const int64_t *interval_lower_tick, const int64_t *interval_upper_tick,
+    int64_t *gap_half_ticks, uint8_t *walk_edge) {
+  memset(walk_edge, 0, (size_t)edge_count);
+  return walk_growth(detector_count, edge_count, endpoint_a, endpoint_b,
+                     length_half_ticks, logical_parity, interval_is_closed,
+                     interval_lower_tick, interval_upper_tick, gap_half_ticks,
+                     walk_edge);
 }

@@ -66,6 +66,7 @@ import decsim.seeding as seeding
 import decsim.statistics.registry as statistics_registry
 import decsim.topology.graph as topology_graph
 import decsim.topology.graph_layout as graph_layout
+import decsim.trace_source as trace_source
 import decsim.windows.built_window_models as built_window_models
 import decsim.windows.routers as routers
 import decsim.windows.window_release as window_release
@@ -246,6 +247,7 @@ class Machine:
             retention=windows.retention,
             router=windows.router,
         )
+        _connect_fired_errors(qpu.syndrome_source, decoders.pools)
         input_fold = decoders.decoder_manager.input_fold()
         entry_sides = _entry_sides(layout, readout, decoders, windows)
         windows.connect(
@@ -557,6 +559,25 @@ def _entry_side(
         store=store_parts.store,
         is_store_written=store_parts.is_written,
     )
+
+
+def _connect_fired_errors(source: ports.SyndromeSource, pools: tuple) -> None:
+    """A row that reads the shot's fired errors hears them from the source.
+
+    The truth decoder (decoders/truth.py) is the one such row. A source
+    that keeps no errors cannot serve it, so the build refuses the pair.
+    """
+    for pool in pools:
+        decoder = getattr(pool.unit, "decoder", None)
+        if not getattr(decoder, "reads_fired_errors", False):
+            continue
+        if source.errors_sampled is trace_source.SILENT:
+            raise ValueError(
+                f"{pool.plan.names.seat}'s decoder reads the shot's fired "
+                "errors and the QPU source keeps none; name "
+                "qpu.source.type=error_model_stim"
+            )
+        source.errors_sampled.connect(decoder.errors_sampled)
 
 
 def _root_seed(value) -> Optional[int]:

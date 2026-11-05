@@ -394,6 +394,14 @@ bulk_strong serves the strong pool's queued re-decodes as one merged batch (Tosh
 | `dispatch_cycles` | `int` | `0` |
 | `clock` | `Optional[config.Clock]` | `None` |
 
+### `TruthDecoder.Settings`
+
+`decsim/decoders/truth.py`. The time a decode holds the unit, in microseconds.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `latency_microseconds` | `float` | `0.0` |
+
 ### `TesseractCheckedDecoder.Settings`
 
 `decsim/decoders/verify_windows.py`. The referee written around the record of the decoder it checks.

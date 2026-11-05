@@ -61,8 +61,11 @@ class ErrorModelSampler:
             rounds = [detector_rounds[detector] for detector in detectors]
             assert rounds, f"error {error_index} flips no detector"
             observable_bits = _observable_bits(observables, observable_count)
+            # _targets_of sorted the detectors and cancelled repeats
             error = sampled_error_records.FiredError(
-                first_round=min(rounds), logical_observables=observable_bits
+                first_round=min(rounds),
+                logical_observables=observable_bits,
+                detectors=detectors,
             )
             fired.append(error)
         return tuple(fired)

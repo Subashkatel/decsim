@@ -18,7 +18,10 @@ class FiredError:
     window whose commit rounds hold that round owns it, as each window
     owns the faults touching its commit rounds and the earliest such
     window keeps them (detector_error_model/window_placement.py).
+    detectors are the detectors it flips, sorted: with the observables,
+    the identity of its physical fault column (decoders/truth.py).
     """
 
     first_round: int
     logical_observables: tuple[int, ...]
+    detectors: tuple[int, ...] = ()

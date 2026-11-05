@@ -373,16 +373,7 @@ _NEIGHBOURS: dict = {}
 
 def _neighbours(graph: evidence_records.UnionFindGraph) -> list:
     """Each detector's neighbours on the window's graph, cached a graph."""
-    identity = id(graph)
-    entry = _NEIGHBOURS.get(identity)
-    if entry is not None and entry[0]() is graph:
-        return entry[1]
-    neighbours = _neighbour_lists(graph)
-    reference = weakref.ref(
-        graph, lambda _dead: _NEIGHBOURS.pop(identity, None)
-    )
-    _NEIGHBOURS[identity] = (reference, neighbours)
-    return neighbours
+    return _kept_while_the_graph_lives(_NEIGHBOURS, graph, _neighbour_lists)
 
 
 def _neighbour_lists(graph: evidence_records.UnionFindGraph) -> list:
@@ -418,20 +409,31 @@ def _fault_rows(graph: evidence_records.UnionFindGraph) -> numpy.ndarray:
 
     A selected fault's cluster is that row's cluster.
     """
-    identity = id(graph)
-    entry = _FAULT_ROWS.get(identity)
-    if entry is not None and entry[0]() is graph:
-        return entry[1]
+    return _kept_while_the_graph_lives(_FAULT_ROWS, graph, _fault_row_array)
+
+
+def _fault_row_array(graph: evidence_records.UnionFindGraph) -> numpy.ndarray:
+    """_fault_rows, built once a graph and read only."""
     rows = numpy.full(graph.fault_count, -1, dtype=numpy.int64)
     for edge in graph.edges:
         touched = cluster_record.detectors_of(edge)
         rows[edge.fault_index] = touched[0]
     rows.setflags(write=False)
-    reference = weakref.ref(
-        graph, lambda _dead: _FAULT_ROWS.pop(identity, None)
-    )
-    _FAULT_ROWS[identity] = (reference, rows)
     return rows
+
+
+def _kept_while_the_graph_lives(
+    cache: dict, graph: evidence_records.UnionFindGraph, build
+):
+    """build(graph), kept in cache under the graph's identity while it lives."""
+    identity = id(graph)
+    entry = cache.get(identity)
+    if entry is not None and entry[0]() is graph:
+        return entry[1]
+    value = build(graph)
+    reference = weakref.ref(graph, lambda _dead: cache.pop(identity, None))
+    cache[identity] = (reference, value)
+    return value
 
 
 def _last_rounds_read(weak_job: decoding_records.DecodeJob) -> tuple:

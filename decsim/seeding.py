@@ -72,6 +72,19 @@ def bind_run_seed(root_seed: Optional[int], roots: Iterable[tuple]) -> None:
         raise
     for component, reservation in acquired:
         component.commit_run_seed(reservation)
+    walk.give_root_seed_to_readers()
+
+
+@runtime_checkable
+class RootSeedReader(Protocol):
+    """A component that replays a recorded run reads the shot's root seed.
+
+    Its records are kept by the seed each shot ran at, which no derived
+    seed names (escalation/verdicts.py, Replay). It draws nothing.
+    """
+
+    def read_root_seed(self, root_seed: Optional[int]) -> None:
+        """The root seed of the shot about to run."""
 
 
 @runtime_checkable
@@ -262,6 +275,8 @@ class _SeedWalk:
         # (path, component, seed) in preorder; a shared component is
         # planned once, at its first sorted path.
         self.leaves: list[tuple] = []
+        # the components that read the root seed itself, in preorder
+        self.root_seed_readers: list = []
 
     def visit(self, path, component) -> None:
         """Plan the component and, when it is a composite, its children."""
@@ -273,6 +288,11 @@ class _SeedWalk:
         self._plan_leaf(path, component)
         self._visit_children(path, component)
 
+    def give_root_seed_to_readers(self) -> None:
+        """Hand each component that reads the root seed the shot's seed."""
+        for reader in self.root_seed_readers:
+            reader.read_root_seed(self._root_seed)
+
     def _note_path(self, path) -> None:
         encoded = _encode_path(path)
         if encoded in self._encoded_paths:
@@ -281,6 +301,8 @@ class _SeedWalk:
         self._encoded_paths.add(encoded)
 
     def _plan_leaf(self, path, component) -> None:
+        if isinstance(component, RootSeedReader):
+            self.root_seed_readers.append(component)
         if not isinstance(component, RunSeedConsumer):
             return
         seed = None

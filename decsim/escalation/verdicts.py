@@ -20,6 +20,9 @@ learns from by the windows it escalates.
     agreement      keep an ensemble's answer at or above a share of its
                    members agreeing; all of them by default (Shutty et
                    al. 2401.12434 Sec. V)
+    replay         escalate exactly the windows a recorded run
+                   escalated, shot by shot, read from its
+                   window_outcomes.csv
 """
 
 import dataclasses
@@ -28,6 +31,7 @@ from typing import Optional
 import decsim.escalation.target_steps as target_steps
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
+import decsim.records.recorded_rows as recorded_rows
 import decsim.seeding as seeding
 
 KEEP = decoding_records.Verdict.KEEP
@@ -326,6 +330,83 @@ class BacklogBernoulli(seeding.GeneratorSeedConsumer):
         generator = self.generator()
         draw = generator.random()
         if draw < self.steps.target:
+            return ESCALATE
+        return KEEP
+
+
+class Replay:
+    """Escalate exactly the windows a recorded run escalated, shot by shot.
+
+    A study that changes one part of the machine (a decoder that is
+    always right) keeps every switching decision of the run it compares
+    with: recomputing the gap would not do, since the changed answers
+    change the next windows' syndromes. The decisions are the recorded
+    run's window_outcomes.csv (observation.record_window_outcomes), one
+    row per committed window with its seed, stream, window index and
+    is_escalated; a window the run absorbed into a strong region has no
+    row and is never asked here. decisions_path is that file, or the
+    recorded task's pieces folder, read a piece at a time
+    (records/recorded_rows.py). A shot is found by the seed it runs at,
+    so the replay runs the recorded run's seeds; a seed the recording
+    does not hold is refused, not taken as "keep every window".
+    """
+
+    @dataclasses.dataclass(frozen=True)
+    class Settings:
+        """decisions_path is a recorded window_outcomes.csv or its pieces."""
+
+        decisions_path: str
+        name = "replay"
+        reads_threshold = False
+        reads_consensus = False
+        reads_source_queue = False
+
+        def build(self) -> "Replay":
+            """A verdict over the recorded decisions."""
+            return Replay(self.decisions_path)
+
+    def __init__(self, decisions_path: str) -> None:
+        self.decisions_path = decisions_path
+        # (stream text, window index) -> is_escalated, for this shot
+        self.shot_decisions: Optional[dict] = None
+        self.seed: Optional[int] = None
+
+    def read_root_seed(self, root_seed: Optional[int]) -> None:
+        """The shot's seed picks its recorded decisions (seeding.py)."""
+        rows = recorded_rows.rows_of_seed(
+            self.decisions_path, "window_outcomes.csv", root_seed
+        )
+        if rows is None:
+            raise ValueError(
+                f"switching.verdict replay: the recorded run holds no shot "
+                f"of seed {root_seed}"
+            )
+        decisions = {}
+        for row in rows:
+            # a window no verdict decided carries no is_escalated
+            if row["is_escalated"] == "":
+                continue
+            key = (row["stream_id"], int(row["window_index"]))
+            decisions[key] = row["is_escalated"] == "True"
+        self.seed = root_seed
+        self.shot_decisions = decisions
+
+    def decide(
+        self,
+        job: decoding_records.DecodeJob,
+        result: decoding_records.DecodeResult,
+        threshold: ports.ThresholdSource,
+    ) -> decoding_records.Verdict:
+        """The recorded run's decision on this window."""
+        del result, threshold
+        key = (str(job.stream_id), job.window_id)
+        if self.shot_decisions is None or key not in self.shot_decisions:
+            raise ValueError(
+                f"switching.verdict replay: seed {self.seed} has no recorded "
+                f"decision for window {key}; the replay's windows differ "
+                "from the recorded run's"
+            )
+        if self.shot_decisions[key]:
             return ESCALATE
         return KEEP
 

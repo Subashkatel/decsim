@@ -136,9 +136,13 @@ class StagedDecoder(decoder_module.DecoderBase):
         decoder: ports.Decoder,
         timing: UnitTiming,
         batch_decoder: Optional[object] = None,
+        time_replay: Optional[object] = None,
     ):
         self.decoder = decoder
         self.timing = timing
+        # a recorded run's algorithm times (decode_time_replay.py); None
+        # prices the algorithm stage the decoder's own way
+        self.time_replay = time_replay
         # the pool's decode_each row over decoder (batching.py), which
         # decodes a merged batch's members; None decodes a batch as one
         # timing-only job
@@ -162,6 +166,11 @@ class StagedDecoder(decoder_module.DecoderBase):
     def missing_evidence_reasons(self) -> dict:
         """Why the wrapped decoder cannot report a piece of evidence."""
         return self.decoder.missing_evidence_reasons
+
+    def read_root_seed(self, root_seed: Optional[int]) -> None:
+        """A replayed unit finds its shot's recorded times by the seed."""
+        if self.time_replay is not None:
+            self.time_replay.read_root_seed(root_seed)
 
     def run_seed_children(self) -> tuple:
         """The wrapped decoder under the segment decoder."""
@@ -333,7 +342,19 @@ class StagedDecoder(decoder_module.DecoderBase):
             self._enter(running, engine, steps, next_index)
 
         decoder = self._algorithm_for(job)
-        decoder.start(job, engine, on_algorithm_result)
+        if self.time_replay is None:
+            decoder.start(job, engine, on_algorithm_result)
+            return
+        # the answer on this run's input, held for the recorded time
+        ticks = self.time_replay.ticks(job)
+        result = None
+        if not job.cancelled and job.on_done is None:
+            result = decoder.decode(job)
+        engine.schedule(
+            ticks,
+            lambda: on_algorithm_result(result),
+            label=f"decode_done({job.label})",
+        )
 
 
 @dataclasses.dataclass(frozen=True)

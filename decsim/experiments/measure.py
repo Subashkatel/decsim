@@ -19,6 +19,7 @@ from typing import Any, Optional, Union
 import decsim.build.decoders as decoders_part
 import decsim.build.layout as layout_module
 import decsim.config as config_module
+import decsim.decoders.staged_decoder as staged_decoder
 import decsim.experiments.collect as collect
 import decsim.experiments.refusal as refusal
 import decsim.experiments.run_folder as run_folder
@@ -399,6 +400,19 @@ class ShotMeasurement:
     # level it held, as the registry's ValueCounts; stat_values.csv adds
     # them over a task's shots
     statistic_values: list
+    # each decode's algorithm ticks, None unless
+    # observation.record_decode_times; decode_times.csv holds it
+    decode_times: Optional[tuple] = None
+
+
+@dataclasses.dataclass(frozen=True)
+class DecodeTimeRow:
+    """One decode of one shot: its pool, window and algorithm ticks."""
+
+    pool: str
+    stream_id: Any  # an opaque identity
+    window_id: int
+    ticks: int
 
 
 def measure_shot(
@@ -1320,6 +1334,7 @@ def _measurement(
         graph, layout, observation, seed, record_options
     )
     window_outcomes = _shot_window_outcomes(observation, owners)
+    decode_times = _shot_decode_times(graph, observation)
     statistics = observation.statistics.rows()
     statistic_values = observation.statistics.value_counts()
     return ShotMeasurement(
@@ -1378,6 +1393,7 @@ def _measurement(
         window_outcomes=window_outcomes,
         statistics=statistics,
         statistic_values=statistic_values,
+        decode_times=decode_times,
     )
 
 
@@ -1408,6 +1424,29 @@ def _signal_name(
         return switching.confidence.name
     windows = graph.held("windows")
     return windows.recorded_confidence.name
+
+
+def _shot_decode_times(
+    graph: topology_graph.Machine,
+    observation: observation_module.Observation,
+) -> Optional[tuple]:
+    """Each finished decode's algorithm ticks, None unless the run asks.
+
+    A unit is named pool#index (decoders/decoder_unit.py), and a replay
+    keys a decode by its pool, so a pool's units share their times.
+    """
+    if not graph.observation.record_decode_times:
+        return None
+    rows = []
+    for record in observation.stages.records:
+        if record.stage != staged_decoder.ALGORITHM_STAGE or record.cancelled:
+            continue
+        name_parts = record.unit_name.split("#")
+        pool = name_parts[0]
+        ticks = record.end_ticks - record.start_ticks
+        row = DecodeTimeRow(pool, record.stream_id, record.window_id, ticks)
+        rows.append(row)
+    return tuple(rows)
 
 
 def _shot_window_outcomes(

@@ -123,6 +123,12 @@ class DecoderPoolSettings:
     decode_each serves the re-decodes waiting for a unit as one batch,
     decodes each member with the algorithm and prices the batch by its
     law, sum or slowest. Only a pool an edge escalates to batches.
+
+    replayed_decode_times, None by default, is a recorded run's
+    decode_times.csv (observation.record_decode_times): each decode
+    holds the unit for the time the same decode took there, while the
+    algorithm still answers on this run's own input
+    (decoders/decode_time_replay.py).
     """
 
     algorithm: ports.DecoderSettings
@@ -136,6 +142,7 @@ class DecoderPoolSettings:
     copies_boundary_fold: bool = True
     result_blocks_unit: bool = False
     batching: Optional[BatchingSettings] = config.added_field(None)
+    replayed_decode_times: Optional[str] = config.added_field(None)
 
     def __post_init__(self) -> None:
         _check_unit_count(self.unit_count)

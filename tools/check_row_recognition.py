@@ -60,6 +60,7 @@ PORTS = frozenset(
     {
         "ports.Decoder",
         "ports.DetectionEventFormer",
+        "RootSeedReader",
         "RunSeedComposite",
         "RunSeedConsumer",
         "seeding.RunSeedComposite",

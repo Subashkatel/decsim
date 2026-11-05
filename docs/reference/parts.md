@@ -155,7 +155,11 @@ None charges the weak row's own timing: its loop's cycle count on the unit that 
 
 ### `NoSignal.Settings`
 
-`decsim/confidence/no_signal.py`. The none row, which takes no setting.
+`decsim/confidence/no_signal.py`. The none row: the time its step takes, none by default.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `walk_microseconds` | `Optional[float]` | `None` |
 
 ## decsim/controller
 
@@ -362,6 +366,8 @@ result_blocks_unit says when a unit's compute goes back to its pool: False at th
 
 batching, None by default, is the pool's batching row (batching.py): decode_each serves the re-decodes waiting for a unit as one batch, decodes each member with the algorithm and prices the batch by its law, sum or slowest. Only a pool an edge escalates to batches.
 
+replayed_decode_times, None by default, is a recorded run's decode_times.csv (observation.record_decode_times): each decode holds the unit for the time the same decode took there, while the algorithm still answers on this run's own input (decoders/decode_time_replay.py).
+
 | Field | Type | Default |
 | --- | --- | --- |
 | `algorithm` | `ports.DecoderSettings` | required |
@@ -372,6 +378,7 @@ batching, None by default, is the pool's batching row (batching.py): decode_each
 | `copies_boundary_fold` | `bool` | `True` |
 | `result_blocks_unit` | `bool` | `False` |
 | `batching` | `Optional[BatchingSettings]` | `config.added_field(None)` |
+| `replayed_decode_times` | `Optional[str]` | `config.added_field(None)` |
 
 ### `SchedulerSettings`
 
@@ -867,6 +874,14 @@ threshold_decibels is where the rate tracker starts; it steps toward target_esca
 | --- | --- | --- |
 | `steps` | `target_steps.TargetSteps.Settings` | required |
 
+### `Replay.Settings`
+
+`decsim/escalation/verdicts.py`. decisions_path is a recorded window_outcomes.csv or its pieces.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `decisions_path` | `str` | required |
+
 ## decsim/frontends
 
 ### `WorkloadSettings`
@@ -1067,6 +1082,8 @@ folds_windows is a stream's: the run keeps no run-long ledger of windows, frame 
 
 record_window_outcomes keeps each window's committed answer, and its true label when the source keeps its errors (ErrorModelStimDevice), for window_outcomes.csv (observe/window_outcomes.py).
 
+record_decode_times writes each decode's algorithm time, by pool, stream and window, to decode_times.csv: what a pool's replayed_decode_times reads to hold its units as this run did (decoders/decode_time_replay.py).
+
 checkpoint_every_rounds closes a checkpoint of each stream every that many rounds and at its last round: the logical outcome had the stream been read out there, a source copy read out without noise and decoded to the end on the machine's own path at no simulated time (Tan et al. 2209.09219 lines 1003-1037; observe/checkpoints.py). Its rows give the logical error rate of runs of every length from one run (experiments/failure_statistics.py). None, the default, closes none.
 
 series_every_rounds is a stream's: every that many rounds the stream's measures write one row, the windows committed and escalated so far, the reaction times since the row before and each pool's waiting line then (experiments/stream_series.py), so a burst's region and the time a line takes to drain can be read. A shot keeps its whole ledgers and reads none. None, the default, writes none.
@@ -1094,6 +1111,7 @@ The log and the trace are labels (compare=False) and no part of a task's id, as 
 | `folds_windows` | `bool` | `config.added_field(False)` |
 | `checkpoint_every_rounds` | `Optional[int]` | `config.added_field(None)` |
 | `series_every_rounds` | `Optional[int]` | `config.added_field(None)` |
+| `record_decode_times` | `bool` | `config.added_field(False)` |
 | `answer_check_paths` | `tuple` | `config.added_field(())` |
 | `answer_check_thresholds` | `tuple` | `config.added_field(())` |
 

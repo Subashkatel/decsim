@@ -81,6 +81,11 @@ class ObservationSettings:
     (ErrorModelStimDevice), for window_outcomes.csv
     (observe/window_outcomes.py).
 
+    record_decode_times writes each decode's algorithm time, by pool,
+    stream and window, to decode_times.csv: what a pool's
+    replayed_decode_times reads to hold its units as this run did
+    (decoders/decode_time_replay.py).
+
     checkpoint_every_rounds closes a checkpoint of each stream every
     that many rounds and at its last round: the logical outcome had the
     stream been read out there, a source copy read out without noise and
@@ -138,6 +143,7 @@ class ObservationSettings:
     folds_windows: bool = config.added_field(False)
     checkpoint_every_rounds: Optional[int] = config.added_field(None)
     series_every_rounds: Optional[int] = config.added_field(None)
+    record_decode_times: bool = config.added_field(False)
     answer_check_paths: tuple = config.added_field(())
     answer_check_thresholds: tuple = config.added_field(())
 
@@ -157,6 +163,9 @@ class ObservationSettings:
         config.check_boolean("observation.data_movement", self.data_movement)
         config.check_boolean(
             "observation.record_window_outcomes", self.record_window_outcomes
+        )
+        config.check_boolean(
+            "observation.record_decode_times", self.record_decode_times
         )
         config.check_whole_count(
             "observation.first_recorded_round",

@@ -12,6 +12,7 @@ from typing import Optional
 
 import decsim.build.layout as layout_module
 import decsim.config as config
+import decsim.decoders.decode_time_replay as decode_time_replay
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_pool as decoder_pool_module
 import decsim.decoders.detection_events as detection_events_module
@@ -408,7 +409,14 @@ def _staged_unit(
         clock=clocked_engine.clock,
     )
     batch_decoder = _batch_decoder(tier_settings, algorithm)
-    return staged_decoder.StagedDecoder(algorithm, timing, batch_decoder)
+    replay = None
+    if tier_settings.replayed_decode_times is not None:
+        replay = decode_time_replay.DecodeTimeReplay(
+            tier_settings.replayed_decode_times, seat
+        )
+    return staged_decoder.StagedDecoder(
+        algorithm, timing, batch_decoder, time_replay=replay
+    )
 
 
 def _clocked_engine(

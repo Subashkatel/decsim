@@ -173,10 +173,17 @@ class DoubtfulBox:
 
 
 class BoxPacker:
-    """Packs an escalated window's doubtful box from the chip's own growth."""
+    """Packs an escalated window's doubtful box from the chip's own growth.
 
-    def __init__(self, shape: BoxShape) -> None:
+    closes_buffer_boundary walks the gap's graph without the buffer's
+    boundary edges, as the edge's cluster gap does (ClusterGap).
+    """
+
+    def __init__(
+        self, shape: BoxShape, closes_buffer_boundary: bool = False
+    ) -> None:
         self.shape = shape
+        self.closes_buffer_boundary = closes_buffer_boundary
 
     def pack(
         self,
@@ -193,7 +200,13 @@ class BoxPacker:
         roots = numpy.asarray(root_list)
         syndrome = numpy.asarray(evidence.syndrome, dtype=numpy.uint8)
         event_rows = numpy.flatnonzero(syndrome)
-        walk_rows = doubtful_rows(evidence, roots, event_rows, self.shape)
+        walk_rows = doubtful_rows(
+            evidence,
+            roots,
+            event_rows,
+            self.shape,
+            self.closes_buffer_boundary,
+        )
         chosen, volume = shaped_roots(
             graph, coordinates, roots, event_rows, walk_rows, self.shape
         )
@@ -220,10 +233,11 @@ def doubtful_rows(
     roots: numpy.ndarray,
     event_rows: numpy.ndarray,
     shape: BoxShape,
+    closes_buffer_boundary: bool,
 ) -> tuple:
     """The doubtful clusters' detection events, as window rows, ascending."""
     if shape.doubt == "walk":
-        record = cluster_record.cluster_record(evidence)
+        record = cluster_record.cluster_record(evidence, closes_buffer_boundary)
         return record.walk_detection_events
     # the gap's half ticks to nats: nats = half ticks x weight step / 2
     # (confidence/cluster.py gap_half_ticks_to_natural_log_weight)

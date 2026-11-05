@@ -2305,9 +2305,15 @@ class ConfidenceSignal(Protocol):
 
 
 class ConfidenceSettings(Protocol):
-    """A confidence row's settings record, which builds the signal."""
+    """A confidence row's settings record, which builds the signal.
+
+    closes_buffer_boundary says the row's cluster gap walks without the
+    buffer's boundary edges (decsim/confidence/cluster.py ClusterGap),
+    so the cluster record and the doubtful box walk the same graph.
+    """
 
     name: str
+    closes_buffer_boundary: bool
 
     def build(
         self,

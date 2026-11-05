@@ -1395,10 +1395,9 @@ def _measurement(
     is_scored = unscored_reason == ""
     provisional_windows = _provisional_no_correction_windows(observation)
     is_scored_failure = logical_failure and is_scored
-    confidence = _shot_confidence(
-        graph, layout, observation, seed, record_options
-    )
-    window_outcomes = _shot_window_outcomes(observation, owners)
+    signal = _signal_record(graph, layout)
+    confidence = _shot_confidence(signal, observation, seed, record_options)
+    window_outcomes = _shot_window_outcomes(observation, owners, signal)
     decode_times = _shot_decode_times(graph, observation)
     statistics = observation.statistics.rows()
     statistic_values = observation.statistics.value_counts()
@@ -1463,8 +1462,7 @@ def _measurement(
 
 
 def _shot_confidence(
-    graph: topology_graph.Machine,
-    layout: layout_module.Layout,
+    signal: Optional[ports.ConfidenceSettings],
     observation: observation_module.Observation,
     seed: int,
     record_options: collect.RecordOptions,
@@ -1475,20 +1473,22 @@ def _shot_confidence(
         return None
     windows = ledger.windows()
     is_sampled = record_options.samples_confidence_of(seed)
-    signal = _signal_name(graph, layout)
     sampled_shot_count = record_options.confidence_shot_count
-    return ShotConfidence(signal, windows, is_sampled, sampled_shot_count)
+    return ShotConfidence(signal.name, windows, is_sampled, sampled_shot_count)
 
 
-def _signal_name(
+def _signal_record(
     graph: topology_graph.Machine, layout: layout_module.Layout
-) -> str:
-    """The signal's word: the entry edge's, else the recorded one's."""
+) -> Optional[ports.ConfidenceSettings]:
+    """The signal's record: the entry edge's, else the recorded one's.
+
+    None on a run with neither, which keeps no confidence ledger.
+    """
     switching = layout.entry_switching()
     if switching is not None:
-        return switching.confidence.name
+        return switching.confidence
     windows = graph.held("windows")
-    return windows.recorded_confidence.name
+    return windows.recorded_confidence
 
 
 def _shot_decode_times(
@@ -1515,7 +1515,9 @@ def _shot_decode_times(
 
 
 def _shot_window_outcomes(
-    observation: observation_module.Observation, owners: tuple
+    observation: observation_module.Observation,
+    owners: tuple,
+    signal: Optional[ports.ConfidenceSettings],
 ) -> Optional[tuple]:
     """Every delivered window's row, None when the run kept none.
 
@@ -1532,7 +1534,7 @@ def _shot_window_outcomes(
         delivered = outcomes.outcomes_by_operation.get(owner.operation_id, ())
         _check_labels_add_up(delivered, owner.observable_truth)
         for outcome in delivered:
-            row = _window_outcome_row(observation, weights, outcome)
+            row = _window_outcome_row(observation, weights, outcome, signal)
             rows.append(row)
     return tuple(rows)
 
@@ -1567,6 +1569,7 @@ def _window_outcome_row(
     observation: observation_module.Observation,
     weights: dict,
     outcome: window_outcomes_module.WindowOutcome,
+    signal: Optional[ports.ConfidenceSettings],
 ) -> WindowOutcomeRow:
     """One outcome joined with its window's decode and its verdict."""
     stream_id, window_index = outcome.owner_key
@@ -1575,7 +1578,7 @@ def _window_outcome_row(
     tier = None
     if request_key is not None:
         tier = request_key.pool.word
-    verdict = _verdict_of(observation, window)
+    verdict = _verdict_of(observation, window, signal)
     detection_events = weights.get(request_key)
     is_right = None
     if outcome.label is not None:
@@ -1642,8 +1645,13 @@ class _Verdict:
 def _verdict_of(
     observation: observation_module.Observation,
     window: window_records.Window,
+    signal: Optional[ports.ConfidenceSettings],
 ) -> _Verdict:
-    """The confidence ledger's reading of the window, labelled on its rounds."""
+    """The confidence ledger's reading of the window, labelled on its rounds.
+
+    signal is the record of the signal the ledger kept, whose walk the
+    cluster record follows.
+    """
     ledger = observation.confidence
     if ledger is None:
         return _Verdict()
@@ -1664,7 +1672,7 @@ def _verdict_of(
             len(weak_answer),
         )
     strong_evidence = ledger.strong_evidence.get(window.key)
-    clusters = _clusters_of(weak_result)
+    clusters = _clusters_of(weak_result, signal.closes_buffer_boundary)
     return _Verdict(
         gap_nats,
         is_escalated,
@@ -1676,12 +1684,13 @@ def _verdict_of(
 
 
 def _clusters_of(
-    weak_result: decoding_records.DecodeResult,
+    weak_result: decoding_records.DecodeResult, closes_buffer_boundary: bool
 ) -> Optional[cluster_record.ClusterRecord]:
     """The verdict decode's cluster record; None when it left no growth."""
-    if weak_result.cluster_evidence is None:
+    evidence = weak_result.cluster_evidence
+    if evidence is None:
         return None
-    return cluster_record.cluster_record(weak_result.cluster_evidence)
+    return cluster_record.cluster_record(evidence, closes_buffer_boundary)
 
 
 def _window_statuses(observation: observation_module.Observation) -> dict:

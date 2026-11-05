@@ -40,8 +40,13 @@ class ClusterRecord:
 
 def cluster_record(
     evidence: evidence_records.UnionFindHardEvidence,
+    closes_buffer_boundary: bool = False,
 ) -> ClusterRecord:
-    """The counts of one growth and the doubtful clusters of its walk."""
+    """The counts of one growth and the doubtful clusters of its walk.
+
+    closes_buffer_boundary walks the gap's graph without the buffer's
+    boundary edges (confidence/cluster.py ClusterGap).
+    """
     graph = evidence.graph
     roots = detector_roots(graph, evidence.edge_intervals)
     events_by_root = cluster_events(roots, evidence.residual_syndrome)
@@ -51,7 +56,9 @@ def cluster_record(
     if largest_root is not None:
         largest_events = len(events_by_root[largest_root])
         largest_edges = _closed_edge_count(graph, evidence, roots, largest_root)
-    walk = compiled_decoder.cluster_gap_walk(graph, evidence.edge_intervals)
+    walk = compiled_decoder.cluster_gap_walk(
+        graph, evidence.edge_intervals, closes_buffer_boundary
+    )
     walk_half_ticks, walk_edges = walk
     walk_roots = _walk_roots(graph, walk_edges, roots, events_by_root)
     walk_events = _events_of(walk_roots, events_by_root)

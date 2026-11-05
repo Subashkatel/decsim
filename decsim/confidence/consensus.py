@@ -39,6 +39,8 @@ class Consensus:
         """The consensus row, which takes no setting."""
 
         name = "consensus"
+        # it walks no cluster gap, whose walk alone a buffer boundary closes
+        closes_buffer_boundary = False
 
         def build(
             self,

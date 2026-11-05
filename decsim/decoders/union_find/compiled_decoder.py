@@ -29,7 +29,6 @@ BUILD_COMMAND = "tools/build_union_find.sh"
 LIBRARY_VARIABLE = "DECSIM_UNION_FIND_LIBRARY"
 _DECODE_SYMBOL = "union_find_decode"
 _CLUSTER_GAP_SYMBOL = "union_find_cluster_gap"
-_CLUSTER_GAP_WALK_SYMBOL = "union_find_cluster_gap_walk"
 _EXTRA_GROWTH_SYMBOL = "union_find_extra_growth"
 
 _OK = 0
@@ -82,6 +81,7 @@ _DECODE_ARGUMENT_TYPES = [
     _INDEX_ARRAY,
     _INDEX_ARRAY,
 ]
+# the growth's arrays; the walk's edges, or null, follow (_BitArrayOrNull)
 _CLUSTER_GAP_ARGUMENT_TYPES = [
     ctypes.c_int32,
     ctypes.c_int32,
@@ -94,8 +94,6 @@ _CLUSTER_GAP_ARGUMENT_TYPES = [
     _TICK_ARRAY,
     _TICK_ARRAY,
 ]
-# the gap's arguments, and the walk's edges
-_CLUSTER_GAP_WALK_ARGUMENT_TYPES = _CLUSTER_GAP_ARGUMENT_TYPES + [_BIT_ARRAY]
 _EXTRA_GROWTH_ARGUMENT_TYPES = [
     ctypes.c_int32,
     ctypes.c_int32,
@@ -226,79 +224,26 @@ def cluster_gap(
     closes_buffer_boundary leaves the buffer's boundary edges out of the
     walk (Mishima et al. 2605.14637's spatiotemporal complementary gap).
     """
-    edge_count = len(graph.edges)
-    _require_one_interval_per_edge(edge_count, edge_intervals)
-    endpoint_a, endpoint_b, lengths = graph.edge_arrays
-    parities = graph.logical_parities
-    is_closed, lower_tick, upper_tick = _interval_arrays(edge_intervals)
-    if closes_buffer_boundary:
-        is_kept = [not edge.buffer_boundary for edge in graph.edges]
-        kept = numpy.array(is_kept, dtype=bool)
-        endpoint_a = numpy.ascontiguousarray(endpoint_a[kept])
-        endpoint_b = numpy.ascontiguousarray(endpoint_b[kept])
-        lengths = numpy.ascontiguousarray(lengths[kept])
-        parities = numpy.ascontiguousarray(parities[kept])
-        is_closed = numpy.ascontiguousarray(is_closed[kept])
-        lower_tick = numpy.ascontiguousarray(lower_tick[kept])
-        upper_tick = numpy.ascontiguousarray(upper_tick[kept])
-        kept_count = kept.sum()
-        edge_count = int(kept_count)
-    gap = numpy.zeros(1, dtype=numpy.int64)
-    walk = cluster_gap_entry_point()
-    status = walk(
-        graph.detector_count,
-        edge_count,
-        endpoint_a,
-        endpoint_b,
-        lengths,
-        parities,
-        is_closed,
-        lower_tick,
-        upper_tick,
-        gap,
+    half_ticks, _walk_edges = _walk_growth(
+        graph, edge_intervals, closes_buffer_boundary, marks_walk=False
     )
-    _refuse_failure(status)
-    half_ticks = int(gap[0])
-    if half_ticks == _UNREACHABLE_GAP:
-        return math.inf
     return half_ticks
 
 
 def cluster_gap_walk(
-    graph: evidence_records.UnionFindGraph, edge_intervals: tuple
+    graph: evidence_records.UnionFindGraph,
+    edge_intervals: tuple,
+    closes_buffer_boundary: bool = False,
 ) -> tuple:
     """The cluster gap in half ticks, and the edges of the walk that sets it.
 
     The edges come back as indices into graph.edges, ascending; none
-    when the growth admits no odd walk. The gap equals cluster_gap's.
+    when the growth admits no odd walk. The gap and closes_buffer_boundary
+    are cluster_gap's.
     """
-    edge_count = len(graph.edges)
-    _require_one_interval_per_edge(edge_count, edge_intervals)
-    endpoint_a, endpoint_b, lengths = graph.edge_arrays
-    parities = graph.logical_parities
-    is_closed, lower_tick, upper_tick = _interval_arrays(edge_intervals)
-    gap = numpy.zeros(1, dtype=numpy.int64)
-    walk_edge = numpy.zeros(edge_count, dtype=numpy.uint8)
-    walk = cluster_gap_walk_entry_point()
-    status = walk(
-        graph.detector_count,
-        edge_count,
-        endpoint_a,
-        endpoint_b,
-        lengths,
-        parities,
-        is_closed,
-        lower_tick,
-        upper_tick,
-        gap,
-        walk_edge,
+    return _walk_growth(
+        graph, edge_intervals, closes_buffer_boundary, marks_walk=True
     )
-    _refuse_failure(status)
-    walk_edges = _selected_edges(walk_edge)
-    half_ticks = int(gap[0])
-    if half_ticks == _UNREACHABLE_GAP:
-        return math.inf, walk_edges
-    return half_ticks, walk_edges
 
 
 def extra_growth(
@@ -369,13 +314,8 @@ def entry_point() -> Callable[..., int]:
 @functools.cache
 def cluster_gap_entry_point() -> Callable[..., int]:
     """The cluster gap walk, bound once per process."""
-    return _bound(_CLUSTER_GAP_SYMBOL, _CLUSTER_GAP_ARGUMENT_TYPES)
-
-
-@functools.cache
-def cluster_gap_walk_entry_point() -> Callable[..., int]:
-    """The cluster gap walk that marks its edges, bound once per process."""
-    return _bound(_CLUSTER_GAP_WALK_SYMBOL, _CLUSTER_GAP_WALK_ARGUMENT_TYPES)
+    argument_types = [*_CLUSTER_GAP_ARGUMENT_TYPES, _BitArrayOrNull]
+    return _bound(_CLUSTER_GAP_SYMBOL, argument_types)
 
 
 @functools.cache
@@ -412,6 +352,80 @@ def _refuse_failure(status: int) -> None:
         return
     message = _MESSAGE_BY_STATUS[status]
     raise RuntimeError(message)
+
+
+def _walk_growth(
+    graph: evidence_records.UnionFindGraph,
+    edge_intervals: tuple,
+    closes_buffer_boundary: bool,
+    marks_walk: bool,
+) -> tuple:
+    """(gap, walk edges) of one growth; no edges unless marks_walk.
+
+    The edges come back as indices into graph.edges, whichever edges
+    the C side was handed.
+    """
+    edge_count = len(graph.edges)
+    _require_one_interval_per_edge(edge_count, edge_intervals)
+    kept, arrays = _walked_arrays(graph, edge_intervals, closes_buffer_boundary)
+    gap = numpy.zeros(1, dtype=numpy.int64)
+    walk_edge = None
+    if marks_walk:
+        walk_edge = numpy.zeros(len(kept), dtype=numpy.uint8)
+    walk = cluster_gap_entry_point()
+    status = walk(graph.detector_count, len(kept), *arrays, gap, walk_edge)
+    _refuse_failure(status)
+    walk_edges = ()
+    if marks_walk:
+        marked = numpy.flatnonzero(walk_edge)
+        walk_edges = decoder_module.int_tuple(kept[marked])
+    half_ticks = int(gap[0])
+    if half_ticks == _UNREACHABLE_GAP:
+        return math.inf, walk_edges
+    return half_ticks, walk_edges
+
+
+def _walked_arrays(
+    graph: evidence_records.UnionFindGraph,
+    edge_intervals: tuple,
+    closes_buffer_boundary: bool,
+) -> tuple:
+    """(the walked edges' indices, the growth's arrays over those edges).
+
+    closes_buffer_boundary leaves the buffer's boundary edges out.
+    """
+    endpoint_a, endpoint_b, lengths = graph.edge_arrays
+    parities = graph.logical_parities
+    is_closed, lower_tick, upper_tick = _interval_arrays(edge_intervals)
+    arrays = (
+        endpoint_a,
+        endpoint_b,
+        lengths,
+        parities,
+        is_closed,
+        lower_tick,
+        upper_tick,
+    )
+    if not closes_buffer_boundary:
+        every_edge = numpy.arange(len(graph.edges))
+        return every_edge, arrays
+    is_kept = [not edge.buffer_boundary for edge in graph.edges]
+    kept = numpy.flatnonzero(is_kept)
+    kept_arrays = []
+    for array in arrays:
+        kept_array = numpy.ascontiguousarray(array[kept])
+        kept_arrays.append(kept_array)
+    return kept, tuple(kept_arrays)
+
+
+class _BitArrayOrNull:
+    """A bit array argument, or None for the C side's null pointer."""
+
+    @classmethod
+    def from_param(cls, value):
+        if value is None:
+            return None
+        return _BIT_ARRAY.from_param(value)
 
 
 def _selected_edges(selected) -> tuple:

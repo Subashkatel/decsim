@@ -207,6 +207,52 @@ def test_a_closed_buffer_boundary_walks_the_graph_without_those_edges():
     assert lengthened > 0
 
 
+def test_a_closed_walk_marks_the_walk_of_the_graph_without_those_edges():
+    """The walk that marks its edges closes the buffer's boundary as the gap.
+
+    On the same shots of the d5 sliding middle window, the marked walk
+    with the boundary closed costs the closed gap, and its edges are the
+    ones the walk on the graph without the buffer's boundary edges
+    marks, read back as indices into the whole graph.
+    """
+    circuit, models = windows.sliding_windows(
+        SLIDING_DISTANCE, SLIDING_PROBABILITY, REQUIREMENT
+    )
+    model = models[1]
+    graph = window_decoder.graph_from_model(
+        model.graphlike_faults,
+        location="middle window",
+        weight_step=WEIGHT_STEP,
+    )
+    kept_indices = []
+    for edge_index, edge in enumerate(graph.edges):
+        if not edge.buffer_boundary:
+            kept_indices.append(edge_index)
+    sampled, _observables = windows.sampled_shots(
+        circuit, SLIDING_SHOTS, CIRCUIT_SEED
+    )
+    walked = 0
+    for shot in sampled:
+        syndrome = windows.row_syndrome(model, shot)
+        result = window_decoder.decode_graph(graph, syndrome)
+        intervals = result.edge_intervals
+        closed_gap = compiled_decoder.cluster_gap(
+            graph, intervals, closes_buffer_boundary=True
+        )
+        gap, walk_edges = compiled_decoder.cluster_gap_walk(
+            graph, intervals, closes_buffer_boundary=True
+        )
+        smaller, kept = _without_buffer_boundary(graph, intervals)
+        _smaller_gap, smaller_edges = compiled_decoder.cluster_gap_walk(
+            smaller, kept
+        )
+        read_back = tuple(kept_indices[index] for index in smaller_edges)
+        assert gap == closed_gap
+        assert walk_edges == read_back
+        walked += len(walk_edges) > 0
+    assert walked > 0
+
+
 def test_the_property_corpus_of_random_small_graphs_matches_the_moved_walk():
     """Two hundred random graphs, one growth each, walk for walk."""
     walk_random_graphs(RANDOM_GRAPH_COUNT, RANDOM_GRAPH_SEED)

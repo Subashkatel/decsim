@@ -47,6 +47,7 @@ class DeclaredTwoSolves:
         """The declared two-solve signal, as the switching slot names it."""
 
         name = "declared_two_solves"
+        closes_buffer_boundary = False
 
         def build(self, weak_algorithm, threshold_nats):
             """The signal; it reads neither the decoder nor the threshold."""

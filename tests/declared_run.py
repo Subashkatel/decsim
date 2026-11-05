@@ -120,6 +120,7 @@ class DeclaredConfidence:
         """The declared signal, as the switching slot names it."""
 
         name = "declared_confidence"
+        closes_buffer_boundary = False
 
         def build(self, weak_algorithm, threshold_nats):
             """The signal; it reads neither the decoder nor the threshold."""

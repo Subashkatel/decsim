@@ -522,9 +522,7 @@ static int64_t walk_from_odd_segments(struct search *search,
   return shortest;
 }
 
-/* The gap of one growth and, when walk_edge is not null, the edges of
- * the walk that sets it. */
-static int32_t walk_growth(
+int32_t union_find_cluster_gap(
     int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
     const int32_t *endpoint_b, const int64_t *length_half_ticks,
     const uint8_t *logical_parity, const uint8_t *interval_is_closed,
@@ -541,6 +539,9 @@ static int32_t walk_growth(
   inputs.interval_lower_tick = interval_lower_tick;
   inputs.interval_upper_tick = interval_upper_tick;
   *gap_half_ticks = union_find_cluster_gap_unreachable;
+  if (walk_edge != NULL) {
+    memset(walk_edge, 0, (size_t)edge_count);
+  }
   struct workspace workspace;
   if (!take_edge_layout(&workspace, edge_count)) {
     release_workspace(&workspace);
@@ -564,29 +565,4 @@ static int32_t walk_growth(
     *gap_half_ticks = shortest;
   }
   return union_find_ok;
-}
-
-int32_t union_find_cluster_gap(
-    int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
-    const int32_t *endpoint_b, const int64_t *length_half_ticks,
-    const uint8_t *logical_parity, const uint8_t *interval_is_closed,
-    const int64_t *interval_lower_tick, const int64_t *interval_upper_tick,
-    int64_t *gap_half_ticks) {
-  return walk_growth(detector_count, edge_count, endpoint_a, endpoint_b,
-                     length_half_ticks, logical_parity, interval_is_closed,
-                     interval_lower_tick, interval_upper_tick, gap_half_ticks,
-                     NULL);
-}
-
-int32_t union_find_cluster_gap_walk(
-    int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
-    const int32_t *endpoint_b, const int64_t *length_half_ticks,
-    const uint8_t *logical_parity, const uint8_t *interval_is_closed,
-    const int64_t *interval_lower_tick, const int64_t *interval_upper_tick,
-    int64_t *gap_half_ticks, uint8_t *walk_edge) {
-  memset(walk_edge, 0, (size_t)edge_count);
-  return walk_growth(detector_count, edge_count, endpoint_a, endpoint_b,
-                     length_half_ticks, logical_parity, interval_is_closed,
-                     interval_lower_tick, interval_upper_tick, gap_half_ticks,
-                     walk_edge);
 }

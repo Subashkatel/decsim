@@ -44,9 +44,12 @@ A decoder that grows clusters also holds a weight_step and a timing, which a clu
 
 `decsim/ports.py`. A confidence row's settings record, which builds the signal.
 
+closes_buffer_boundary says the row's cluster gap walks without the buffer's boundary edges (decsim/confidence/cluster.py ClusterGap), so the cluster record and the doubtful box walk the same graph.
+
 | Member | Type |
 | --- | --- |
 | `name` | `str` |
+| `closes_buffer_boundary` | `bool` |
 | `build(self, weak_algorithm: DecoderSettings, threshold_nats: Optional[float])` | `ConfidenceSignal` |
 
 ### `CouplingOrderSettings`

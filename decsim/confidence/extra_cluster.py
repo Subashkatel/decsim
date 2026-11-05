@@ -106,6 +106,8 @@ class ExtraClusterGap:
         walk_microseconds: Optional[float] = None
         # the word the reports name this row by
         name = "extra_cluster_gap"
+        # it walks no cluster gap, whose walk alone a buffer boundary closes
+        closes_buffer_boundary = False
 
         def __post_init__(self) -> None:
             if self.walk_microseconds is None:

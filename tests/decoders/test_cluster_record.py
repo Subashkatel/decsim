@@ -1,8 +1,8 @@
 """The cluster record beside the walk and the clusters it is held to.
 
 The row under test is decsim/decoders/cluster_record.py with
-the walk entry point that marks its edges (union_find_cluster_gap_walk
-in decsim/decoders/union_find/cluster_gap.c). The gap entry point is the
+the entry point's walk that marks its edges (union_find_cluster_gap
+in decsim/decoders/union_find/cluster_gap.c). The gap alone is the
 oracle for the walk's length; the marked edges must cost exactly that
 length; and scipy's connected components, a second reading of which
 detectors the covered edges join, is the oracle for the clusters.

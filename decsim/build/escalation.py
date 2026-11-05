@@ -387,7 +387,7 @@ def _box_packer(
 
     The box is packed from the verdict's own result, so a strong decode
     that starts before the verdict (run_both_at_once, a deadline) has
-    none.
+    none. Its walk is the edge's cluster gap's, on the same graph.
     """
     shape = settings.strong_window.box_shape()
     if shape is None:
@@ -398,7 +398,8 @@ def _box_packer(
             "verdict's result; run_both_at_once and a deadline start the "
             "strong decode before it (the policies contradict; pick one)"
         )
-    return doubtful_box.BoxPacker(shape)
+    closes_buffer_boundary = settings.confidence.closes_buffer_boundary
+    return doubtful_box.BoxPacker(shape, closes_buffer_boundary)
 
 
 def _verdict_costs(

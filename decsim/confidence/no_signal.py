@@ -45,6 +45,8 @@ class NoSignal:
         walk_microseconds: Optional[float] = None
         # the word the reports name this row by
         name = "none"
+        # it walks no cluster gap, whose walk alone a buffer boundary closes
+        closes_buffer_boundary = False
 
         def __post_init__(self) -> None:
             if self.walk_microseconds is not None:

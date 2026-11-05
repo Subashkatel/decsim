@@ -22,7 +22,7 @@
 /* The gap when no odd closed walk exists at all. */
 enum { union_find_cluster_gap_unreachable = -1 };
 
-/* Walk one growth's quotient graph.
+/* Walk one growth's quotient graph, and mark the edges of its walk.
  *
  * The graph is the decode's: a detector index is a row of the
  * syndrome, -1 is the boundary, a length is in half ticks, and a
@@ -34,26 +34,16 @@ enum { union_find_cluster_gap_unreachable = -1 };
  * logical_parity, interval_is_closed, interval_lower_tick and
  * interval_upper_tick at edge_count, and gap_half_ticks at one.
  * gap_half_ticks receives the gap, or union_find_cluster_gap_unreachable
- * when the growth admits no odd closed walk. The return value is an
- * enum union_find_status, and on anything but union_find_ok
- * gap_half_ticks holds the unreachable sentinel.
+ * when the growth admits no odd closed walk. walk_edge, when not null,
+ * is sized at edge_count and receives one for every edge the shortest
+ * odd closed walk crosses any segment of and zero elsewhere: all zero
+ * when no walk exists. When several walks share the shortest length,
+ * the one the search meets first is marked; the gap is the same for
+ * all of them. A null walk_edge asks for the gap alone. The return
+ * value is an enum union_find_status, and on anything but
+ * union_find_ok gap_half_ticks holds the unreachable sentinel.
  */
 int32_t union_find_cluster_gap(
-    int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
-    const int32_t *endpoint_b, const int64_t *length_half_ticks,
-    const uint8_t *logical_parity, const uint8_t *interval_is_closed,
-    const int64_t *interval_lower_tick, const int64_t *interval_upper_tick,
-    int64_t *gap_half_ticks);
-
-/* The same walk, and the edges it crosses.
- *
- * The arguments are union_find_cluster_gap's, and walk_edge, sized at
- * edge_count, receives one for every edge the shortest odd closed walk
- * crosses any segment of and zero elsewhere: all zero when no walk
- * exists. When several walks share the shortest length, the one the
- * search meets first is marked; the gap is the same for all of them.
- */
-int32_t union_find_cluster_gap_walk(
     int32_t detector_count, int32_t edge_count, const int32_t *endpoint_a,
     const int32_t *endpoint_b, const int64_t *length_half_ticks,
     const uint8_t *logical_parity, const uint8_t *interval_is_closed,

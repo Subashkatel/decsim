@@ -12,8 +12,10 @@ each edge at the length its posterior gives.
 The paper returns a converged BP's own correction (Sec. I); this row
 grows every time, one fixed pipeline, so every decode carries the
 growth evidence the cluster gap and the cycle count read. A converged
-BP's posteriors sit near zero or one, and on SD6 memories at d = 5 to
-11 the growth on them gave BP's logical class on every converged shot.
+BP's posteriors sit near zero or one, and the growth on them gives BP's
+logical class on every converged shot of the row's test (tests/decoders/
+test_union_find_belief_find.py: 200 shots of a d = 3, 3-round memory at
+p = 0.005); no wider sweep is in the tree.
 
 The unit spends the BP iterations at a stated time each, then the
 growth's own cycles. Relay-BP's FPGA runs one iteration in 24 ns

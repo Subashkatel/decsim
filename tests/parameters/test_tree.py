@@ -17,6 +17,7 @@ import decsim.parameters.fields as fields
 import decsim.parameters.tree as tree
 import decsim.presets.machines as machines
 import tests.experiments.run_files as run_files
+from decsim.decoders.union_find import cycle_count
 from decsim.decoders.union_find import decoder as union_find
 
 ORIGIN = "a test"
@@ -137,6 +138,27 @@ def test_a_type_assignment_swaps_the_part_and_its_parameters_follow():
     algorithm = pool.settings.algorithm
     expected = union_find.UnionFindDecoder.Settings(
         weight_step=0.5, timing=run_files.HOST_TIME
+    )
+    assert algorithm == expected
+
+
+def test_a_weak_decode_is_given_a_stated_time_by_name():
+    """The weak 0 us run: the union-find row keeps its weight step."""
+    machine = run_files.minimal_machine()
+
+    assigned = _applied(
+        machine,
+        ("weak.algorithm.type", "union_find"),
+        ("weak.algorithm.timing.type", "PresetTime"),
+        ("weak.algorithm.timing.latency", "0us"),
+        ("weak.algorithm.weight_step", 0.1),
+    )
+
+    pool = assigned.part("weak")
+    algorithm = pool.settings.algorithm
+    no_time = cycle_count.PresetTime(latency_microseconds=0.0)
+    expected = union_find.UnionFindDecoder.Settings(
+        weight_step=0.1, timing=no_time
     )
     assert algorithm == expected
 

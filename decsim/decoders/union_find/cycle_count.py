@@ -249,8 +249,46 @@ class HostMeasuredTime:
         return _measured_ticks(elapsed_nanoseconds)
 
 
-# What prices a union-find unit's time: its cycle count or the host's.
-Timing = Union[CycleCount, HostMeasuredTime]
+@dataclasses.dataclass(frozen=True)
+class PresetTime:
+    """A union-find unit held for one stated time, whatever the decode.
+
+    The decode still runs and gives its correction and its growth; only
+    the time it holds the unit is set. It is a model, not hardware: zero
+    asks what the latency would be if the weak decode took no time. The
+    extra growth takes the same stated time. The engine's fetch and
+    release are priced apart and are not changed.
+    """
+
+    latency_microseconds: float = 0.0
+
+    def __post_init__(self) -> None:
+        config.check_microseconds(
+            "preset_time.latency_microseconds", self.latency_microseconds
+        )
+
+    def decode_ticks(
+        self,
+        evidence: Optional[evidence_records.UnionFindHardEvidence],
+        elapsed_nanoseconds: int,
+        now: int,
+    ) -> int:
+        """The stated time in ticks."""
+        del evidence
+        del elapsed_nanoseconds
+        del now
+        return config.microseconds_to_ticks(self.latency_microseconds)
+
+    def extra_growth_ticks(self, steps: tuple, elapsed_nanoseconds: int) -> int:
+        """The stated time in ticks."""
+        del steps
+        del elapsed_nanoseconds
+        return config.microseconds_to_ticks(self.latency_microseconds)
+
+
+# What prices a union-find unit's time: its cycle count, the host's, or a
+# stated time.
+Timing = Union[CycleCount, HostMeasuredTime, PresetTime]
 
 
 def _measured_ticks(elapsed_nanoseconds: int) -> int:

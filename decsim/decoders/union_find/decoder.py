@@ -44,10 +44,10 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         tick of edge length is (Huang, Newman and Brown 2004.04693): the
         smaller it is, the longer every edge and the more growth
         iterations a decode spans. timing prices the decode: a cycle
-        count (cycle_count.CycleCount) or
-        cycle_count.HostMeasuredTime(). A run names one; none is
-        refused, since the host's time is no hardware's and is never
-        assumed.
+        count (cycle_count.CycleCount),
+        cycle_count.HostMeasuredTime(), or a stated time
+        (cycle_count.PresetTime). A run names one; none is refused,
+        since the host's time is no hardware's and is never assumed.
         """
 
         weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP

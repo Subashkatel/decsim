@@ -324,6 +324,47 @@ def test_the_host_measured_time_holds_the_unit_for_what_the_call_took():
     assert host_time.extra_growth_ticks((), 2000) == two_microseconds
 
 
+def test_a_preset_time_holds_the_unit_for_the_stated_time_and_still_decodes():
+    """Zero microseconds frees the unit at once; the correction is the decode's.
+
+    The same two adjacent defects as the counted unit's test: the unit
+    selects the same one fault, and frees at the tick it started.
+    """
+    engine = engine_module.Engine()
+    preset = cycle_count_module.PresetTime(latency_microseconds=0.0)
+    settings = union_find.UnionFindDecoder.Settings(timing=preset)
+    decoder = union_find.UnionFindDecoder(settings=settings)
+    timing = staged_decoder.UnitTiming((), (), CLOCK)
+    unit = staged_decoder.StagedDecoder(decoder, timing)
+    model = hand_graph._model()
+    syndrome = numpy.zeros(hand_graph.DETECTOR_COUNT, dtype=numpy.uint8)
+    syndrome[[8, 9]] = 1
+    job = hand_graph._job(model, syndrome)
+    delivered = []
+
+    def on_result(result):
+        delivered.append((engine.now, result))
+
+    unit.start(job, engine, on_result)
+    engine.run()
+    ((tick, result),) = delivered
+    selected = result.cluster_evidence.selected_faults
+    assert tick == 0
+    assert selected[9] == 1
+    assert sum(selected) == 1
+
+
+def test_a_preset_time_is_the_same_for_every_decode_and_growth():
+    """The stated time, whatever the evidence or the host's time."""
+    preset = cycle_count_module.PresetTime(latency_microseconds=2.0)
+    two_microseconds = config.microseconds_to_ticks(2.0)
+
+    assert preset.decode_ticks(None, 999_999, 7) == two_microseconds
+    assert preset.extra_growth_ticks((), 5) == two_microseconds
+    with pytest.raises(ValueError, match="preset_time.latency_microseconds"):
+        cycle_count_module.PresetTime(latency_microseconds=-1.0)
+
+
 def test_a_negative_field_is_refused_by_name():
     with pytest.raises(ValueError, match="cycle_count.setup_cycles"):
         cycle_count_module.CycleCount(CLOCK, setup_cycles=-1)

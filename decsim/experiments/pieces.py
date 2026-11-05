@@ -27,6 +27,7 @@ import decsim.experiments.refusal as refusal
 import decsim.experiments.report as report
 import decsim.experiments.run_folder as run_folder
 import decsim.ports as ports
+import decsim.records.recorded_rows as recorded_rows
 
 PIECES_FOLDER = "pieces"
 PIECE_FILE = "piece.json"
@@ -38,9 +39,9 @@ def piece_dir(
     experiment_dir: pathlib.Path, task_id: str, first_seed: int, count: int
 ) -> pathlib.Path:
     """Where the piece's folder is: its task, then its first and last seed."""
-    last_seed = first_seed + count - 1
     task_dir = experiment_dir / PIECES_FOLDER / task_id
-    return task_dir / f"{first_seed}-{last_seed}"
+    name = recorded_rows.piece_name(first_seed, count)
+    return task_dir / name
 
 
 def write(
@@ -278,8 +279,9 @@ def _whole_pieces(task_dir: pathlib.Path) -> list:
 
 def _range_of(folder: pathlib.Path) -> tuple:
     """(first seed, count) from a piece folder's <first>-<last> name."""
-    first_text, last_text = folder.name.split("-")
-    first_seed = int(first_text)
-    last_seed = int(last_text)
-    count = last_seed - first_seed + 1
-    return (first_seed, count)
+    seed_range = recorded_rows.piece_range(folder.name)
+    if seed_range is None:
+        raise ValueError(
+            f"{folder} is no piece: a piece folder is named <first>-<last>"
+        )
+    return seed_range

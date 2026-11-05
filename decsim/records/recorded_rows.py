@@ -6,7 +6,9 @@ shots write gigabytes of rows, more than every job of a replay should
 hold, so a recording may be given as its task's pieces folder
 (pieces/TASK_ID, one FIRST-LAST folder per piece of seeds FIRST to LAST)
 and only the piece holding the seed is read, a few kept at a time. A
-single file is read whole, for small recordings and tests.
+single file is read whole, for small recordings and tests. The piece
+folder's name is made and read here alone (piece_name, piece_range),
+for the writer (experiments/pieces.py) and this reader.
 """
 
 import csv
@@ -34,23 +36,38 @@ def rows_of_seed(path: str, file_name: str, seed: int) -> Optional[list]:
     return piece_rows.get(seed, [])
 
 
+def piece_name(first_seed: int, count: int) -> str:
+    """The folder name of a piece of count seeds from first_seed."""
+    last_seed = first_seed + count - 1
+    return f"{first_seed}-{last_seed}"
+
+
+def piece_range(name: str) -> Optional[tuple]:
+    """(first seed, count) a piece folder's name holds; None for another."""
+    first, _separator, last = name.partition("-")
+    if not (first.isdigit() and last.isdigit()):
+        return None
+    first_seed = int(first)
+    count = int(last) - first_seed + 1
+    return first_seed, count
+
+
 @functools.lru_cache(maxsize=1)
 def _pieces(folder: str) -> tuple:
-    """(first seed, last seed, folder) of every piece, by first seed."""
+    """(first seed, count, folder) of every piece, by first seed."""
     pieces = []
     folder_path = pathlib.Path(folder)
     for child in folder_path.iterdir():
-        first, separator, last = child.name.partition("-")
-        is_seed_range = first.isdigit() and last.isdigit()
-        is_piece_name = bool(separator) and is_seed_range
-        if child.is_dir() and is_piece_name:
-            pieces.append((int(first), int(last), child))
+        seed_range = piece_range(child.name)
+        if child.is_dir() and seed_range is not None:
+            first_seed, count = seed_range
+            pieces.append((first_seed, count, child))
     return tuple(sorted(pieces))
 
 
 def _piece_of(folder: str, seed: int) -> Optional[pathlib.Path]:
-    for first, last, piece in _pieces(folder):
-        if first <= seed <= last:
+    for first_seed, count, piece in _pieces(folder):
+        if first_seed <= seed < first_seed + count:
             return piece
     return None
 

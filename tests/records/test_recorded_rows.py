@@ -59,3 +59,16 @@ def test_a_seed_a_piece_ran_without_rows_is_empty_and_an_unrun_seed_is_none(
         recorded_rows.rows_of_seed(str(pieces), "window_outcomes.csv", 10)
         is None
     )
+
+
+def test_a_piece_name_reads_back_as_the_seeds_it_was_made_from():
+    name = recorded_rows.piece_name(10, 5)
+
+    assert name == "10-14"
+    assert recorded_rows.piece_range(name) == (10, 5)
+
+
+def test_a_folder_name_of_no_seed_range_is_no_piece():
+    assert recorded_rows.piece_range(".staging-10-14") is None
+    assert recorded_rows.piece_range("10") is None
+    assert recorded_rows.piece_range("10-14-2") is None

@@ -797,7 +797,9 @@ restart_reread_buffer_regions is how many of the strong region's buffer regions 
 
 ### `TargetSteps.Settings`
 
-`decsim/escalation/target_steps.py`. The levels, the start, the cadence, the trend's tests and the pool whose line the loop watches: "source" (the weak tier) or "target" (the strong tier).
+`decsim/escalation/target_steps.py`. The loop's levels, its start, its cadence and its trend's tests.
+
+watched_pool is the pool whose line the loop watches: "source" (the weak tier) or "target" (the strong tier).
 
 | Field | Type | Default |
 | --- | --- | --- |

@@ -33,9 +33,11 @@ class TargetSteps:
 
     @dataclasses.dataclass(frozen=True)
     class Settings:
-        """The levels, the start, the cadence, the trend's tests and the
-        pool whose line the loop watches: "source" (the weak tier) or
-        "target" (the strong tier)."""
+        """The loop's levels, its start, its cadence and its trend's tests.
+
+        watched_pool is the pool whose line the loop watches: "source"
+        (the weak tier) or "target" (the strong tier).
+        """
 
         start: float
         levels: tuple = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)

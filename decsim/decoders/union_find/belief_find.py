@@ -128,16 +128,24 @@ class BeliefFindDecoder(union_find.UnionFindDecoder):
         """The growth's correction on the posterior lengths, and BP's steps."""
         del model
         del faults
-        belief_propagation = backend.belief_propagation
-        belief_propagation.decode(syndrome)
-        iterations = int(belief_propagation.iter)
-        posteriors = belief_matching.edge_posteriors(
-            belief_propagation, backend.edge_from_hyperedge
-        )
-        graph = posterior_graph(backend.graph, posteriors)
-        evidence = window_decoder.decode_graph(graph, syndrome)
+        iterations, _graph, evidence = grow_on_posteriors(backend, syndrome)
         decode = union_find.window_decode_of(evidence)
         return dataclasses.replace(decode, iterations=iterations)
+
+
+def grow_on_posteriors(
+    backend: BeliefFindBackend, syndrome: numpy.ndarray
+) -> tuple:
+    """(BP's iterations, the posterior graph, the growth on it)."""
+    belief_propagation = backend.belief_propagation
+    belief_propagation.decode(syndrome)
+    iterations = int(belief_propagation.iter)
+    posteriors = belief_matching.edge_posteriors(
+        belief_propagation, backend.edge_from_hyperedge
+    )
+    graph = posterior_graph(backend.graph, posteriors)
+    evidence = window_decoder.decode_graph(graph, syndrome)
+    return iterations, graph, evidence
 
 
 def posterior_graph(

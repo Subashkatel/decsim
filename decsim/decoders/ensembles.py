@@ -454,10 +454,7 @@ def selection_weight(
     priors = numpy.asarray(faults.priors, dtype=float)
     selected = numpy.asarray(result.selected_faults, dtype=bool)
     chosen = priors[selected]
-    with numpy.errstate(divide="ignore"):
-        weights = numpy.log1p(-chosen) - numpy.log(chosen)
-    total = numpy.sum(weights)
-    return float(total)
+    return _summed_log_odds(chosen)
 
 
 def correlated_selection_weight(
@@ -478,6 +475,11 @@ def correlated_selection_weight(
         )
     selected = numpy.flatnonzero(result.selected_faults)
     probabilities = correlated_decoder.partnered_probabilities(model, selected)
+    return _summed_log_odds(probabilities)
+
+
+def _summed_log_odds(probabilities: numpy.ndarray) -> float:
+    """The sum of log((1 - p) / p); +inf when a p is zero."""
     with numpy.errstate(divide="ignore"):
         weights = numpy.log1p(-probabilities) - numpy.log(probabilities)
     total = numpy.sum(weights)

@@ -20,6 +20,7 @@ import scipy.sparse
 
 import decsim.config as config
 import decsim.engine as engine_module
+import decsim.ports as ports
 import decsim.records.decoding as decoding_records
 import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
@@ -109,9 +110,7 @@ class DecoderBase(abc.ABC):
     def _deliver(
         self, job: decoding_records.DecodeJob, on_result: OnResult
     ) -> None:
-        result = None
-        if not job.cancelled and job.on_done is None:
-            result = self.decode(job)
+        result = delivered_result(self, job)
         on_result(result)
 
     def ticks_after_decode(
@@ -341,6 +340,19 @@ class WindowDecoderBase(DecoderBase):
 # compile key -> {model identity: (model reference, backend)}, the
 # backends every row of one kind and settings shares in this process
 _SHARED_BACKENDS: dict = {}
+
+
+def delivered_result(
+    decoder: ports.Decoder, job: decoding_records.DecodeJob
+) -> Optional[decoding_records.DecodeResult]:
+    """The decode a finished job hands on.
+
+    A cancelled job and a job without a window (on_done) hand on None:
+    their unit time is charged, no correction is computed.
+    """
+    if job.cancelled or job.on_done is not None:
+        return None
+    return decoder.decode(job)
 
 
 def timed_decode(

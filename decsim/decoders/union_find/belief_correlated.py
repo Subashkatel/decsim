@@ -20,7 +20,6 @@ import dataclasses
 
 import numpy
 
-import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.union_find.belief_find as belief_find
 import decsim.decoders.union_find.correlated_decoder as correlated_decoder
 import decsim.decoders.union_find.decoder as union_find
@@ -82,14 +81,8 @@ class BeliefCorrelatedDecoder(belief_find.BeliefFindDecoder):
         del model
         del faults
         belief = backend.belief
-        belief_propagation = belief.belief_propagation
-        belief_propagation.decode(syndrome)
-        iterations = int(belief_propagation.iter)
-        posteriors = belief_matching.edge_posteriors(
-            belief_propagation, belief.edge_from_hyperedge
-        )
-        posterior = belief_find.posterior_graph(belief.graph, posteriors)
-        first = window_decoder.decode_graph(posterior, syndrome)
+        first_pass = belief_find.grow_on_posteriors(belief, syndrome)
+        iterations, posterior, first = first_pass
         partner_lengths = correlated_decoder.second_pass_lengths(
             backend.partners, first.selected_faults
         )

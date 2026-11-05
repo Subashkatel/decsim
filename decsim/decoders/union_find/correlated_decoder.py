@@ -114,8 +114,7 @@ def partnered_probabilities(
     probabilities = selected_priors.copy()
     joint = _joint_probabilities(model, selected)
     for (given, partner), both in joint.items():
-        conditional = both / selected_priors[given]
-        conditional = min(conditional, LARGEST_CONDITIONAL)
+        conditional = _conditional(both, selected_priors[given])
         probabilities[partner] = max(probabilities[partner], conditional)
     return probabilities
 
@@ -139,8 +138,7 @@ def partner_lengths(
     weight_step = graph.weight_step
     lengths_by_fault = collections.defaultdict(list)
     for (selected, partner), both in joint.items():
-        conditional = both / priors[selected]
-        conditional = min(conditional, LARGEST_CONDITIONAL)
+        conditional = _conditional(both, priors[selected])
         partner_edge = edge_of_fault.get(partner)
         if partner_edge is None or conditional <= priors[partner]:
             continue
@@ -173,6 +171,12 @@ def with_lengths(
         edges[edge_index] = dataclasses.replace(edge, length_half_ticks=length)
     edge_tuple = tuple(edges)
     return dataclasses.replace(graph, edges=edge_tuple)
+
+
+def _conditional(both: float, given: float) -> float:
+    """P(partner | selected) = P(both) / P(selected), at most one half."""
+    conditional = both / given
+    return min(conditional, LARGEST_CONDITIONAL)
 
 
 def _joint_probabilities(

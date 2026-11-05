@@ -346,9 +346,7 @@ class StagedDecoder(decoder_module.DecoderBase):
             return
         # the answer on this run's input, held for the recorded time
         ticks = self.time_replay.ticks(job)
-        result = None
-        if not job.cancelled and job.on_done is None:
-            result = decoder.decode(job)
+        result = decoder_module.delivered_result(decoder, job)
         engine.schedule(
             ticks,
             lambda: on_algorithm_result(result),

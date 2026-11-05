@@ -178,6 +178,7 @@ def test_the_packer_reads_union_find_growth_only():
     packed = box_tests.packed_windows(1)
     job, result, _box = packed[0]
     other = dataclasses.replace(result, cluster_evidence=None)
-    packer = doubtful_box.BoxPacker(1)
+    shape = doubtful_box.BoxShape(1, 1)
+    packer = doubtful_box.BoxPacker(shape)
     with pytest.raises(ValueError, match="union-find growth"):
         packer.pack(job, other)

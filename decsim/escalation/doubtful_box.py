@@ -175,10 +175,7 @@ class DoubtfulBox:
 class BoxPacker:
     """Packs an escalated window's doubtful box from the chip's own growth."""
 
-    def __init__(self, margin: int, shape: Optional[BoxShape] = None) -> None:
-        if shape is None:
-            shape = BoxShape(time_margin=margin, space_margin=margin)
-        self.margin = margin
+    def __init__(self, shape: BoxShape) -> None:
         self.shape = shape
 
     def pack(
@@ -232,23 +229,6 @@ def doubtful_rows(
     # (confidence/cluster.py gap_half_ticks_to_natural_log_weight)
     limit_half_ticks = 2.0 * shape.doubt_nats / evidence.graph.weight_step
     return all_walk_rows(evidence, roots, event_rows, limit_half_ticks)
-
-
-def box_roots(
-    coordinates: numpy.ndarray,
-    roots: numpy.ndarray,
-    event_rows: numpy.ndarray,
-    walk_rows: tuple,
-    margin: int,
-) -> numpy.ndarray:
-    """The clusters with an event in the doubtful clusters' widened box."""
-    if not walk_rows:
-        return numpy.zeros(0, dtype=roots.dtype)
-    shape = BoxShape(time_margin=margin, space_margin=margin)
-    chosen, _volume = _bounding_roots(
-        coordinates, roots, event_rows, [walk_rows], shape
-    )
-    return chosen
 
 
 def shaped_roots(

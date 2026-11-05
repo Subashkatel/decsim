@@ -383,7 +383,7 @@ def _box_packer(
             "window's rounds (use box_correlated_pymatching)"
         )
     shape = settings.strong_window.box_shape()
-    return doubtful_box.BoxPacker(margin, shape)
+    return doubtful_box.BoxPacker(shape)
 
 
 def _verdict_costs(

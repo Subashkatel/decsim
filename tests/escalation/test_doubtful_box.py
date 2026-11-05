@@ -57,7 +57,8 @@ def packed_windows(margin: int) -> list:
     model = windows.whole_circuit_window(circuit, ROUNDS, LINKED)
     detection_events, _ = windows.sampled_shots(circuit, SHOTS, 11)
     weak = UNION_FIND.build()
-    packer = doubtful_box.BoxPacker(margin)
+    shape = doubtful_box.BoxShape(margin, margin)
+    packer = doubtful_box.BoxPacker(shape)
     packed = []
     for shot in detection_events:
         job = windows.job_for(model, shot)
@@ -292,7 +293,7 @@ def shaped_windows(shape) -> list:
     model = windows.whole_circuit_window(circuit, ROUNDS, LINKED)
     detection_events, _ = windows.sampled_shots(circuit, SHOTS, 11)
     weak = UNION_FIND.build()
-    packer = doubtful_box.BoxPacker(shape.space_margin, shape)
+    packer = doubtful_box.BoxPacker(shape)
     packed = []
     for shot in detection_events:
         job = windows.job_for(model, shot)

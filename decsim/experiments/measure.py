@@ -145,6 +145,11 @@ POINTS = (
     # the last round the committing decode read off QPU -> frame
     "qpu_last_round_to_frame",
     "qpu_first_round_to_frame",  # first required round off QPU -> frame
+    # per original window of the weak chain, absorbed ones included: its
+    # last round, buffer included, off QPU -> the frame commit of the
+    # answer that covers its commit rounds; a switch moves only the end
+    # (original_window_latencies_us)
+    "window_last_round_to_final_answer",
     # per shot: the last round any committing decode read leaving the QPU
     # -> the last correction committed at the frame, whichever window
     # holds it (end_of_stream_reaction_us)
@@ -158,6 +163,7 @@ POINTS = (
 # the points sampled once a round, a shot or a conditional operation,
 # not once a window, so no committing tier names their samples
 UNTIERED_POINTS = (
+    "window_last_round_to_final_answer",
     "cwb_per_round",
     "cwb_stall_per_round",
     "csb_stall_per_round",
@@ -849,6 +855,9 @@ def collect_samples(
         for name, value in sample.values.items():
             samples[name].append(value)
         window_tiers.append(sample.decode.tier.word)
+    samples["window_last_round_to_final_answer"] = original_window_latencies_us(
+        observation, observation_settings, qpu_send
+    )
     decoded = decoded_windows(observation)
     samples["end_of_stream_reaction"] = end_of_stream_reaction_us(
         decoded, stages, qpu_send
@@ -1029,6 +1038,48 @@ def last_required_send_ticks(decode: "_CommittedDecode", qpu_send: dict) -> int:
     for stream_id, round_index in decode.last_rounds_read:
         sends.append(qpu_send[(stream_id, round_index)])
     return max(sends)
+
+
+def original_window_latencies_us(
+    observation: observation_module.Observation,
+    observation_settings: observe_settings.ObservationSettings,
+    qpu_send: dict,
+) -> list:
+    """Each original window's final-answer latency in us, in key order.
+
+    Every window the weak chain sliced counts once, whether it kept its
+    weak answer, switched, or was absorbed into a strong region. It runs
+    from the window's last round, its buffer included and cut at the
+    stream's last round, leaving the QPU to the frame's commit of the
+    answer that covers its commit rounds:
+    its own commit, or for an absorbed window the strong region's, whose
+    owner is the nearest earlier window of its stream the frame
+    committed (Toshio et al. 2510.25222 Sec. III C: a region absorbs the
+    windows after the one that switched). A switch moves only the end:
+    the start is the window's own last round, so every window is timed
+    from the same point. Only windows whose first commit round is
+    recorded count, as for every per-window point.
+    """
+    frame_by_window = frame_records_by_window(observation)
+    window_items = observation.windows.windows.items()
+    ordered_windows = sorted(window_items, key=_window_order)
+    covering_records = _covering_frame_records(ordered_windows, frame_by_window)
+    # a window near the end reads its buffer only up to the stream's last
+    # round (the lookahead terminal policy), which is its last round then
+    last_round_by_stream = _last_sent_round_by_stream(qpu_send)
+    samples = []
+    pairs = zip(ordered_windows, covering_records, strict=True)
+    for (_window_key, window), frame_record in pairs:
+        if frame_record is None:
+            continue
+        if not observation_settings.records_round(window.commit_lo):
+            continue
+        last_sent_round = last_round_by_stream[window.stream_id]
+        last_round = min(window.buffer_hi, last_sent_round)
+        start = qpu_send[(window.stream_id, last_round)]
+        span = _span_microseconds(frame_record.committed_ticks, start)
+        samples.append(span)
+    return samples
 
 
 def end_of_stream_reaction_us(
@@ -2492,3 +2543,33 @@ def _is_copy(row: dict) -> bool:
     """Whether a transfer row is a round's copy (RoundCopyRelation)."""
     relation = row["attribution"]["relation"]
     return relation is not None and "copy_into" in relation
+
+
+def _covering_frame_records(
+    ordered_windows: list, frame_by_window: dict
+) -> list:
+    """The frame record of the answer covering each window, in order.
+
+    A kept window's is its own commit; an absorbed window's is its
+    region's, whose owner is the nearest earlier window of its stream
+    the frame committed; None where neither is recorded.
+    """
+    owner_by_stream = {}
+    covering_records = []
+    for window_key, window in ordered_windows:
+        frame_record = frame_by_window.get(window_key)
+        if window.is_absorbed:
+            frame_record = owner_by_stream.get(window.stream_id)
+        if not window.is_absorbed and frame_record is not None:
+            owner_by_stream[window.stream_id] = frame_record
+        covering_records.append(frame_record)
+    return covering_records
+
+
+def _last_sent_round_by_stream(qpu_send: dict) -> dict:
+    """Each stream's last round leaving the QPU."""
+    last_round_by_stream = {}
+    for stream_id, round_index in qpu_send:
+        last = last_round_by_stream.get(stream_id, 0)
+        last_round_by_stream[stream_id] = max(last, round_index)
+    return last_round_by_stream

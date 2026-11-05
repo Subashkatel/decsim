@@ -79,8 +79,8 @@ class BoxShape:
     time_margin is in rounds and space_margin in stabilizer columns (2
     Stim steps each in x and y); a graph form reads space_margin as the
     edges it walks out and needs the two margins equal. doubt_nats is
-    the walk weight all_walks keeps, in the gap's nats (the switching
-    threshold's 20 dB is 4.605 nats).
+    the walk weight all_walks keeps, in the gap's nats (a threshold of D
+    decibels is D ln(10) / 10 nats, threshold_sources.decibels_to_nats).
     """
 
     time_margin: int
@@ -451,10 +451,10 @@ def _union_find_evidence(
     # union-find is the one row whose result carries cluster evidence
     if evidence is not None:
         return evidence
-    carried = type(evidence)
     raise ValueError(
         "the doubtful box is packed from the weak decode's union-find "
-        f"growth; this result carries {carried.__name__}"
+        "growth; this result carries no cluster evidence (use a "
+        "union_find weak row)"
     )
 
 

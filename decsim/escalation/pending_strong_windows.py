@@ -77,7 +77,7 @@ class PendingStrongWindows:
     def __init__(self) -> None:
         self.by_key: dict = {}
         self.keys_by_committed_window: dict = {}
-        self.keys_by_stored_operation: dict = {}
+        self.keys_by_stored_stream: dict = {}
         self.uncommitted_windows: dict = {}
 
     def register(self, held: PendingStrongWindow) -> None:
@@ -96,7 +96,7 @@ class PendingStrongWindows:
         for window_key in conditions.committed_windows:
             _index(self.keys_by_committed_window, window_key, held.key)
         for stream_id in conditions.stored_data_of_streams:
-            _index(self.keys_by_stored_operation, stream_id, held.key)
+            _index(self.keys_by_stored_stream, stream_id, held.key)
 
     def released_by_commit(self, window_key: tuple) -> tuple:
         """The entries this weak commit satisfies, in registration order."""
@@ -114,7 +114,7 @@ class PendingStrongWindows:
         stream_id: Any,  # an opaque identity
     ) -> tuple:
         """The entries of this stream whose weak commits have landed."""
-        waiting = _waiting_on(self.keys_by_stored_operation, stream_id)
+        waiting = _waiting_on(self.keys_by_stored_stream, stream_id)
         released = []
         for held_key in waiting:
             if self.uncommitted_windows[held_key]:
@@ -130,7 +130,7 @@ class PendingStrongWindows:
         for window_key in held.conditions.committed_windows:
             _unindex(self.keys_by_committed_window, window_key, held.key)
         for stream_id in held.conditions.stored_data_of_streams:
-            _unindex(self.keys_by_stored_operation, stream_id, held.key)
+            _unindex(self.keys_by_stored_stream, stream_id, held.key)
 
     def held_for(self, window_key: tuple) -> Optional[PendingStrongWindow]:
         """The entry held for one escalated window, or None."""

@@ -520,13 +520,17 @@ def _window_over(
     """The strong window over (context_lo, commit_lo, commit_hi, context_hi).
 
     Its round count holds its own rounds and each region it reads across,
-    as a planned window's does (WindowGeometry.round_count).
+    as a planned window's does.
     """
     context_lo, commit_lo, commit_hi, context_hi = bounds
-    local_round_count = context_hi - context_lo + 1
-    read_round_counts = [span.round_count for span in spatial_reads]
-    spatial_round_count = sum(read_round_counts)
-    round_count = local_round_count + spatial_round_count
+    geometry = window_records.WindowGeometry(
+        buffer_lo=context_lo,
+        commit_lo=commit_lo,
+        commit_hi=commit_hi,
+        buffer_hi=context_hi,
+        spatial_reads=spatial_reads,
+    )
+    round_count = geometry.round_count
     return window_records.Window(
         stream_id=stream_id,
         window_index=window_index,

@@ -814,6 +814,23 @@ def test_a_redo_window_pin_leaves_the_chip_with_its_escalation():
     assert pins <= escalations
 
 
+def test_a_double_window_pin_leaves_the_chip_with_its_rounds():
+    """The pins cross the cable beside the region's rounds, not after.
+
+    Both boundary conditions are determined when the restart window
+    commits (Toshio et al. 2510.25222 lines 1248-1250), and the rounds
+    leave the chip then. Sent only once the rounds land, the pins waited
+    one more leg of the cable, here 400 room cycles, so the double
+    window paid the cable twice where the redo window pays it once.
+    """
+    machine = _slow_boundary_machine(declared_run.DOUBLE_WINDOW)
+    result = machine.run()
+    pins = _cable_sends(result, boundary=True)
+    escalations = _cable_sends(result, boundary=False)
+    assert pins
+    assert pins <= escalations
+
+
 def _cable_sends(result, *, boundary: bool) -> set:
     """(window index, send tick) of the chip's sends up to the host."""
     transfers = result.link_traffic["transfers"]

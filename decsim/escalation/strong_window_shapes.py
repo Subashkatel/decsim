@@ -472,13 +472,15 @@ class DoubleWindow(StrongWindowPorts):
         must also be filled through the extent's last round. A region
         not laid out yet sets aside the windows it now covers and is
         laid out once it can be; its job then waits on what the region
-        waits on.
+        waits on. The faces the chip committed are pinned at the first
+        call, which the far boundary's commit releases.
         """
         hold = assignment.held_plan
         if hold.laid_out is None:
             self._lay_out_once_it_can(hold)
             return None
         held = hold.laid_out
+        self._pin_chip_faces_once(hold)
         crossing = self._rounds_not_stored(held)
         if crossing:
             return None
@@ -742,21 +744,47 @@ class DoubleWindow(StrongWindowPorts):
 
     # ---- private: the held job
 
+    def _pin_chip_faces_once(self, hold: "_DoubleWindowHold") -> None:
+        """Ship the faces the chip committed, as the job is released.
+
+        Both boundary conditions are determined once the restart window
+        commits (Toshio et al. 2510.25222 lines 1248-1250), so they
+        leave the chip then, beside the rounds the host still lacks, as
+        the redo window's leave with its escalation (RedoWindow.plan).
+        Pinned only once the rounds land on the host, they would wait a
+        second cable leg the chip cannot know of.
+        """
+        if hold.chip_faces_pinned:
+            return
+        held = hold.laid_out
+        chip_faces = _faces_committed_off(self, held.folded_boundaries, False)
+        pin_faces(
+            self,
+            held.strong_window,
+            held.strong_model,
+            held.operation,
+            held.strong_request_key,
+            chip_faces,
+        )
+        hold.chip_faces_pinned = True
+
     def _build_strong_job(
         self, held: "_HeldDoubleWindow"
     ) -> decoding_records.DecodeJob:
         """The strong window's job, once both of its boundaries exist.
 
         It commits all r_strong rounds and reads only those, its faces
-        pinned.
+        pinned. A face the strong host committed is read from its own
+        memory now, as the redo window's is (_strong_job_of).
         """
+        host_faces = _faces_committed_off(self, held.folded_boundaries, True)
         payloads = strong_job_payloads(
             self,
             held.strong_window,
             held.strong_model,
             held.operation,
             held.strong_request_key,
-            held.folded_boundaries,
+            host_faces,
         )
         plan = held.resolved_region.plan
         self.retention.require_rounds_retained(
@@ -1160,12 +1188,14 @@ class _DoubleWindowHold:
 
     laid_out is the region once it is laid out, and None while a stream
     has not laid every window it needs; conditions are then what
-    releases its job (DoubleWindow._conditions_of).
+    releases its job (DoubleWindow._conditions_of). chip_faces_pinned
+    says the faces the chip committed have left for the strong host.
     """
 
     escalation: _Escalation
     laid_out: Optional[_HeldDoubleWindow] = None
     conditions: Optional[pending_strong_windows.ReleaseConditions] = None
+    chip_faces_pinned: bool = False
 
 
 def _double_window_assignment(

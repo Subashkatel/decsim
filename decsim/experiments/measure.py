@@ -13,7 +13,7 @@ import json
 import math
 import pathlib
 import statistics
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, Optional, Union
 
 import decsim.build.decoders as decoders_part
@@ -151,6 +151,10 @@ POINTS = (
     # answer that covers its commit rounds; a switch moves only the end
     # (original_window_latencies_us)
     "window_last_round_to_final_answer",
+    # per round: the round off QPU -> the frame commit of the answer
+    # that covers it, its window's own or, for a round of an absorbed
+    # window, the strong region's (round_final_answer_latencies_us)
+    "round_to_final_answer",
     # per shot: the last round any committing decode read leaving the QPU
     # -> the last correction committed at the frame, whichever window
     # holds it (end_of_stream_reaction_us)
@@ -165,6 +169,7 @@ POINTS = (
 # not once a window, so no committing tier names their samples
 UNTIERED_POINTS = (
     "window_last_round_to_final_answer",
+    "round_to_final_answer",
     "cwb_per_round",
     "cwb_stall_per_round",
     "csb_stall_per_round",
@@ -872,6 +877,9 @@ def collect_samples(
     samples["window_last_round_to_final_answer"] = original_window_latencies_us(
         observation, observation_settings, qpu_send
     )
+    samples["round_to_final_answer"] = round_final_answer_latencies_us(
+        observation, observation_settings, qpu_send
+    )
     decoded = decoded_windows(observation)
     samples["end_of_stream_reaction"] = end_of_stream_reaction_us(
         decoded, stages, qpu_send
@@ -1094,6 +1102,72 @@ def original_window_latencies_us(
         span = _span_microseconds(frame_record.committed_ticks, start)
         samples.append(span)
     return samples
+
+
+def round_final_answer_latencies_us(
+    observation: observation_module.Observation,
+    observation_settings: observe_settings.ObservationSettings,
+    qpu_send: dict,
+) -> list:
+    """Each round's final-answer latency in us, by window then round.
+
+    One sample a syndrome round, so a window counts by the rounds it
+    commits and not once. It runs from the round leaving the QPU to the
+    frame's commit of the answer that covers the round: the commit of
+    the window whose commit rounds hold it, or for a round of an
+    absorbed window the strong region's (_covering_frame_records). The
+    clock of each round starts at the round itself, so the rounds of
+    one window differ by the time between their sends. Only recorded
+    rounds count.
+    """
+    frame_by_window = frame_records_by_window(observation)
+    window_items = observation.windows.windows.items()
+    ordered_windows = sorted(window_items, key=_window_order)
+    covering_records = _covering_frame_records(ordered_windows, frame_by_window)
+    samples = []
+    pairs = zip(ordered_windows, covering_records, strict=True)
+    for (_window_key, window), frame_record in pairs:
+        if frame_record is None:
+            continue
+        round_indices = commit_round_indices(window)
+        spans = round_spans_us(
+            window.stream_id,
+            round_indices,
+            frame_record.committed_ticks,
+            observation_settings,
+            qpu_send,
+        )
+        samples.extend(spans)
+    return samples
+
+
+def commit_round_indices(window: window_records.Window) -> range:
+    """The rounds a window commits, first to last."""
+    stop = window.commit_hi + 1
+    return range(window.commit_lo, stop)
+
+
+def round_spans_us(
+    stream_id: object,
+    round_indices: Iterable,
+    committed_ticks: int,
+    observation_settings: observe_settings.ObservationSettings,
+    qpu_send: dict,
+) -> list:
+    """Each recorded round's span in us, its QPU send to a frame commit.
+
+    A shot and a stream read a round's final-answer latency here
+    (round_final_answer_latencies_us, stream_measures.py), so both give
+    the same number.
+    """
+    spans = []
+    for round_index in round_indices:
+        if not observation_settings.records_round(round_index):
+            continue
+        sent = qpu_send[(stream_id, round_index)]
+        span = _span_microseconds(committed_ticks, sent)
+        spans.append(span)
+    return spans
 
 
 def end_of_stream_reaction_us(

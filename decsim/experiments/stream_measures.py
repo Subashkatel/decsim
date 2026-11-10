@@ -22,7 +22,8 @@ one, quantile_sketch.py), the windows by tier and by status, the
 escalated windows, the reaction growth rates (an exact least-squares
 fit in ticks), the deadline misses, the end-of-stream reaction and the
 throughput. The per-round latencies (cwb_per_round and the stalls) are
-not folded.
+not folded, but for round_to_final_answer, which is folded a round at
+a time when its window commits.
 
 Past measure_shot, it samples the escalated share as the stream goes:
 every hundredth committed window, the windows committed so far, the
@@ -193,11 +194,12 @@ class StreamMeasures:
         its strong region's window answers for its rounds
         (escalation/strong_window_shapes.py DoubleWindow).
         """
-        del owner_key
+        observation = self.machine.observation
+        absorbed = observation.windows.windows[key]
+        self.folds.note_absorbed(owner_key, absorbed)
         observation_settings = self.machine.graph.observation
         if not observation_settings.folds_windows:
             return
-        observation = self.machine.observation
         observation.windows.forget(key)
         observation.stages.forget_window(key)
         self.transfers.forget_window(key)
@@ -321,6 +323,7 @@ class StreamMeasures:
         if is_escalated:
             self.folds.fold_strong(decode)
         self.folds.note_commit(frame_record)
+        self._fold_rounds(window, frame_record)
         self.folds.sample_escalation(window)
         if window.t_done is None:
             return
@@ -336,6 +339,30 @@ class StreamMeasures:
             return
         sample = self._sample(window, frame_record)
         self.folds.fold_recorded(window, frame_record, sample)
+
+    def _fold_rounds(
+        self,
+        window: window_records.Window,
+        frame_record: decoding_records.PauliFrameCommitRecord,
+    ) -> None:
+        """Each round the commit answers: its send to the commit.
+
+        The rounds are the window's own commit rounds and those of the
+        windows its strong region absorbed, as
+        measure.round_final_answer_latencies_us reads a shot.
+        """
+        observation_settings = self.machine.graph.observation
+        round_indices = self.folds.rounds_answered(window)
+        spans = measure.round_spans_us(
+            window.stream_id,
+            round_indices,
+            frame_record.committed_ticks,
+            observation_settings,
+            self.transfers.qpu_send,
+        )
+        values = self.folds.values_by_name["round_to_final_answer"]
+        for span in spans:
+            values.add(span)
 
     def _sample(
         self,
@@ -465,6 +492,25 @@ class _Folds:
         counts.strong_rounds += decode.round_count
         service = decode.done_ticks - decode.compute_start_ticks
         counts.strong_service_ticks += service
+
+    def note_absorbed(
+        self, owner_key: tuple, absorbed: window_records.Window
+    ) -> None:
+        """A strong region took a window: its commit rounds are the owner's."""
+        round_indices = measure.commit_round_indices(absorbed)
+        absorbed_rounds = self.counts.absorbed_rounds_by_owner
+        owner_rounds = absorbed_rounds.setdefault(owner_key, [])
+        owner_rounds.extend(round_indices)
+
+    def rounds_answered(self, window: window_records.Window) -> list:
+        """The rounds a committed window answers, its absorbed ones' too.
+
+        Read once: the absorbed windows' rounds are let go here.
+        """
+        own_rounds = measure.commit_round_indices(window)
+        absorbed_rounds = self.counts.absorbed_rounds_by_owner
+        absorbed = absorbed_rounds.pop(window.key, [])
+        return [*own_rounds, *absorbed]
 
     def note_commit(
         self, frame_record: decoding_records.PauliFrameCommitRecord
@@ -652,6 +698,9 @@ class _Counts:
     last_readout_tick: Optional[int] = None
     latest_round_by_stream: dict = dataclasses.field(default_factory=dict)
     let_go_below_by_stream: dict = dataclasses.field(default_factory=dict)
+    # owner window key -> the commit rounds of the windows it absorbed,
+    # kept until the owner commits
+    absorbed_rounds_by_owner: dict = dataclasses.field(default_factory=dict)
     # the windows the frame committed off each pool's decode, by word,
     # since the statistics' restart
     committed_by_pool: collections.Counter = dataclasses.field(

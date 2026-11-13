@@ -230,6 +230,9 @@ def command_output(command: str, scratch: pathlib.Path) -> Printed:
     environment = dict(os.environ)
     environment["PYTHONUNBUFFERED"] = "1"
     environment["PYTHONPATH"] = str(CHECKOUT)
+    # ls sorts by the locale: en_US puts shots.csv before shot_stats.csv,
+    # and the pages show the order of the C locale.
+    environment["LC_ALL"] = "C.UTF-8"
     completed = subprocess.run(
         command,
         shell=True,

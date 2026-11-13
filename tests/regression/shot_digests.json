@@ -54,9 +54,9 @@
     "event_count": 204
   },
   "experiment_one_switching": {
-    "result_sha256": "f3c5757c205bef84687f31edc111b1cb96d72c33f775af38a823ea8da24782c1",
+    "result_sha256": "4069f9217649ce4560b21b8581e72ee7deff4359b417205f023a9961ae806df2",
     "seeds_sha256": "acdfa3e34606ce94fd3a5f059b2429aba6ddab15f677fc64126a2ffe7c7d1b17",
-    "final_tick": 759084000,
+    "final_tick": 757932000,
     "event_count": 1040
   },
   "experiment_one_weak_alone": {

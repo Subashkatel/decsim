@@ -977,12 +977,26 @@ def _versions() -> dict:
     """Python's version and every installed package's, by name."""
     version_words = sys.version.split()
     python_version = version_words[0]
+    installed = _installed_packages()
+    packages = dict(installed)
+    return {"python": python_version, "packages": packages}
+
+
+@functools.lru_cache(maxsize=1)
+def _installed_packages() -> tuple:
+    """Every installed package's (name, version), sorted by name, once.
+
+    Read at the first ask and reused, as the tree reading is: the
+    packages this process imported do not change while it runs, and a
+    read parses the metadata file of every installed package.
+    """
     packages = {}
     for distribution in importlib.metadata.distributions():
         name = distribution.metadata["Name"]
         packages[name] = distribution.version
     names = sorted(packages)
-    ordered = {}
+    ordered = []
     for name in names:
-        ordered[name] = packages[name]
-    return {"python": python_version, "packages": ordered}
+        version = packages[name]
+        ordered.append((name, version))
+    return tuple(ordered)

@@ -260,10 +260,14 @@ def test_extending_a_finite_input_cannot_add_empty_rounds_after_readout() -> (
 def test_command_replay_preserves_repetition_geometry_and_horizon(
     tmp_path: pathlib.Path,
 ) -> None:
+    """A replay of the example's own output answers as the output did.
+
+    The generating run and the replay run in this process; the refusal
+    runs the command line as a process of its own.
+    """
     original = tmp_path / "original"
     replay = tmp_path / "replay"
-    command = [sys.executable, "examples/deltakit_example.py"]
-    generate = command + [
+    generate = [
         "--family",
         "repetition",
         "--rounds",
@@ -271,9 +275,9 @@ def test_command_replay_preserves_repetition_geometry_and_horizon(
         "--output",
         str(original),
     ]
-    subprocess.run(generate, check=True, capture_output=True)
-    repeat = command + ["--input", str(original), "--output", str(replay)]
-    subprocess.run(repeat, check=True, capture_output=True)
+    example.main(generate)
+    repeat = ["--input", str(original), "--output", str(replay)]
+    example.main(repeat)
     original_result_path = original / "result.json"
     replay_result_path = replay / "result.json"
     original_text = original_result_path.read_text()
@@ -281,7 +285,8 @@ def test_command_replay_preserves_repetition_geometry_and_horizon(
     original_result = json.loads(original_text)
     replay_result = json.loads(replay_text)
     assert original_result == replay_result
-    altered = repeat + ["--rounds", "24"]
+    command = [sys.executable, "examples/deltakit_example.py"]
+    altered = command + repeat + ["--rounds", "24"]
     refused = subprocess.run(
         altered, check=False, capture_output=True, text=True
     )

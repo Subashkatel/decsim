@@ -2,6 +2,9 @@
 
 Canonical inputs use tests.qpu.memory_programs and ordinary Stim; optional
 producer tests additionally execute Explorer SD6 and duration-aware noise.
+The example's main runs in this process; the two refusals and the check
+that a replay loads no producer run its command line as a process of its
+own.
 """
 
 import dataclasses
@@ -228,9 +231,9 @@ def test_a_replay_names_the_circuit_its_saved_fragments_hold(
     """
     pytest.importorskip("deltakit_explorer")
     original = tmp_path / "original"
-    command = _producer_command(original, "physical")
-    command.extend(["--basis", "X"])
-    subprocess.run(command, check=True, capture_output=True)
+    arguments = _producer_arguments(original, "physical")
+    arguments.extend(["--basis", "X"])
+    example.main(arguments)
     saved = _saved_fragments(original)
     replay = tmp_path / "replay"
     _run_example(saved, replay)
@@ -288,8 +291,8 @@ def test_optional_producer_saves_reusable_physical_inputs(
 ) -> None:
     pytest.importorskip("deltakit_explorer")
     output = tmp_path / noise_model
-    command = _producer_command(output, noise_model)
-    subprocess.run(command, check=True, capture_output=True)
+    arguments = _producer_arguments(output, noise_model)
+    example.main(arguments)
     saved = _saved_fragments(output)
     parameters = _read_json(saved, workload_files.PHYSICAL_FILE_NAME)
     assert parameters["round_period_microseconds"] == 1.25
@@ -431,9 +434,7 @@ def _run_example(
     feedback_microseconds: float = 4.0,
     physical: tuple = (),
 ) -> None:
-    command = [
-        sys.executable,
-        "examples/live_memory_example.py",
+    arguments = [
         "--input",
         str(inputs),
         "--output",
@@ -442,7 +443,7 @@ def _run_example(
         str(feedback_microseconds),
         *physical,
     ]
-    subprocess.run(command, check=True, capture_output=True)
+    example.main(arguments)
 
 
 def _resolved_names(folder: pathlib.Path) -> list:
@@ -466,10 +467,8 @@ def _executed_circuit(folder: pathlib.Path) -> stim.Circuit:
     return stim.Circuit.from_file(str(path))
 
 
-def _producer_command(output: pathlib.Path, noise_model: str) -> list[str]:
-    command = [
-        sys.executable,
-        "examples/live_memory_example.py",
+def _producer_arguments(output: pathlib.Path, noise_model: str) -> list[str]:
+    arguments = [
         "--output",
         str(output),
         "--round-period-microseconds",
@@ -478,7 +477,7 @@ def _producer_command(output: pathlib.Path, noise_model: str) -> list[str]:
         noise_model,
     ]
     if noise_model == "physical":
-        command.extend(
+        arguments.extend(
             [
                 "--relaxation-time-microseconds",
                 "50",
@@ -486,4 +485,4 @@ def _producer_command(output: pathlib.Path, noise_model: str) -> list[str]:
                 "40",
             ]
         )
-    return command
+    return arguments

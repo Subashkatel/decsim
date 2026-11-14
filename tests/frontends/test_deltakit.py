@@ -4,6 +4,7 @@ Sources: pinned Explorer css_code_memory_circuit and CSSStage.first_round;
 Stim compile_m2d_converter; detector_formation's explicit packet contract.
 """
 
+import functools
 import importlib.util
 import math
 import subprocess
@@ -304,17 +305,7 @@ def test_invalid_repeated_memory_noise_is_refused(arguments: dict) -> None:
 def test_supplied_css_memory_preserves_the_full_bb_native_circuit(
     basis: str, round_count: int, noise_model: str
 ) -> None:
-    import deltakit_explorer.codes as codes
-
-    code = codes.BivariateBicycleCode(3, 5, [1, 1, 4], [0, 1, 2])
-    noise_arguments = _noise_arguments(noise_model)
-    fragments = deltakit.css_memory_rounds(
-        code,
-        basis,
-        0.003,
-        round_period_microseconds=0.9,
-        **noise_arguments,
-    )
+    fragments = _bb_fragments(basis, noise_model)
     assembled, mapping = fragments.assemble(round_count)
     reference, duration_seconds = _finite_native_reference(
         "bivariate_bicycle", basis, round_count, noise_model
@@ -366,6 +357,26 @@ def test_supplied_css_refuses_extra_ancilla_preparation_time() -> None:
     code = _repetition_with_explicit_ancilla_preparation()
     with pytest.raises(ValueError, match="CSS memory fragments must fit"):
         deltakit.css_memory_rounds(code, "Z", 0, round_period_microseconds=1)
+
+
+@functools.cache
+def _bb_fragments(basis: str, noise_model: str):
+    """The BB code's memory fragments, compiled once per basis and noise.
+
+    Every round count assembles the same fragments, and assembling only
+    reads them.
+    """
+    import deltakit_explorer.codes as codes
+
+    code = codes.BivariateBicycleCode(3, 5, [1, 1, 4], [0, 1, 2])
+    noise_arguments = _noise_arguments(noise_model)
+    return deltakit.css_memory_rounds(
+        code,
+        basis,
+        0.003,
+        round_period_microseconds=0.9,
+        **noise_arguments,
+    )
 
 
 def _noise_arguments(noise_model: str) -> dict:

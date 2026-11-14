@@ -36,20 +36,39 @@ def _built_and_run(folds: bool):
     return machine, result
 
 
-def test_a_stream_that_lets_windows_go_delivers_the_same_results():
-    _whole_machine, whole = _built_and_run(folds=False)
+@pytest.fixture(scope="module")
+def kept_run():
+    """The long stream keeping every window, run once for the module.
 
-    _machine, lean = _built_and_run(folds=True)
+    The tests read the finished machine and result and change neither.
+    """
+    return _built_and_run(folds=False)
+
+
+@pytest.fixture(scope="module")
+def released_run():
+    """The long stream letting its final windows go, run once likewise."""
+    return _built_and_run(folds=True)
+
+
+def test_a_stream_that_lets_windows_go_delivers_the_same_results(
+    kept_run, released_run
+):
+    _whole_machine, whole = kept_run
+
+    _machine, lean = released_run
 
     assert lean.operation_results == whole.operation_results
     assert lean.fully_done_ticks == whole.fully_done_ticks
 
 
-def test_the_frame_folds_what_it_lets_go_into_the_same_correction():
-    whole_machine, _whole = _built_and_run(folds=False)
+def test_the_frame_folds_what_it_lets_go_into_the_same_correction(
+    kept_run, released_run
+):
+    whole_machine, _whole = kept_run
     whole_frame = whole_machine.control.pauli_frame
 
-    machine, _result = _built_and_run(folds=True)
+    machine, _result = released_run
 
     frame = machine.control.pauli_frame
     stream_id = stream_machines.STREAM_ID
@@ -57,8 +76,8 @@ def test_the_frame_folds_what_it_lets_go_into_the_same_correction():
     assert frame.frame_for_stream(stream_id) == expected
 
 
-def test_a_long_stream_keeps_a_bounded_number_of_windows():
-    machine, _result = _built_and_run(folds=True)
+def test_a_long_stream_keeps_a_bounded_number_of_windows(released_run):
+    machine, _result = released_run
 
     planner = machine.windows.planner
     stream_id = stream_machines.STREAM_ID
@@ -102,8 +121,8 @@ def test_a_parallel_stream_that_lets_blocks_go_decides_as_one_that_keeps():
     assert len(planner.windows_by_key) <= kept_bound
 
 
-def test_reading_a_window_let_go_says_it_was_let_go():
-    machine, _result = _built_and_run(folds=True)
+def test_reading_a_window_let_go_says_it_was_let_go(released_run):
+    machine, _result = released_run
 
     planner = machine.windows.planner
     first_key = (stream_machines.STREAM_ID, 0)

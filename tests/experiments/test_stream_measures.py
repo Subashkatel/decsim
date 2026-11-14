@@ -10,6 +10,7 @@ leave no window, stage, frame write or round event behind.
 import bisect
 import collections
 import dataclasses
+import functools
 import math
 
 import pytest
@@ -63,6 +64,17 @@ def _run(graph):
     result = machine.run()
     folded = measures.measurement(result)
     return machine, result, folded
+
+
+@functools.cache
+def _whole_run(run: stream_machines.StreamRun):
+    """_run of the run's whole stream, run once and kept.
+
+    Three or four tests read each whole stream of RUNS, and none changes
+    the machine, the result or the measurement it reads.
+    """
+    graph = stream_machines.stream_graph(run, folds=False)
+    return _run(graph)
 
 
 def _differences(folded, shot) -> list:
@@ -171,7 +183,7 @@ def _same_rate(folded_rate, shot_rate) -> bool:
 @pytest.mark.parametrize("run", RUNS)
 def test_the_stream_measures_what_measure_shot_reads_off_the_whole_run(run):
     graph = stream_machines.stream_graph(run, folds=False)
-    machine, result, folded = _run(graph)
+    machine, result, folded = _whole_run(run)
     task = collect.Task("stream", graph, {})
     shot = collect.Shot(task, SEED, machine, result, 0.0)
 
@@ -188,9 +200,8 @@ def test_the_stream_measures_what_measure_shot_reads_off_the_whole_run(run):
 def test_a_stream_that_lets_each_window_go_measures_the_same_and_keeps_none(
     run,
 ):
-    whole = stream_machines.stream_graph(run, folds=False)
     lean = stream_machines.stream_graph(run, folds=True)
-    _machine, _result, kept = _run(whole)
+    _machine, _result, kept = _whole_run(run)
 
     machine, _result, folded = _run(lean)
 
@@ -234,8 +245,7 @@ def test_a_pools_row_counts_the_windows_committed_past_the_warmup():
 
 
 def test_the_escalated_share_is_sampled_off_the_frames_commits_in_order():
-    graph = stream_machines.stream_graph(RUNS[3], folds=False)
-    machine, _result, folded = _run(graph)
+    machine, _result, folded = _whole_run(RUNS[3])
     observation = machine.observation
     windows = observation.windows.windows
     _weak_pools, strong_pools = machine.layout.tier_pools()
@@ -317,6 +327,14 @@ def _with_series(graph, every_rounds: int):
     return dataclasses.replace(graph, observation=observation)
 
 
+@functools.cache
+def _whole_run_with_series():
+    """_run of the longest whole stream writing its series, kept likewise."""
+    graph = stream_machines.stream_graph(RUNS[3], folds=False)
+    with_series = _with_series(graph, SERIES_EVERY_ROUNDS)
+    return _run(with_series)
+
+
 def _decoded_commits_us(machine) -> list:
     """Each decoded window's (commit time, reaction) in us, in order."""
     observation = machine.observation
@@ -374,7 +392,7 @@ def _is_within_accuracy(estimate: float, exact: float) -> bool:
 @pytest.mark.parametrize("run", RUNS)
 def test_a_streams_percentiles_are_within_one_percent_of_the_shots(run):
     graph = stream_machines.stream_graph(run, folds=False)
-    machine, result, folded = _run(graph)
+    machine, result, folded = _whole_run(run)
     task = collect.Task("stream", graph, {})
     shot = collect.Shot(task, SEED, machine, result, 0.0)
 
@@ -388,10 +406,7 @@ def test_a_streams_percentiles_are_within_one_percent_of_the_shots(run):
 
 
 def test_a_series_row_counts_the_windows_committed_before_its_round():
-    graph = stream_machines.stream_graph(RUNS[3], folds=False)
-    with_series = _with_series(graph, SERIES_EVERY_ROUNDS)
-
-    machine, _result, folded = _run(with_series)
+    machine, _result, folded = _whole_run_with_series()
 
     commits = _decoded_commits_us(machine)
     rounds = [row["round_index"] for row in folded.series]
@@ -401,10 +416,7 @@ def test_a_series_row_counts_the_windows_committed_before_its_round():
 
 
 def test_the_series_sees_every_reaction_up_to_its_last_row():
-    graph = stream_machines.stream_graph(RUNS[3], folds=False)
-    with_series = _with_series(graph, SERIES_EVERY_ROUNDS)
-
-    machine, _result, folded = _run(with_series)
+    machine, _result, folded = _whole_run_with_series()
 
     last_time_us = folded.series[-1]["time_us"]
     commits = _decoded_commits_us(machine)

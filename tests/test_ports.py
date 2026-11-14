@@ -326,20 +326,29 @@ def _decsim_modules() -> list:
     return sorted(modules)
 
 
-def _local_protocols() -> dict:
+def _parsed_modules() -> dict:
+    """Every module of the package parsed once, by path, in path order."""
+    trees = {}
+    for path in _decsim_modules():
+        text = path.read_text()
+        trees[path] = ast.parse(text)
+    return trees
+
+
+def _local_protocols(trees: dict) -> dict:
     """Every Protocol declared outside decsim/ports.py, by declaring file."""
     declared = {}
-    for path in _decsim_modules():
+    for path, tree in trees.items():
         if path == PORTS_PATH:
             continue
-        _add_protocols(path, declared)
+        _add_protocols(path, tree, declared)
     return declared
 
 
-def _add_protocols(path: pathlib.Path, declared: dict) -> None:
+def _add_protocols(
+    path: pathlib.Path, tree: ast.Module, declared: dict
+) -> None:
     """Add one module's top-level Protocol declarations."""
-    text = path.read_text()
-    tree = ast.parse(text)
     for node in tree.body:
         if not isinstance(node, ast.ClassDef):
             continue
@@ -362,28 +371,41 @@ def _package_of(path: pathlib.Path) -> str:
     return path.parent.name
 
 
-def _named_outside(name: str, package: str, declaring: pathlib.Path) -> list:
+def _named_outside(
+    name: str, package: str, declaring: pathlib.Path, mentions: dict
+) -> list:
     """Every place outside the package that names the Protocol in code."""
     sites = []
-    for path in _decsim_modules():
+    for path, site in mentions.get(name, ()):
         if path == declaring:
             continue
         if _package_of(path) == package:
             continue
-        _add_mentions(path, name, sites)
+        sites.append(site)
     return sites
 
 
-def _add_mentions(path: pathlib.Path, name: str, sites: list) -> None:
-    """Add every code mention of the name in one module."""
-    text = path.read_text()
-    tree = ast.parse(text)
+def _mentions_by_name(trees: dict) -> dict:
+    """Every code mention of every name, as (path, site) pairs in order."""
+    mentions = {}
+    for path, tree in trees.items():
+        _add_mentions(path, tree, mentions)
+    return mentions
+
+
+def _add_mentions(path: pathlib.Path, tree: ast.Module, mentions: dict) -> None:
+    """Add every code mention of a name in one module, by that name."""
     where = f"{path.parent.name}/{path.name}"
     for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id == name:
-            sites.append(f"{where}:{node.lineno}")
-        if isinstance(node, ast.Attribute) and node.attr == name:
-            sites.append(f"{where}:{node.lineno}")
+        if isinstance(node, ast.Name):
+            _add_mention(mentions, node.id, path, f"{where}:{node.lineno}")
+        if isinstance(node, ast.Attribute):
+            _add_mention(mentions, node.attr, path, f"{where}:{node.lineno}")
+
+
+def _add_mention(mentions: dict, name: str, path, site: str) -> None:
+    found = mentions.setdefault(name, [])
+    found.append((path, site))
 
 
 def test_every_protocol_outside_the_port_file_is_one_packages_seam():
@@ -394,19 +416,21 @@ def test_every_protocol_outside_the_port_file_is_one_packages_seam():
     learns it and the package may change it alone. decsim/seeding.py is
     the named exception.
     """
-    protocols = _local_protocols()
-    crossing = _protocols_named_outside(protocols)
+    trees = _parsed_modules()
+    protocols = _local_protocols(trees)
+    mentions = _mentions_by_name(trees)
+    crossing = _protocols_named_outside(protocols, mentions)
     assert crossing == {}
 
 
-def _protocols_named_outside(protocols: dict) -> dict:
+def _protocols_named_outside(protocols: dict, mentions: dict) -> dict:
     """Each package-local Protocol named outside its package: where."""
     crossing = {}
     for name, path in protocols.items():
         package = _package_of(path)
         if package == SHARED_PROTOCOL_MODULE:
             continue
-        sites = _named_outside(name, package, path)
+        sites = _named_outside(name, package, path, mentions)
         if sites:
             crossing[name] = sites
     return crossing

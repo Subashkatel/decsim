@@ -39,15 +39,17 @@ from decsim.decoders.minimum_weight_perfect_matching import (
 TASK_NAME = "shot"
 
 
-def main() -> None:
+def main(argv: Optional[list] = None) -> None:
     """Write the input circuit, settings, result and trace into one folder.
 
     The folder is a results folder (decsim/experiments/run_folder.py):
     its run.json, every value of the run and its workload under
     tasks/shot/, the shot's files as decsim run writes them and the
-    finished time, beside the arguments and the setup time.
+    finished time, beside the arguments and the setup time. argv is the
+    words after the program's name; None reads them from the command
+    line, as argparse does.
     """
-    arguments = _arguments()
+    arguments = _arguments(argv)
     _resolve_memory_parameters(arguments)
     if arguments.mode == "protection" and arguments.family == "repetition":
         raise ValueError(
@@ -294,7 +296,7 @@ def _circuit(arguments) -> tuple[stim.Circuit, dict[int, int]]:
     return physical.circuit, physical.measurement_rounds
 
 
-def _arguments() -> argparse.Namespace:
+def _arguments(argv: Optional[list]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode", choices=("memory", "protection"), default="memory"
@@ -317,7 +319,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--patch", default="memory-patch")
     parser.add_argument("--input", type=pathlib.Path)
     parser.add_argument("--output", type=pathlib.Path, required=True)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _resolve_memory_parameters(arguments) -> None:

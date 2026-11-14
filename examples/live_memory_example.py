@@ -10,6 +10,7 @@ folder keeps in tasks/<name>/inputs/fragments.
 import argparse
 import json
 import pathlib
+from typing import Optional
 
 import decsim.config as config
 import decsim.decoders.settings as decoder_settings
@@ -54,16 +55,17 @@ CIRCUIT_VALUES = (
 )
 
 
-def main() -> None:
+def main(argv: Optional[list] = None) -> None:
     """Save canonical inputs and the physical history selected by feedback.
 
     The output folder is a results folder
     (decsim/experiments/run_folder.py): its run.json, every value of the
     run and its workload under tasks/shot/, the shot's files as decsim
     run writes them and the finished time, beside the executed history
-    and the arguments.
+    and the arguments. argv is the words after the program's name; None
+    reads them from the command line, as argparse does.
     """
-    arguments = _arguments()
+    arguments = _arguments(argv)
     recorded = _recorded_values(arguments.input)
     parameters = _physical_parameters(arguments, recorded)
     program = _program(arguments, parameters)
@@ -143,7 +145,7 @@ def live_machine(
     return machines.with_pool(machine, decoder)
 
 
-def _arguments() -> argparse.Namespace:
+def _arguments(argv: Optional[list]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     _physical_arguments(parser)
     # a prefix ends on a window boundary; the default is one window, the
@@ -157,7 +159,7 @@ def _arguments() -> argparse.Namespace:
     # tasks/<name>/inputs/fragments
     parser.add_argument("--input", type=pathlib.Path)
     parser.add_argument("--output", type=pathlib.Path, required=True)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _physical_arguments(parser: argparse.ArgumentParser) -> None:

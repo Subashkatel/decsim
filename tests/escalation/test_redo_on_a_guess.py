@@ -9,6 +9,8 @@ same seeds every shot must predict and commit what it does, withdrawn
 redos included, while redos of one stream now overlap.
 """
 
+import functools
+
 import pytest
 
 import decsim.escalation.strong_window_shapes as strong_window_shapes
@@ -29,10 +31,9 @@ STRONG_UNITS = 4
 def test_a_guess_commits_what_held_boundaries_do(seed):
     """The final answers are serial switching's; only their ticks move."""
     held = _held_graph()
-    guessing = _with_a_guess(held)
 
     held_machine, held_result = switching_mode.run_shot(held, seed)
-    machine, result = switching_mode.run_shot(guessing, seed)
+    machine, result = _guessing_shot(seed)
 
     held_predictions = switching_mode.predictions(held_result)
     assert switching_mode.predictions(result) == held_predictions
@@ -46,10 +47,9 @@ def test_a_changed_face_withdraws_the_redo():
     The seeds are test_a_guess_commits_what_held_boundaries_do's, so
     those shots, which answer as held ones do, withdraw a redo.
     """
-    held = _held_graph()
-    guessing = _with_a_guess(held)
+    shots = [_guessing_shot(seed) for seed in range(2)]
 
-    withdrawn = _count_over(guessing, range(2), "withdrawn")
+    withdrawn = _count_over(shots, "withdrawn")
 
     assert withdrawn > 0
 
@@ -58,10 +58,13 @@ def test_redos_of_one_stream_overlap_only_on_a_guess():
     """Checked boundaries chain a stream's redos; a guess lets them overlap."""
     held = _held_graph()
     checked = _with_checked_redo(held)
-    guessing = _with_a_guess(held)
+    checked_shots = [
+        switching_mode.run_shot(checked, seed) for seed in range(4)
+    ]
+    guessing_shots = [_guessing_shot(seed) for seed in range(4)]
 
-    chained = _overlaps_over(checked, range(4))
-    overlapped = _overlaps_over(guessing, range(4))
+    chained = _overlaps_over(checked_shots)
+    overlapped = _overlaps_over(guessing_shots)
 
     assert chained == 0
     assert overlapped > 0
@@ -78,14 +81,16 @@ def test_a_backlog_limit_keeps_a_busy_pool_from_guessing():
     )
     guessing = _with_redo(held, GUESSING_REDO)
     limited = _with_redo(held, limited_redo)
+    seeds = range(4)
+    guessing_shots = [switching_mode.run_shot(guessing, seed) for seed in seeds]
+    limited_shots = [switching_mode.run_shot(limited, seed) for seed in seeds]
 
-    always = _count_over(guessing, range(4), "withdrawn")
-    when_room = _count_over(limited, range(4), "withdrawn")
+    always = _count_over(guessing_shots, "withdrawn")
+    when_room = _count_over(limited_shots, "withdrawn")
 
     assert when_room < always
-    for seed in range(4):
+    for seed, (_machine, result) in zip(seeds, limited_shots, strict=True):
         _held_machine, held_result = switching_mode.run_shot(held, seed)
-        _machine, result = switching_mode.run_shot(limited, seed)
         held_predictions = switching_mode.predictions(held_result)
         assert switching_mode.predictions(result) == held_predictions
 
@@ -110,27 +115,36 @@ def _with_a_guess(graph):
     return _with_redo(graph, GUESSING_REDO)
 
 
+@functools.cache
+def _guessing_shot(seed: int) -> tuple:
+    """One shot of the held card with a redo on a guess, run once and kept.
+
+    Three tests read these shots and none changes them.
+    """
+    held = _held_graph()
+    guessing = _with_a_guess(held)
+    return switching_mode.run_shot(guessing, seed)
+
+
 def _with_redo(graph, redo):
     """The run with this redo window, its windows on its boundary row."""
     switched = switching_mode.with_switching(graph, strong_window=redo)
     return switched.with_settings(machines.WINDOWS, boundary_policy=CHECKED)
 
 
-def _count_over(graph, seeds, statistic: str) -> int:
-    """A statistic's value summed over the seeds' shots."""
+def _count_over(shots: list, statistic: str) -> int:
+    """A statistic's value summed over the shots."""
     total = 0
-    for seed in seeds:
-        machine, _result = switching_mode.run_shot(graph, seed)
+    for machine, _result in shots:
         counts = input_checks_tests._counts(machine.observation.statistics)
         total += counts[statistic]
     return total
 
 
-def _overlaps_over(graph, seeds) -> int:
+def _overlaps_over(shots: list) -> int:
     """Strong decodes that started before the one of the window before ended."""
     total = 0
-    for seed in seeds:
-        machine, _result = switching_mode.run_shot(graph, seed)
+    for machine, _result in shots:
         total += _overlapping_redos(machine)
     return total
 

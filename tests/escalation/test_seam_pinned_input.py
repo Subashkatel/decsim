@@ -43,6 +43,8 @@ with the crossing part of its commit (Toshio et al. 2510.25222 lines
 1248-1250).
 """
 
+import functools
+
 import numpy
 import pytest
 import stim
@@ -77,8 +79,13 @@ def _machine(distance: int, rounds: int, seed: int, strong_window):
     return machine_module.Machine.build(gate, seed)
 
 
+@functools.cache
 def _external_flip_matrix(distance: int, rounds: int):
-    """(H, column by detector set) of the circuit's model, built by qLDPC."""
+    """(H, column by detector set) of the circuit's model, built by qLDPC.
+
+    The near and forward cases share each distance's circuit, and the
+    oracle only reads H, so it is built once per circuit.
+    """
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z",
         rounds=rounds,

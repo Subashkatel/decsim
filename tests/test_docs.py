@@ -122,9 +122,20 @@ def _prose_files() -> tuple:
 
 
 @functools.cache
-def _collected_tests() -> frozenset:
-    """Every test pytest collects, as `path::name`, from one collection."""
-    command = [sys.executable, "-m", "pytest", "--collect-only", "-q"]
+def _collected_tests(test_files: tuple) -> frozenset:
+    """Every test pytest collects from the files, as `path::name`.
+
+    A test's identifier does not depend on what else is collected beside
+    it, so one collection of the named files answers for each name.
+    """
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "--collect-only",
+        "-q",
+        *test_files,
+    ]
     finished = subprocess.run(
         command, cwd=CHECKOUT, capture_output=True, text=True, check=True
     )
@@ -262,10 +273,27 @@ def _check_one_path(quoted: str, page: pathlib.Path) -> None:
 
 def test_every_test_named_in_the_docs_is_a_test_pytest_collects():
     """A page that sends a reader to a test sends them to one that exists."""
-    collected = _collected_tests()
     quoted_on_pages = _quoted_on_prose_pages()
+    test_files = _test_files_named(quoted_on_pages)
+    collected = _collected_tests(test_files)
     check_one = functools.partial(_check_one_test, collected=collected)
     _check_each_quoted(quoted_on_pages, check_one)
+
+
+def _test_files_named(quoted_on_pages: list) -> tuple:
+    """The files of tests/ that a backticked `path::name` names, sorted."""
+    test_files = set()
+    for quoted, _page in quoted_on_pages:
+        if "::" not in quoted:
+            continue
+        if not quoted.startswith("tests/"):
+            continue
+        words = quoted.split("::")
+        name = words[0]
+        path = CHECKOUT / name
+        if path.is_file():
+            test_files.add(name)
+    return tuple(sorted(test_files))
 
 
 def _check_one_test(quoted: str, page, collected: frozenset) -> None:

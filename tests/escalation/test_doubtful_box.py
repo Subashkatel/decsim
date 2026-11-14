@@ -15,6 +15,7 @@ which the sliding chain never lets them do.
 """
 
 import dataclasses
+import functools
 
 import numpy
 import pytest
@@ -52,21 +53,34 @@ CYCLE_COUNT = cycle_count.CycleCount(clock=clocks.FRIDGE_CLOCK)
 UNION_FIND = union_find.UnionFindDecoder.Settings(timing=CYCLE_COUNT)
 
 
-def packed_windows(margin: int) -> list:
-    """(job, weak result, box) of each window that has a doubtful cluster."""
+@functools.cache
+def doubtful_windows() -> tuple:
+    """(job, weak result, cluster record) of each window with doubt.
+
+    Every margin and shape packs the same sampled windows, and packing
+    only reads them, so they are sampled and decoded once.
+    """
     circuit = windows.memory_circuit(DISTANCE, ROUNDS, PROBABILITY)
     model = windows.whole_circuit_window(circuit, ROUNDS, LINKED)
     detection_events, _ = windows.sampled_shots(circuit, SHOTS, 11)
     weak = UNION_FIND.build()
-    shape = doubtful_box.BoxShape(margin, margin)
-    packer = doubtful_box.BoxPacker(shape)
-    packed = []
+    decoded = []
     for shot in detection_events:
         job = windows.job_for(model, shot)
         result = weak.decode(job)
         record = cluster_record.cluster_record(result.cluster_evidence)
         if record.walk_cluster_count == 0:
             continue
+        decoded.append((job, result, record))
+    return tuple(decoded)
+
+
+def packed_windows(margin: int) -> list:
+    """(job, weak result, box) of each window that has a doubtful cluster."""
+    shape = doubtful_box.BoxShape(margin, margin)
+    packer = doubtful_box.BoxPacker(shape)
+    packed = []
+    for job, result, _record in doubtful_windows():
         box = packer.pack(job, result)
         packed.append((job, result, box))
     return packed
@@ -290,18 +304,9 @@ def test_every_window_of_a_box_run_has_its_final_answer_latency():
 
 def shaped_windows(shape) -> list:
     """(weak result, box, cluster record) of each window with doubt."""
-    circuit = windows.memory_circuit(DISTANCE, ROUNDS, PROBABILITY)
-    model = windows.whole_circuit_window(circuit, ROUNDS, LINKED)
-    detection_events, _ = windows.sampled_shots(circuit, SHOTS, 11)
-    weak = UNION_FIND.build()
     packer = doubtful_box.BoxPacker(shape)
     packed = []
-    for shot in detection_events:
-        job = windows.job_for(model, shot)
-        result = weak.decode(job)
-        record = cluster_record.cluster_record(result.cluster_evidence)
-        if record.walk_cluster_count == 0:
-            continue
+    for job, result, record in doubtful_windows():
         box = packer.pack(job, result)
         packed.append((result, box, record))
     return packed

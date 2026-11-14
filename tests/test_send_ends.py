@@ -11,6 +11,7 @@ two ends.
 """
 
 import ast
+import functools
 import pathlib
 
 TESTS_FILE = pathlib.Path(__file__)
@@ -474,8 +475,12 @@ def _first_attribute(node) -> str:
     return first
 
 
+@functools.cache
 def _packages_defining() -> dict:
-    """Every function name of the component packages, by package."""
+    """Every function name of the component packages, by package.
+
+    Read once: every delivery site asks, and the callers only read it.
+    """
     packages = {}
     for package in COMPONENT_PACKAGES:
         directory = DECSIM_ROOT / package

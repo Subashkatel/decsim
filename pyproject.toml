@@ -51,6 +51,9 @@ testpaths = ["tests"]
 # tree, which silently dropped tests/build/ from the suite; the list
 # below is that default without "build".
 norecursedirs = [".*", "*.egg", "_darcs", "CVS", "dist", "node_modules", "venv", "{arch}"]
+# tests/conftest.py marks the tests tests/slow_tests.txt lists; plain
+# pytest runs them, and `pytest -m "not slow"`, the quick set, does not.
+markers = ["slow: a test on tests/slow_tests.txt, left out of the quick set"]
 
 # The style gate (STYLE.md rule 9): Google Python style, 80
 # columns, Google docstrings. The one-action rule of rule 1 is checked

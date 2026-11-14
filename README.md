@@ -116,6 +116,23 @@ python -m pytest tests
 A test whose optional backend is absent (the `bb-decoders` and Deltakit
 extras) is skipped and says which module it could not import.
 
+The whole suite takes 10 to 13 minutes on one core; run it before a
+change lands. While editing, run the quick set, a minute or two, which
+leaves out the tests `tests/slow_tests.txt` lists. A test is on that
+list when one of its cases took 0.2 s or more, and a renamed or deleted
+test left on it stops the run. `tools/slow_tests.py` writes the list
+from two durations reports: the whole suite's, then the quick set's on
+the list the first gives, because a shared setup that a left-out test
+paid for moves to the next test that needs it.
+
+```bash
+python -m pytest tests -m "not slow"
+python -m pytest tests -q --durations=0 --durations-min=0.02 > whole.txt
+python tools/slow_tests.py whole.txt
+python -m pytest tests -q --durations=0 --durations-min=0.02 -m "not slow" > quick.txt
+python tools/slow_tests.py whole.txt quick.txt
+```
+
 The tutorials show what their commands and their Python print.
 `tools/check_tutorial_runs.py` runs each page's commands and Python
 blocks and holds what the page shows to what they print: every line on a page whose decoders

@@ -617,3 +617,25 @@ def test_the_speed_check_fails_a_task_past_the_slowdown_on_its_medians():
     slower = speed_check.slower_tasks(timings, 0.2)
 
     assert slower == ["slower"]
+
+
+def test_the_slow_list_names_the_function_of_a_case_at_the_threshold():
+    """A case's setup and call add up, and its parameters are dropped.
+
+    test_summed's case takes 0.15 s and 0.05 s, the threshold exactly;
+    test_fast's takes 0.19 s.
+    """
+    slow_tests = _tool("slow_tests")
+    report = (
+        "1.20s call     tests/x.py::Holder::test_method\n"
+        "0.15s call     tests/x.py::test_summed[one case]\n"
+        "0.05s setup    tests/x.py::test_summed[one case]\n"
+        "0.19s call     tests/x.py::test_fast[one case]\n"
+    )
+
+    functions = slow_tests.slow_functions(report, slow_tests.THRESHOLD_SECONDS)
+
+    assert functions == [
+        "tests/x.py::Holder::test_method",
+        "tests/x.py::test_summed",
+    ]

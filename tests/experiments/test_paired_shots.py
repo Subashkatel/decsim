@@ -6,6 +6,8 @@
   fails broken - repaired more times than the fast decoder alone, on
   outcomes numpy draws.
 - The rows: shots.csv text read by csv.DictReader.
+- The draws: a seed whose three shots hold different sample digests is
+  refused, since the counts are of one shot decoded three ways.
 """
 
 import csv
@@ -21,11 +23,11 @@ import decsim.experiments.paired_shots as paired_shots
 # The float error of a sum of a few thousand binomial terms.
 P_VALUE_TOLERANCE = 1e-12
 
-SHOTS_CSV = """decoding,seed,is_scored,logical_failure
-fast,1,True,True
-fast,2,True,False
-fast,3,False,True
-pair,1,True,False
+SHOTS_CSV = """decoding,seed,is_scored,logical_failure,sample_digest
+fast,1,True,True,a1
+fast,2,True,False,b2
+fast,3,False,True,c3
+pair,1,True,False,a1
 """
 
 
@@ -42,9 +44,9 @@ def test_shots_with_no_discordant_pair_give_a_p_of_one():
 
 
 def test_a_hand_made_set_of_shots_counts_each_kind_on_the_shared_seeds():
-    fast = {1: True, 2: True, 3: False, 4: False, 5: True, 9: True}
-    strong = {1: False, 2: True, 3: False, 4: False, 5: False}
-    pair = {1: False, 2: True, 3: True, 4: False, 5: True}
+    fast = _one_draw({1: True, 2: True, 3: False, 4: False, 5: True, 9: True})
+    strong = _one_draw({1: False, 2: True, 3: False, 4: False, 5: False})
+    pair = _one_draw({1: False, 2: True, 3: True, 4: False, 5: True})
     repairs = paired_shots.paired_repairs(fast, strong, pair)
     assert repairs == paired_shots.PairedRepairs(
         shots=5,
@@ -81,12 +83,28 @@ def test_the_pair_fails_broken_minus_repaired_more_than_fast_alone_property():
         assert change == repairs.broken - repairs.repaired
 
 
-def test_a_runs_failures_leave_out_unscored_shots_and_other_runs():
+def test_a_seed_whose_three_shots_are_not_one_draw_is_refused():
+    fast = {7: paired_shots.ShotOutcome("a1", True)}
+    strong = {7: paired_shots.ShotOutcome("a1", False)}
+    pair = {7: paired_shots.ShotOutcome("b2", False)}
+    with pytest.raises(ValueError) as refused:
+        paired_shots.paired_repairs(fast, strong, pair)
+    assert str(refused.value) == (
+        "seed 7 holds 2 different draws in the three runs (their "
+        "sample_digest cells differ), so its outcomes cannot be paired; "
+        "pair runs that differ only in their decoder"
+    )
+
+
+def test_a_runs_outcomes_leave_out_unscored_shots_and_other_runs():
     text = io.StringIO(SHOTS_CSV)
     reader = csv.DictReader(text)
     rows = list(reader)
-    failures = paired_shots.failures_by_seed(rows, {"decoding": "fast"})
-    assert failures == {1: True, 2: False}
+    outcomes = paired_shots.outcomes_by_seed(rows, {"decoding": "fast"})
+    assert outcomes == {
+        1: paired_shots.ShotOutcome("a1", True),
+        2: paired_shots.ShotOutcome("b2", False),
+    }
 
 
 def _binomial_sum_p(first_only: int, second_only: int) -> float:
@@ -104,7 +122,16 @@ def _binomial_sum_p(first_only: int, second_only: int) -> float:
 
 
 def _random_outcomes(generator: numpy.random.Generator) -> dict:
-    """{seed: failed} on 40 seeds, about one in three failed."""
+    """{seed: outcome} on 40 seeds of one draw, about one in three failed."""
     failed = generator.random(40) < 0.3
     outcomes = failed.tolist()
-    return dict(enumerate(outcomes))
+    failed_by_seed = dict(enumerate(outcomes))
+    return _one_draw(failed_by_seed)
+
+
+def _one_draw(failed_by_seed: dict) -> dict:
+    """{seed: outcome} of runs that drew the same shot at every seed."""
+    return {
+        seed: paired_shots.ShotOutcome("one draw", failed)
+        for seed, failed in failed_by_seed.items()
+    }

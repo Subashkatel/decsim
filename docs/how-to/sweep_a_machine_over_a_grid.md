@@ -174,9 +174,9 @@ as one axis of the grid. Then pair the rows of `shots.csv` by seed:
 
 ```python
 rows = list(csv.DictReader(open("results/shots.csv")))
-fast = paired_shots.failures_by_seed(rows, {"decoding": "fast"})
-strong = paired_shots.failures_by_seed(rows, {"decoding": "strong"})
-pair = paired_shots.failures_by_seed(rows, {"decoding": "pair"})
+fast = paired_shots.outcomes_by_seed(rows, {"decoding": "fast"})
+strong = paired_shots.outcomes_by_seed(rows, {"decoding": "strong"})
+pair = paired_shots.outcomes_by_seed(rows, {"decoding": "pair"})
 repairs = paired_shots.paired_repairs(fast, strong, pair)
 ```
 
@@ -186,7 +186,9 @@ the shots the pair failed and the strong decoder alone did not
 (`decsim/experiments/paired_shots.py`). The pair fails broken -
 repaired more times than the fast decoder alone, and `repairs.p_value`
 is McNemar's exact test of those two counts. Only the shots all three
-runs scored are compared.
+runs scored are compared. The three runs must hold the same draw at
+each seed: a seed whose `sample_digest` cells differ is refused, since
+its three outcomes are not of one shot.
 
 `repairs.best_of_two_failures` counts the shots that the fast decoder
 alone and the strong one alone both failed. A pair that chose the

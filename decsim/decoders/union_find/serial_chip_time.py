@@ -1,4 +1,4 @@
-"""A serial union-find chip's time: from its memory reads, or its defects.
+"""A serial union-find chip's time: from its memory reads, or its loop.
 
 A chip that keeps its graph in memory tables and works through its
 clusters one at a time spends its time on memory reads, and two
@@ -13,34 +13,32 @@ each read the cluster's vertices once. The paper counts on the clusters
 the growth ends with, as this does, and holds a read for four clock
 cycles.
 
-DefectCycleCount is a law in the defects alone,
-
-    cycles = cycles_per_round x rounds + cycles_per_defect x defects
-           + cycles_per_squared_defect x defects^2,
-
-after the work Barber et al. 2309.05558 Sec. II A name for their
-design: a read and a write per defect a growth step, and a comparison
-per pair of defects. The paper prints no law and no cycle counts, so
-the three numbers are a fit to its published times, and a run supplies
-them with their source.
+CollisionClusteringCount is the chip of Barber et al. 2309.05558: its
+loop is run on the decode's own graph and defects, and each operation
+costs the cycles the paper's data record gives it
+(collision_clustering.py).
 
 Both keep one chip per stabilizer type, the two working side by side,
 so a decode is held for the slower of the two (2001.06598 Sec. III: two
 decoders per logical qubit, one for each type of error; 2309.05558
-Fig. 5: disjoint decoding graphs decode X and Z errors). A detector's
-type and place are read off its coordinates: Stim's rotated memory
-places stabilizers at even x and y with the two types alternating, so
-(x + y) / 2 is even for one type and odd for the other, one type's
-stabilizers are one step apart along the diagonals (x + y) / 4 and
-(x - y) / 4, and the third coordinate counts rounds.
+Fig. 5: disjoint decoding graphs decode X and Z errors). The read count
+reads a detector's type and place off its coordinates: Stim's rotated
+memory places stabilizers at even x and y with the two types
+alternating, so (x + y) / 2 is even for one type and odd for the other,
+one type's stabilizers are one step apart along the diagonals
+(x + y) / 4 and (x - y) / 4, and the third coordinate counts rounds.
+The loop's chips are the connected parts of the decode's graph.
 """
 
 import dataclasses
 import math
 from typing import Optional
 
+import numpy
+
 import decsim.config as config
 import decsim.decoders.cluster_record as cluster_record
+import decsim.decoders.union_find.collision_clustering as collision_clustering
 import decsim.records.decoder_evidence as evidence_records
 
 # the two stabilizer types, a chip each
@@ -124,42 +122,33 @@ class ClusterReadCount:
 
 
 @dataclasses.dataclass(frozen=True)
-class DefectCycleCount:
-    """A union-find unit's time as a law in each chip's defects.
+class CollisionClusteringCount:
+    """A union-find unit's time as the Collision Clustering chip's cycles.
 
-    cycles = cycles_per_round x rounds + cycles_per_defect x defects
-           + cycles_per_squared_defect x defects^2, rounded up,
-
-    with the defects of the stabilizer type that has more of them, and
-    the rounds the window's detectors span. A decode with no defect
-    still costs its rounds. It prices the decode only: the extra growth
-    of the extra-cluster gap is refused.
+    The chip's loop (collision_clustering.passes_of) runs on the
+    decode's own graph and defects, a chip for each connected part of
+    the graph, and the unit is held for the cycles of the chip that
+    takes longest (collision_clustering.cycles_of), rounded up. The
+    loop's clusters are the decode's own. A decode with no defect still
+    costs a chip its Init and one Grow pass. It prices the decode only:
+    the extra growth of the extra-cluster gap is refused.
     """
 
     clock: config.Clock
-    cycles_per_round: float
-    cycles_per_defect: float
-    cycles_per_squared_defect: float
 
-    def __post_init__(self) -> None:
-        _check_cycle_rate("cycles_per_round", self.cycles_per_round)
-        _check_cycle_rate("cycles_per_defect", self.cycles_per_defect)
-        _check_cycle_rate(
-            "cycles_per_squared_defect", self.cycles_per_squared_defect
-        )
-
-    def cycles(self, evidence: evidence_records.UnionFindHardEvidence) -> int:
-        """The cycles of the chip with more defects for one decode."""
-        coordinates = _coordinates_of(evidence)
-        defects = _defects_by_type(evidence.residual_syndrome, coordinates)
-        most_defects = max(defects)
-        rounds = {coordinate[2] for coordinate in coordinates}
-        round_cycles = self.cycles_per_round * len(rounds)
-        defect_cycles = self.cycles_per_defect * most_defects
-        squared_defects = most_defects * most_defects
-        pair_cycles = self.cycles_per_squared_defect * squared_defects
-        cycles = round_cycles + defect_cycles + pair_cycles
-        return math.ceil(cycles)
+    def cycles(self, evidence: evidence_records.UnionFindHardEvidence) -> list:
+        """The cycles of each chip for one decode."""
+        chips = collision_clustering.chips_of(evidence.graph)
+        fired = numpy.asarray(evidence.residual_syndrome, dtype=bool)
+        cycles = []
+        for chip in chips:
+            chip_fired = fired[chip.detectors]
+            defects = numpy.flatnonzero(chip_fired)
+            passes, _ = collision_clustering.passes_of(chip, defects)
+            detector_count = len(chip.detectors)
+            chip_cycles = collision_clustering.cycles_of(passes, detector_count)
+            cycles.append(chip_cycles)
+        return cycles
 
     def decode_ticks(
         self,
@@ -172,12 +161,14 @@ class DefectCycleCount:
         if evidence is None:
             return 0
         cycles = self.cycles(evidence)
-        if cycles == 0:
+        if not cycles:
             return 0
-        return self.clock.ticks_to_edge(cycles, now)
+        slowest = max(cycles)
+        whole_cycles = math.ceil(slowest)
+        return self.clock.ticks_to_edge(whole_cycles, now)
 
     def extra_growth_ticks(self, steps: tuple, elapsed_nanoseconds: int) -> int:
-        """Refused: the law prices no growth past the decode."""
+        """Refused: the chip's cycles are known for the decode only."""
         del steps
         del elapsed_nanoseconds
         raise ValueError(EXTRA_GROWTH_REFUSAL)
@@ -226,16 +217,6 @@ def _growth_reads(diameter: int) -> int:
     return sum(step_reads)
 
 
-def _defects_by_type(residual_syndrome: tuple, coordinates: tuple) -> list:
-    defects = [0] * STABILIZER_TYPE_COUNT
-    for detector, bit in enumerate(residual_syndrome):
-        if not bit:
-            continue
-        chip = _stabilizer_type(coordinates[detector])
-        defects[chip] += 1
-    return defects
-
-
 def _stabilizer_type(coordinate: tuple) -> int:
     """Which of the two types a detector at this coordinate is."""
     diagonal = coordinate[0] + coordinate[1]
@@ -248,13 +229,3 @@ def _grid_place(coordinate: tuple) -> tuple:
     along = (coordinate[0] + coordinate[1]) / 4
     across = (coordinate[0] - coordinate[1]) / 4
     return along, across, coordinate[2]
-
-
-def _check_cycle_rate(name: str, value: object) -> None:
-    is_finite = config.is_number(value) and math.isfinite(value)
-    if is_finite and value >= 0:
-        return
-    raise ValueError(
-        f"defect_cycle_count.{name} must be finite and not negative "
-        f"(got {value!r})"
-    )

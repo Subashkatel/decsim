@@ -288,13 +288,13 @@ class PresetTime:
 
 
 # What prices a union-find unit's time: its cycle count, the host's, a
-# stated time, or a serial chip's reads or defects.
+# stated time, or a serial chip's reads or its loop.
 Timing = Union[
     CycleCount,
     HostMeasuredTime,
     PresetTime,
     serial_chip_time.ClusterReadCount,
-    serial_chip_time.DefectCycleCount,
+    serial_chip_time.CollisionClusteringCount,
 ]
 
 

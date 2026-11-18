@@ -47,8 +47,8 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         count (cycle_count.CycleCount),
         cycle_count.HostMeasuredTime(), a stated time
         (cycle_count.PresetTime), or a serial chip's memory reads or its
-        defects (serial_chip_time.ClusterReadCount,
-        serial_chip_time.DefectCycleCount). A run names one; none is
+        loop (serial_chip_time.ClusterReadCount,
+        serial_chip_time.CollisionClusteringCount). A run names one; none is
         refused, since the host's time is no hardware's and is never
         assumed.
         """

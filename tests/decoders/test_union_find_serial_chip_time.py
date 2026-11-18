@@ -100,50 +100,6 @@ def test_a_decode_with_no_detection_event_takes_no_time_by_its_reads():
     assert PAPER_READ_COUNT.decode_ticks(evidence, 0, 0) == 0
 
 
-def test_the_defect_law_is_its_rounds_its_defects_and_their_square():
-    """One round and two defects of one type: 3.5 + 10 x 2 + 1.25 x 4."""
-    law = serial_chip_time.DefectCycleCount(
-        clock=PAPER_CLOCK,
-        cycles_per_round=3.5,
-        cycles_per_defect=10.0,
-        cycles_per_squared_defect=1.25,
-    )
-    evidence = placed_evidence(
-        traced.ADJACENT_PAIR_CHECK, [1, 1], ADJACENT_PAIR_PLACES
-    )
-
-    assert law.cycles(evidence) == 29
-    expected_ticks = 29 * PAPER_CLOCK.period_ticks
-    assert law.decode_ticks(evidence, 0, 0) == expected_ticks
-
-
-def test_the_defect_law_counts_the_type_with_more_defects():
-    """Two defects on each type's grid cost what two defects cost."""
-    law = serial_chip_time.DefectCycleCount(
-        clock=PAPER_CLOCK,
-        cycles_per_round=0.0,
-        cycles_per_defect=10.0,
-        cycles_per_squared_defect=0.0,
-    )
-    evidence = placed_evidence(TWO_PAIR_CHECK, [1, 1, 1, 1], TWO_PAIR_PLACES)
-
-    assert law.cycles(evidence) == 20
-
-
-def test_a_decode_with_no_defect_still_costs_the_defect_law_its_rounds():
-    law = serial_chip_time.DefectCycleCount(
-        clock=PAPER_CLOCK,
-        cycles_per_round=4.0,
-        cycles_per_defect=10.0,
-        cycles_per_squared_defect=1.0,
-    )
-    evidence = placed_evidence(
-        traced.QUIET_NEIGHBOUR_CHECK, [0, 0, 0], QUIET_NEIGHBOUR_PLACES
-    )
-
-    assert law.cycles(evidence) == 8
-
-
 def test_a_decode_whose_window_has_no_coordinates_is_refused():
     graph = traced.traced_graph(traced.ADJACENT_PAIR_CHECK)
     syndrome = numpy.asarray([1, 1], dtype=numpy.uint8)
@@ -151,16 +107,6 @@ def test_a_decode_whose_window_has_no_coordinates_is_refused():
 
     with pytest.raises(ValueError, match="carries no detector coordinates"):
         PAPER_READ_COUNT.decode_ticks(evidence, 0, 0)
-
-
-def test_a_negative_cycle_rate_is_refused():
-    with pytest.raises(ValueError, match="finite and not negative"):
-        serial_chip_time.DefectCycleCount(
-            clock=PAPER_CLOCK,
-            cycles_per_round=-1.0,
-            cycles_per_defect=0.0,
-            cycles_per_squared_defect=0.0,
-        )
 
 
 def test_negative_cycles_a_read_are_refused():
@@ -171,18 +117,6 @@ def test_negative_cycles_a_read_are_refused():
 def test_the_read_count_refuses_to_price_growth_past_the_decode():
     with pytest.raises(ValueError, match="prices the decode only"):
         PAPER_READ_COUNT.extra_growth_ticks((), 0)
-
-
-def test_the_defect_law_refuses_to_price_growth_past_the_decode():
-    law = serial_chip_time.DefectCycleCount(
-        clock=PAPER_CLOCK,
-        cycles_per_round=4.0,
-        cycles_per_defect=10.0,
-        cycles_per_squared_defect=1.0,
-    )
-
-    with pytest.raises(ValueError, match="prices the decode only"):
-        law.extra_growth_ticks((), 0)
 
 
 def test_the_union_find_row_hands_its_windows_coordinates_to_the_law():

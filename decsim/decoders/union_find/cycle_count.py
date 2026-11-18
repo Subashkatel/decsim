@@ -25,6 +25,7 @@ import numbers
 from typing import Optional, Union
 
 import decsim.config as config
+import decsim.decoders.union_find.serial_chip_time as serial_chip_time
 import decsim.records.decoder_evidence as evidence_records
 
 CYCLE_FIELDS = (
@@ -286,9 +287,15 @@ class PresetTime:
         return config.microseconds_to_ticks(self.latency_microseconds)
 
 
-# What prices a union-find unit's time: its cycle count, the host's, or a
-# stated time.
-Timing = Union[CycleCount, HostMeasuredTime, PresetTime]
+# What prices a union-find unit's time: its cycle count, the host's, a
+# stated time, or a serial chip's reads or defects.
+Timing = Union[
+    CycleCount,
+    HostMeasuredTime,
+    PresetTime,
+    serial_chip_time.ClusterReadCount,
+    serial_chip_time.DefectCycleCount,
+]
 
 
 def _measured_ticks(elapsed_nanoseconds: int) -> int:

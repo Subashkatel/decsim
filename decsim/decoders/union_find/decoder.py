@@ -45,9 +45,12 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         smaller it is, the longer every edge and the more growth
         iterations a decode spans. timing prices the decode: a cycle
         count (cycle_count.CycleCount),
-        cycle_count.HostMeasuredTime(), or a stated time
-        (cycle_count.PresetTime). A run names one; none is refused,
-        since the host's time is no hardware's and is never assumed.
+        cycle_count.HostMeasuredTime(), a stated time
+        (cycle_count.PresetTime), or a serial chip's memory reads or its
+        defects (serial_chip_time.ClusterReadCount,
+        serial_chip_time.DefectCycleCount). A run names one; none is
+        refused, since the host's time is no hardware's and is never
+        assumed.
         """
 
         weight_step: float = evidence_records.DEFAULT_WEIGHT_STEP
@@ -119,10 +122,12 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         gap reads the intervals of this exact decode (Meister et al.
         2405.07433 Algorithm 2 lines 518-525).
         """
-        del model
         del faults
         evidence = window_decoder.decode_graph(backend, syndrome)
-        return window_decode_of(evidence)
+        placed_evidence = dataclasses.replace(
+            evidence, detector_coordinates=model.detector_coordinates
+        )
+        return window_decode_of(placed_evidence)
 
 
 def window_decode_of(

@@ -294,7 +294,7 @@ Timing = Union[
     HostMeasuredTime,
     PresetTime,
     serial_chip_time.ClusterReadCount,
-    serial_chip_time.CollisionClusteringCount,
+    serial_chip_time.PairCompareCount,
 ]
 
 

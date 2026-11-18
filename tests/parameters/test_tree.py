@@ -189,25 +189,43 @@ def test_a_weak_decode_is_priced_by_its_clusters_reads_by_name():
     assert algorithm == expected
 
 
-def test_a_weak_decode_is_priced_by_the_collision_clustering_chip_by_name():
+def test_a_weak_decode_is_priced_by_its_loop_over_defect_pairs_by_name():
+    """Every cost is written: the record has no default for one."""
     machine = run_files.minimal_machine()
-    clock = config.Clock.from_megahertz(2000.0)
+    costs = {
+        "load_cycles": 9.0,
+        "load_cycles_per_word": 2.0,
+        "load_cycles_per_defect": 22.0,
+        "grow_cycles_per_pass": 0.25,
+        "grow_cycles_per_entry": 7.0,
+        "grow_cycles_per_grown_entry": 0.5,
+        "grow_cycles_per_root_step": 1.5,
+        "grow_cycles_per_boundary_hit": 5.5,
+        "match_cycles_per_step": 5.0,
+        "match_cycles_per_pair": 1.0,
+        "match_cycles_per_first_collision": 13.0,
+        "match_cycles_per_boundary_hit": 8.0,
+        "union_cycles_per_step": 1.75,
+    }
+    written_costs = [
+        (f"weak.algorithm.timing.{name}", cost) for name, cost in costs.items()
+    ]
 
     assigned = _applied(
         machine,
         ("weak.algorithm.type", "union_find"),
-        ("weak.algorithm.timing.type", "CollisionClusteringCount"),
+        ("weak.algorithm.timing.type", "PairCompareCount"),
         ("weak.algorithm.timing.clock", "2000MHz"),
-        ("weak.algorithm.weight_step", 1.0),
+        ("weak.algorithm.timing.syndrome_word", "32 bits"),
+        *written_costs,
     )
 
     assigned_pool = assigned.part("weak")
-    algorithm = assigned_pool.settings.algorithm
-    chip_count = serial_chip_time.CollisionClusteringCount(clock=clock)
-    expected = union_find.UnionFindDecoder.Settings(
-        weight_step=1.0, timing=chip_count
+    clock = config.Clock.from_megahertz(2000.0)
+    pair_count = serial_chip_time.PairCompareCount(
+        clock=clock, syndrome_word_bits=32, **costs
     )
-    assert algorithm == expected
+    assert assigned_pool.settings.algorithm.timing == pair_count
 
 
 def test_a_part_is_added_to_an_empty_slot_and_emptied_again():

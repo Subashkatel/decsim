@@ -203,6 +203,23 @@ def test_the_union_find_row_hands_its_windows_coordinates_to_the_law():
     assert PAPER_READ_COUNT.reads(evidence) == [9, 0]
 
 
+def test_a_decode_on_matrices_alone_carries_no_coordinates():
+    """A caller with no window model, as the machine tests' referee is."""
+    settings = union_find.UnionFindDecoder.Settings(
+        weight_step=traced.ONE_TICK_WEIGHT_STEP, timing=PAPER_READ_COUNT
+    )
+    decoder = settings.build()
+    model = pair_window_model()
+    faults = model.graphlike_faults
+    backend = decoder.compile(faults, None)
+    syndrome = numpy.asarray([1, 1], dtype=numpy.uint8)
+
+    decode = decoder.decode_window(backend, None, faults, syndrome)
+
+    evidence = decode.cluster_evidence
+    assert evidence.detector_coordinates is None
+
+
 def test_the_read_count_gives_the_papers_mean_time_on_its_own_case_property():
     """42 ns for d = 11, p = 0.001 (HPCA 2022 Sec. IV E), within 1.5 ns.
 

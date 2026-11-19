@@ -233,7 +233,7 @@ def hyperedge_belief_propagation(
     (distinct_hyperedges); the sparse map takes each hyperedge's value
     onto the graphlike edges of its decomposition, by the window's
     projection, as beliefmatching's hyperedge_to_edge_matrix does. The
-    belief_matching and belief_find rows both decode on this pair.
+    belief_matching row decodes on this pair.
     """
     physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
     columns, error_channel = distinct_hyperedges(physical)
@@ -288,8 +288,7 @@ def edge_posteriors(
     """Map the decoded BP's hyperedge posteriors onto graphlike edges.
 
     One posterior per graphlike fault column of the window: the
-    belief_matching row matches on them, the belief_find row grows on
-    them.
+    belief_matching row matches on them.
     """
     log_likelihood_ratios = numpy.asarray(
         belief_propagation.log_prob_ratios, dtype=float

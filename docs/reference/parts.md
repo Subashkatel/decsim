@@ -571,7 +571,7 @@ It extends `union_find.UnionFindDecoder.Settings`, and holds its fields.
 
 `decsim/decoders/union_find/decoder.py`. The union-find row's settings.
 
-weight_step is the growth resolution, the natural-log weight one tick of edge length is (Huang, Newman and Brown 2004.04693): the smaller it is, the longer every edge and the more growth iterations a decode spans. timing prices the decode: a cycle count (cycle_count.CycleCount), cycle_count.HostMeasuredTime(), a stated time (cycle_count.PresetTime), or a serial chip's memory reads or its loop (serial_chip_time.ClusterReadCount, serial_chip_time.PairCompareCount). A run names one; none is refused, since the host's time is no hardware's and is never assumed.
+weight_step is the growth resolution, the natural-log weight one tick of edge length is (Huang, Newman and Brown 2004.04693): the smaller it is, the longer every edge and the more growth iterations a decode spans. timing prices the decode: a cycle count (cycle_count.CycleCount), cycle_count.HostMeasuredTime(), a stated time (cycle_count.PresetTime), or a serial chip's loop (serial_chip_time.PairCompareCount). A run names one; none is refused, since the host's time is no hardware's and is never assumed.
 
 | Field | Type | Default |
 | --- | --- | --- |

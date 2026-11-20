@@ -46,9 +46,8 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         iterations a decode spans. timing prices the decode: a cycle
         count (cycle_count.CycleCount),
         cycle_count.HostMeasuredTime(), a stated time
-        (cycle_count.PresetTime), or a serial chip's memory reads or its
-        loop (serial_chip_time.ClusterReadCount,
-        serial_chip_time.PairCompareCount). A run names one; none is
+        (cycle_count.PresetTime), or a serial chip's loop
+        (serial_chip_time.PairCompareCount). A run names one; none is
         refused, since the host's time is no hardware's and is never
         assumed.
         """
@@ -112,7 +111,7 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
     def decode_window(
         self,
         backend: evidence_records.UnionFindGraph,
-        model: Optional[fault_models.WindowErrorModel],
+        model: fault_models.WindowErrorModel,
         faults: fault_models.PlacedFaultModel,
         syndrome: numpy.ndarray,
     ) -> decoding_records.WindowDecode:
@@ -120,19 +119,12 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
         The immutable growth evidence rides on the result, so a cluster
         gap reads the intervals of this exact decode (Meister et al.
-        2405.07433 Algorithm 2 lines 518-525). The window's detector
-        coordinates ride on it too, for a time law that reads where a
-        cluster lies. A caller that decodes matrices alone hands no
-        model, and its evidence carries no coordinates.
+        2405.07433 Algorithm 2 lines 518-525).
         """
+        del model
         del faults
         evidence = window_decoder.decode_graph(backend, syndrome)
-        if model is None:
-            return window_decode_of(evidence)
-        placed_evidence = dataclasses.replace(
-            evidence, detector_coordinates=model.detector_coordinates
-        )
-        return window_decode_of(placed_evidence)
+        return window_decode_of(evidence)
 
 
 def window_decode_of(

@@ -164,31 +164,6 @@ def test_a_weak_decode_is_given_a_stated_time_by_name():
     assert algorithm == expected
 
 
-def test_a_weak_decode_is_priced_by_its_clusters_reads_by_name():
-    """Four cycles a read, on the clock the run names for the chip."""
-    machine = run_files.minimal_machine()
-    clock = config.Clock.from_megahertz(2000.0)
-
-    assigned = _applied(
-        machine,
-        ("weak.algorithm.type", "union_find"),
-        ("weak.algorithm.timing.type", "ClusterReadCount"),
-        ("weak.algorithm.timing.clock", "2000MHz"),
-        ("weak.algorithm.timing.per_read", "4 cycles"),
-        ("weak.algorithm.weight_step", 0.1),
-    )
-
-    assigned_pool = assigned.part("weak")
-    algorithm = assigned_pool.settings.algorithm
-    read_count = serial_chip_time.ClusterReadCount(
-        clock=clock, cycles_per_read=4
-    )
-    expected = union_find.UnionFindDecoder.Settings(
-        weight_step=0.1, timing=read_count
-    )
-    assert algorithm == expected
-
-
 def test_a_weak_decode_is_priced_by_its_loop_over_defect_pairs_by_name():
     """Every cost is written: the record has no default for one."""
     machine = run_files.minimal_machine()

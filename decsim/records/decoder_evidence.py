@@ -16,7 +16,7 @@ import dataclasses
 import functools
 import math
 import numbers
-from typing import Optional, Union
+from typing import Union
 
 import numpy
 
@@ -151,10 +151,6 @@ class UnionFindHardEvidence:
     # the passes the unit ran on this window before this one, in order,
     # whose cycles it also spent: a correlated decode's first pass
     earlier_passes: tuple["UnionFindHardEvidence", ...] = ()
-    # Stim's coordinates of the graph's detectors, in row order, when
-    # the window's model has them: a time law that reads where a
-    # cluster lies places its detectors by them
-    detector_coordinates: Optional[tuple] = None
 
 
 def normalized_weight_step(

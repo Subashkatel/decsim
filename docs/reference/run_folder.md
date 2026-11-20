@@ -11,12 +11,7 @@ names one. `decsim run --record` fixes the folder once, and every job of
 `results/` is output, not code, and git does not track it, which is
 gem5's `m5out/`. `examples/deltakit_example.py` and
 `examples/live_memory_example.py` write the same records into their
-`--output` folder. A sinter experiment, `experiments/decoder_baseline/run.py`,
-writes the same `run.json`, code state and script copy, and its tasks'
-counts to `stats.csv` in sinter's columns (`shots`, `errors`,
-`discards`, `decoder`, the labels in `json_metadata`); its rate per
-round is sinter's `shot_error_rate_to_piece_error_rate` over the 100
-rounds its script sets, as `sweep.csv`'s per-round columns are.
+`--output` folder.
 
 A results folder holds one experiment: its pieces, one record per
 task, and the files folded from the pieces at its root. It holds one
@@ -276,8 +271,8 @@ One run is outside that sum, and knowingly: under
 overlap rather than follow each other, so adding both would count the
 same wall time twice. `tests/experiments/test_measure.py` asserts the
 identity window by window on `decsim.presets.machines.weak_baseline`,
-`examples/two_tiers.py`, and the `redo_window_d3` and `cluster_gap_d3`
-tasks of `experiments/switching/run.py`, which are a run with no signal to compute, a run whose signal is a second
+`examples/two_tiers.py`, and the redo window and cluster gap machines of
+`tests/experiments/two_tier_machines.py`, which are a run with no signal to compute, a run whose signal is a second
 forced-class solve, the same on a host-clock strong tier, and a run
 whose signal is a priced walk.
 

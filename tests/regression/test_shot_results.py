@@ -10,7 +10,8 @@ none), both strong windows, the three threshold sources, both cluster
 gaps, the four window schemes, bounded links and buffers, the ported
 store, the credit and reliable protocols, the chip side's priced
 stages, the data path read in place, and Experiment 1's two machines,
-each at d = 3 from the shipped presets and run files.
+each at d = 3 from the shipped presets and the tests' two tier
+machines (tests/experiments/two_tier_machines.py).
 
 The decoders' and confidence walks' host clocks are a counter stepping
 20 microseconds a reading, as the fingerprint harness steps them, so a
@@ -23,13 +24,10 @@ commit message.
 """
 
 import dataclasses
-import functools
 import hashlib
-import importlib.util
 import itertools
 import json
 import pathlib
-import types
 
 import pytest
 
@@ -60,6 +58,7 @@ import decsim.windows.boundary_policies as boundary_policies
 import decsim.windows.schemes.naive_online as naive_online
 import decsim.windows.schemes.parallel as parallel
 import decsim.windows.schemes.sandwich as sandwich
+import tests.experiments.two_tier_machines as two_tier_machines
 from decsim.decoders.minimum_weight_perfect_matching import (
     decoder as minimum_weight_perfect_matching,
 )
@@ -69,7 +68,6 @@ HERE = THIS_FILE.parent
 DIGESTS_PATH = HERE / "shot_digests.json"
 # one row: 40 dB at d = 3 and p = 0.008, twice the fixed threshold
 THRESHOLD_TABLE = HERE / "threshold_table.csv"
-EXPERIMENTS = HERE.parents[1] / "experiments"
 DISTANCE = 3
 # the rotated surface code's checks a round
 SYNDROME_BITS_PER_ROUND = DISTANCE * DISTANCE - 1
@@ -87,13 +85,11 @@ def strong_alone() -> graph.Machine:
 
 
 def redo_window_switching() -> graph.Machine:
-    run_file = _run_file("switching")
-    return run_file.redo_window_switching(DISTANCE)
+    return two_tier_machines.redo_window_switching(DISTANCE)
 
 
 def cluster_gap_switching() -> graph.Machine:
-    run_file = _run_file("switching")
-    return run_file.cluster_gap_switching(DISTANCE)
+    return two_tier_machines.cluster_gap_switching(DISTANCE)
 
 
 def table_threshold() -> graph.Machine:
@@ -141,8 +137,7 @@ def bounded_buffer() -> graph.Machine:
 
 
 def data_path_in_place() -> graph.Machine:
-    run_file = _run_file("data_movement")
-    return run_file.weak_input_in_place(DISTANCE)
+    return two_tier_machines.weak_input_in_place(DISTANCE)
 
 
 def experiment_one_switching() -> graph.Machine:
@@ -329,17 +324,6 @@ class _CountingClock:
 
     def perf_counter_ns(self) -> int:
         return next(self.readings)
-
-
-@functools.cache
-def _run_file(name: str) -> types.ModuleType:
-    """experiments/<name>/config.py as a module, for its machine functions."""
-    path = EXPERIMENTS / name / "config.py"
-    module_name = f"regression_config_{name}"
-    specification = importlib.util.spec_from_file_location(module_name, path)
-    module = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(module)
-    return module
 
 
 def _redo_window_switching_on(threshold) -> graph.Machine:

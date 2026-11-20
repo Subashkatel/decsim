@@ -152,11 +152,11 @@ python -m pip install -e ".[run,test,dev]" -c constraints.txt
 tools/check.sh
 ```
 
-`tools/speed_check.py` times seven tasks of the shipped experiments in
-a base checkout and in this one, in turn on one node, and fails when a
-task's median warm seconds a shot here pass the base's by more than
-20%. Nodes of one type differ by that much, so it keeps no stored
-numbers; run it as one Slurm job (about half an hour):
+`tools/speed_check.py` times four tasks of the examples in a base
+checkout and in this one, in turn on one node, and fails when a task's
+median warm seconds a shot here pass the base's by more than 20%. Nodes
+of one type differ by that much, so it keeps no stored numbers; run it
+as one Slurm job:
 
 ```bash
 git worktree add ../decsim_base main

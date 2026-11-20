@@ -10,9 +10,9 @@ page is enforced here.
 2. Every backticked path in docs/ and README.md exists in the tree, and
    every `path::test_name` in them names a test pytest collects.
 3. Every uppercase name in backticks in docs/ and README.md is a name
-   the tree defines: a module-level name of decsim/, tests/, examples/
-   or experiments/, or a shell variable one of the scripts reads, apart
-   from the foreign names listed in FOREIGN_NAMES.
+   the tree defines: a module-level name of decsim/, tests/ or
+   examples/, or a shell variable one of the scripts reads, apart from
+   the foreign names listed in FOREIGN_NAMES.
 4. No em dash in docs/, README.md, STYLE.md, or any docstring of the
    package, the tests or the tools.
 5. Every relative link in docs/ and README.md opens a file in the tree,
@@ -46,7 +46,6 @@ PACKAGE = CHECKOUT / "decsim"
 DOCS = CHECKOUT / "docs"
 TESTS = CHECKOUT / "tests"
 EXAMPLES = CHECKOUT / "examples"
-EXPERIMENTS = CHECKOUT / "experiments"
 TOOLS = CHECKOUT / "tools"
 SLURM = CHECKOUT / "slurm"
 EM_DASH = "—"
@@ -102,9 +101,9 @@ def _module_paths() -> tuple:
 
 @functools.cache
 def _other_module_paths() -> tuple:
-    """Every module of tests/, examples/ and experiments/, in path order."""
+    """Every module of tests/ and examples/, in path order."""
     found = []
-    for folder in (TESTS, EXAMPLES, EXPERIMENTS):
+    for folder in (TESTS, EXAMPLES):
         globbed = folder.rglob("*.py")
         found.extend(sorted(globbed))
     return tuple(found)
@@ -150,7 +149,7 @@ def _collected_tests(test_files: tuple) -> frozenset:
 
 @functools.cache
 def _module_level_names() -> frozenset:
-    """Every module-level name of decsim/, tests/, examples/, experiments/.
+    """Every module-level name of decsim/, tests/ and examples/.
 
     A page names a constant a run file or a test owns as readily as one
     the package owns.

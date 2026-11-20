@@ -90,7 +90,6 @@ Each guide adds one kind of thing to the machine.
 | --- | --- |
 | `decsim/` | the simulator, in packages layered so that a lower one never imports a higher one |
 | `decsim/ports.py` | the ports, the only way two packages talk |
-| `experiments/` | the experiments' run files, one folder each |
 | `examples/` | runnable examples, each run by a test |
 | `results/` | what a run writes, one folder per run. Not tracked by git. |
 | `tests/` | the test suite, one folder per package |

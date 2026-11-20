@@ -163,9 +163,8 @@ def load_beside(run_file: Union[str, pathlib.Path], name: str) -> Any:
     """The Python file at name, relative to the run file's folder, as a module.
 
     A run file is run as a module of its own (experiment.load), so a
-    config.py beside it, or another experiment's
-    (../switching_baseline/config.py), is loaded by its path rather than
-    imported.
+    config.py beside it, or another experiment's (../other/config.py),
+    is loaded by its path rather than imported.
     """
     run_path = pathlib.Path(run_file)
     folder = run_path.parent

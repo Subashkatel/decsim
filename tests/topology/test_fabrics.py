@@ -1,22 +1,22 @@
 """Links and fabric rules, against the cards decsim ships (fabrics.py).
 
 The referent is each card as link_profiles.py, the presets and the
-shipped run files build it: a rule over today's routes gives the card
-those give, record for record, so a task built from a rule keeps its id.
+tests' two tier machines build it: a rule over today's routes gives the
+card those give, record for record, so a task built from a rule keeps
+its id.
 A link's cycle is gem5's cyclesToTicks (src/sim/clocked_object.hh:227).
 """
 
 import fractions
-import pathlib
 
 import pytest
 
 import decsim.config as config
 import decsim.engine
-import decsim.experiments.experiment as experiment
 import decsim.links.channel as channel_module
 import decsim.links.link_profiles as link_profiles
 import decsim.presets.clocks as clocks
+import decsim.presets.experiment_one as experiment_one
 import decsim.presets.link_cards as link_cards
 import decsim.presets.machines as machines
 import decsim.records.routes as route_records
@@ -24,11 +24,10 @@ import decsim.records.transfers as transfer_records
 import decsim.topology.fabrics as fabrics
 import decsim.topology.graph_layout as graph_layout
 import tests.experiments.run_files as run_files
+import tests.experiments.two_tier_machines as two_tier_machines
 
 FRIDGE = clocks.FRIDGE_CLOCK
 ROOM = clocks.ROOM_CLOCK
-THIS_FILE = pathlib.Path(__file__)
-EXPERIMENTS = THIS_FILE.parents[2] / "experiments"
 ONE_FRIDGE_CYCLE = fabrics.ClockedLink(clock=FRIDGE, latency_cycles=1)
 ONE_ROOM_CYCLE = fabrics.ClockedLink(clock=ROOM, latency_cycles=1)
 # Backline's CPU echo on the 100 Gb/s cable, the host polling its memory
@@ -75,18 +74,13 @@ def _card(rule, wire_links=None):
     return fabrics.card(rule, SWITCHING_ROUTES, links, None)
 
 
-def _tasks(name: str) -> list:
-    run_file = EXPERIMENTS / name / "run.py"
-    loaded = experiment.load(run_file)
-    return loaded.tasks
-
-
-def _task_card(task, rule, wire_links=None):
-    """The card the rule gives over the task's own hops."""
-    routes = _routes_of(task.layout.card)
+def _machine_card(machine, rule, wire_links=None):
+    """The card the rule gives over the machine's own hops."""
+    layout = _layout(machine)
+    routes = _routes_of(layout.card)
     links = wire_links or {}
-    clock = task.machine.clock
-    return fabrics.card(rule, routes, links, clock, task.machine.readout_routes)
+    clock = machine.clock
+    return fabrics.card(rule, routes, links, clock, machine.readout_routes)
 
 
 def _experiment_one_wire_links() -> dict:
@@ -174,42 +168,46 @@ def test_the_strong_bases_loop_is_on_the_chip_and_its_pool_on_the_host():
 def test_experiment_one_is_a_cable_rule_and_the_fiber_loops_wires():
     rule = fabrics.FridgeHostFabric(cable=ROCE_V2_CPU_LEG, host_local=HOST_POLL)
     wire_links = _experiment_one_wire_links()
-    tasks = _tasks("switching_baseline")
-    per_window_tasks = _tasks("switching_per_window")
 
-    for task in [*tasks, *per_window_tasks]:
-        card = _task_card(task, rule, wire_links)
-        assert task.layout.card == card, task.name
+    for distance in (5, 13):
+        weak_alone = experiment_one.weak_alone(distance, 0.003)
+        switching = experiment_one.switching(distance, 0.003)
+        for machine in (weak_alone, switching):
+            card = _machine_card(machine, rule, wire_links)
+            layout = _layout(machine)
+            assert layout.card == card, distance
 
 
-def test_the_switching_study_is_the_weak_base_and_the_strong_side():
+def test_the_two_tier_machines_are_the_weak_base_and_the_strong_side():
     ten_microseconds = fabrics.ClockedLink(clock=ROOM, latency_cycles=2500)
     weak_base = link_cards.WEAK_BASELINE_FABRIC
     cluster_gap_rule = link_cards.strong_side(weak_base, ten_microseconds)
     redo_window_rule = link_cards.strong_side(weak_base)
 
-    for task in _tasks("switching"):
-        rule = redo_window_rule
-        if task.name.startswith("cluster_gap"):
-            rule = cluster_gap_rule
-        expected = _task_card(task, rule)
-        assert task.layout.card == expected, task.name
+    for distance in (3, 5):
+        cluster_gap = two_tier_machines.cluster_gap_switching(distance)
+        redo_window = two_tier_machines.redo_window_switching(distance)
+        cluster_gap_card = _machine_card(cluster_gap, cluster_gap_rule)
+        redo_window_card = _machine_card(redo_window, redo_window_rule)
+        cluster_gap_layout = _layout(cluster_gap)
+        redo_window_layout = _layout(redo_window)
+        assert cluster_gap_layout.card == cluster_gap_card, distance
+        assert redo_window_layout.card == redo_window_card, distance
 
 
-def test_the_data_movement_study_is_the_weak_base_with_a_slower_write():
+def test_the_data_path_machines_are_the_weak_base_with_a_slower_write():
     one_microsecond = fabrics.ClockedLink(clock=FRIDGE, latency_cycles=250)
-    ten_microseconds = fabrics.ClockedLink(clock=ROOM, latency_cycles=2500)
     weak_tier = fabrics.RoleLinks(
         write_written=one_microsecond, base=link_cards.WEAK_BASELINE_FABRIC
     )
-    switching_rule = link_cards.strong_side(weak_tier, ten_microseconds)
 
-    for task in _tasks("data_movement"):
-        rule = weak_tier
-        if task.name.startswith("switching"):
-            rule = switching_rule
-        expected = _task_card(task, rule)
-        assert task.layout.card == expected, task.name
+    for distance in (3, 5):
+        copies = two_tier_machines.every_hop_copies(distance)
+        in_place = two_tier_machines.weak_input_in_place(distance)
+        for machine in (copies, in_place):
+            expected = _machine_card(machine, weak_tier)
+            layout = _layout(machine)
+            assert layout.card == expected, distance
 
 
 def test_a_wires_own_link_wins_over_the_rule():

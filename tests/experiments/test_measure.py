@@ -96,6 +96,7 @@ import decsim.windows.settings as window_settings
 import examples.live_memory_example as live_memory_example
 import tests.declared_run as declared_run
 import tests.experiments.run_files as run_files
+import tests.experiments.two_tier_machines as two_tier_machines
 import tests.patch_pools as patch_pools
 import tests.qpu.memory_programs as memory_programs
 import tests.topology.test_graph_layout as layout_tests
@@ -1136,6 +1137,13 @@ def shipped_shot(run_file: str, task_name: str):
     return collect.run_shot(task, 0)
 
 
+def two_tier_shot(make) -> collect.Shot:
+    """Seed 0 of one of the tests' two tier machines, at that same task."""
+    machine = make(3)
+    task = task_at(machine, SWITCHING_ERROR_PROBABILITY)
+    return collect.run_shot(task, 0)
+
+
 def base_shot(base) -> collect.Shot:
     """Seed 0 of a shipped base (presets/machines.py) at that same task."""
     machine = base(3, SWITCHING_ERROR_PROBABILITY, 1.0)
@@ -1244,13 +1252,13 @@ def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
 def test_the_shipped_pinned_config_sums_to_its_reaction_time():
     """The same law where the strong tier's time is measured, not declared.
 
-    experiments/switching/run.py's redo window task names a
+    The tests' redo window machine (two_tier_machines.py) names a
     belief-matching strong tier, whose decode time is read off the host
     clock, so the values move from host to host and the identity does not:
     every window's points still add up to its reaction time to the tick, the
     solve it ran after the committing one being its confidence step.
     """
-    shot = shipped_shot("experiments/switching/run.py", "redo_window_d3")
+    shot = two_tier_shot(two_tier_machines.redo_window_switching)
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)
@@ -1269,7 +1277,7 @@ def test_the_shipped_pinned_config_sums_to_its_reaction_time():
 def test_the_shipped_cluster_gap_config_sums_to_its_reaction_time():
     """The identity where the confidence step is a card of its own.
 
-    experiments/switching/run.py's cluster gap task walks a union
+    The tests' cluster gap machine (two_tier_machines.py) walks a union
     find decode for its signal and prices that walk at 12.0 us on the weak
     unit (decision D8), so a window the weak tier answered carries the walk
     between its decode's end and its verdict. A window that escalated
@@ -1278,7 +1286,7 @@ def test_the_shipped_cluster_gap_config_sums_to_its_reaction_time():
     is read off the host clock, so the assertions are in ticks and about the
     identity, never about a magnitude.
     """
-    shot = shipped_shot("experiments/switching/run.py", "cluster_gap_d3")
+    shot = two_tier_shot(two_tier_machines.cluster_gap_switching)
 
     measurement = measure.measure_shot(shot)
     gaps = chain_gap_ticks(shot, measurement)

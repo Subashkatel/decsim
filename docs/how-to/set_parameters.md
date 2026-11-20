@@ -13,8 +13,8 @@ A unit leaves the field's name and is written with the value, so
 ## 1. See what can be set
 
 ```bash
-decsim params experiments/switching/run.py
-decsim params experiments/switching/run.py --match "weak.**"
+decsim params examples/two_tiers.py
+decsim params examples/two_tiers.py --match "weak.**"
 ```
 
 Each line is `path = value  [record default]  (set by)`, for the first
@@ -24,8 +24,8 @@ swap.
 ## 2. Set one value, or many
 
 ```bash
-decsim run experiments/switching/run.py --set weak.unit_count=3
-decsim run experiments/switching/run.py --set "**.engine.clock=500MHz" \
+decsim run examples/two_tiers.py --set weak.unit_count=3
+decsim run examples/two_tiers.py --set "**.engine.clock=500MHz" \
     --set "fabric.*.latency=20ns"
 ```
 
@@ -63,7 +63,7 @@ called `none`, as `switching.confidence.type=none` does.
 ## 4. Check every task before a job
 
 ```bash
-decsim check experiments/switching/run.py
+decsim check examples/two_tiers.py
 ```
 
 `check` builds every task's machine once, as a run builds it, and runs

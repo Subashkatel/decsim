@@ -4,9 +4,9 @@
 
 An experiment is three files in one folder: `constants.yaml` holds the
 numbers and their sources, `config.py` builds the machine from them,
-and `run.py` sweeps it. The worked example is Experiment 1 in
-`experiments/switching_baseline`, 60 tasks; every other folder in
-`experiments/` is written the same way.
+and `run.py` sweeps it. The worked example below is Experiment 1,
+union-find switching to Relay-BP-5, 60 tasks; its machine is the one
+`decsim/presets/experiment_one.py` builds.
 
 ## 1. Write the numbers in constants.yaml
 
@@ -30,14 +30,14 @@ Load the file, then read a value by attribute. A section is a mapping,
 so it splats into a record's parameters, and `record` converts the
 times on the part's clock:
 
-```python experiments/switching_baseline/config.py
+```python
 HERE = pathlib.Path(__file__)
 CONSTANTS_PATH = HERE.with_name("constants.yaml")
 constants = constants_module.load(CONSTANTS_PATH)
 record = machine_file.record
 ```
 
-```python experiments/switching_baseline/config.py
+```python
 def union_find_pool() -> decoder_settings.DecoderPoolSettings:
     """Union-find on Helios's cycle law, on an FPGA in the fridge rack."""
     settings = constants.union_find
@@ -59,12 +59,12 @@ physical_error_probability)`.
 
 ## 3. Sweep it in run.py
 
-```python experiments/switching_baseline/run.py
+```python
 config = sweeps.load_beside(__file__, "config.py")
 constants = config.constants
 ```
 
-```python experiments/switching_baseline/run.py
+```python
 sweep = decsim.Sweep(
     "switching_baseline",
     config.machine,

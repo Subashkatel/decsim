@@ -30,24 +30,13 @@ import time
 TOOL_FILE = pathlib.Path(__file__)
 TOOL_PATH = TOOL_FILE.resolve()
 CHECKOUT = TOOL_PATH.parent.parent
-# run file, task, shots: the tasks stage7_plan.md profiled, one of each
-# kind of machine, each run for one first shot and its warm ones
+# run file, task, shots: a weak decoder alone and a machine of two
+# tiers from the examples, each run for one first shot and its warm ones
 TASKS = (
-    ("experiments/switching_baseline/run.py", "weak_alone_d5_p0.003", 6),
-    ("experiments/switching_baseline/run.py", "weak_alone_d13_p0.003", 4),
-    ("experiments/switching_baseline/run.py", "switching_d5_p0.003", 4),
-    ("experiments/switching_baseline/run.py", "switching_d11_p0.003", 3),
-    (
-        "experiments/switching_per_window/run.py",
-        "union_find_alone_d9_p0.003",
-        5,
-    ),
-    (
-        "experiments/switching_per_window/run.py",
-        "relay_bp5_alone_d9_p0.003",
-        3,
-    ),
-    ("experiments/data_movement/run.py", "every_hop_copies_d7", 5),
+    ("examples/my_first_sweep.py", "d5", 6),
+    ("examples/my_first_sweep.py", "d7", 4),
+    ("examples/two_tiers.py", "d3", 6),
+    ("examples/two_tiers.py", "d5", 4),
 )
 BASE = "base"
 HERE = "here"

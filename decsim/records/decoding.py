@@ -605,11 +605,6 @@ class DecodeJob:
     # the windows whose committed boundary a target job folds at its
     # faces; a redo of this job at the next edge pins the same faces
     pinned_faces: tuple = ()
-    # what the source chip packed for this decode in place of rounds, a
-    # strong redo's doubtful box (escalation/doubtful_box.py); opaque to
-    # the record, read by the one row that decodes it; None for a job
-    # whose input is its rounds
-    request: Optional[object] = None
     cancelled: bool = False  # cancelled speculative decodes discard completion
     completed: bool = (
         False  # terminal flag; admission refuses reuse of a completed job
@@ -952,7 +947,3 @@ class RunShape:
     has_static_decode_plan: bool
     leaves_an_entry_pool: bool = True
     batches_each_member: bool = False
-    # the edge's strong redo decodes the box the chip packed: it reads no
-    # round and pins no face (escalation/doubtful_box.py), so a window
-    # decoded before its past neighbour can be redone
-    reads_no_round: bool = False

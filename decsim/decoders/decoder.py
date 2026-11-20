@@ -59,9 +59,6 @@ class DecoderBase(abc.ABC):
     # whether the row decodes on the shot's fired errors, which the
     # machine connects to its errors_sampled
     reads_fired_errors = False
-    # whether the row decodes the chip's doubtful box, which a redo
-    # window packs under box_margin, instead of a window's rounds
-    reads_doubtful_box = False
     # whether the device the row submits to prices each decode (a strong
     # backend row), so neither the host clock nor a latency is its time
     priced_by_its_backend = False
@@ -276,21 +273,8 @@ class WindowDecoderBase(DecoderBase):
         job: decoding_records.DecodeJob,
         faults: fault_models.PlacedFaultModel,
     ) -> numpy.ndarray:
-        """The detection events the job's input holds: its landed rounds.
-
-        A row that reads a request its source packed instead of rounds
-        (records/decoding.py DecodeJob.request) says so by its own
-        job_syndrome; any other row refuses such a job.
-        """
+        """The detection events the job's input holds: its landed rounds."""
         del faults
-        if job.request is not None:
-            row = type(self)
-            request_class = type(job.request)
-            raise ValueError(
-                f"{job.label}: {row.__name__} reads a window's rounds, and "
-                f"this job carries a packed {request_class.__name__} "
-                "instead; give the edge a strong row that reads it"
-            )
         return payload_syndrome(job)
 
     def window_answer(

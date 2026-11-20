@@ -405,14 +405,7 @@ def _fragments_read(job: decoding_records.DecodeJob) -> list:
 
 
 def _last_rounds_read(job: decoding_records.DecodeJob) -> tuple:
-    """(stream, last round) of what the decode read.
-
-    A job that carries a packed request reads no round: its answer rests
-    on the rounds its source read to pack it (escalation/doubtful_box.py
-    DoubtfulBox.last_rounds_read).
-    """
-    if job.request is not None:
-        return job.request.last_rounds_read
+    """(stream, last round) of what the decode read."""
     fragments = _fragments_read(job)
     return decoding_records.last_round_by_stream(fragments)
 

@@ -440,8 +440,7 @@ class WindowVerdict:
             self._apply_verdict(job, result, verdict, edge)
             return
         costs = edge.rules.costs
-        packing_cycles = edge.pack_request(job, result)
-        switch_cycles = costs.switch_cycles + packing_cycles
+        switch_cycles = costs.switch_cycles
         if switch_cycles == 0:
             self._apply_verdict(job, result, verdict, edge)
             return
@@ -792,7 +791,7 @@ def _refuse_cycles_without_a_clock(clock, cycles: int) -> None:
     if clock is not None:
         return
     raise ValueError(
-        f"the escalation switch takes {cycles} cycles (switch_cycles and "
-        "the chip's packing of the doubtful box), and neither "
-        "switching.clock nor the machine names a clock to count them on"
+        f"the escalation switch takes {cycles} cycles (switch_cycles), and "
+        "neither switching.clock nor the machine names a clock to count "
+        "them on"
     )

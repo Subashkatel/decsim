@@ -44,7 +44,7 @@ A decoder that grows clusters also holds a weight_step and a timing, which a clu
 
 `decsim/ports.py`. A confidence row's settings record, which builds the signal.
 
-closes_buffer_boundary says the row's cluster gap walks without the buffer's boundary edges (decsim/confidence/cluster.py ClusterGap), so the cluster record and the doubtful box walk the same graph.
+closes_buffer_boundary says the row's cluster gap walks without the buffer's boundary edges (decsim/confidence/cluster.py ClusterGap), so the cluster record walks the same graph.
 
 | Member | Type |
 | --- | --- |
@@ -478,17 +478,6 @@ It extends `measurements.RelaySettings`, and holds its fields.
 
 ## decsim/decoders/minimum_weight_perfect_matching
 
-### `BoxCorrelatedPyMatchingDecoder.Settings`
-
-`decsim/decoders/minimum_weight_perfect_matching/box_decoder.py`. timing is the fitted law at the box's detection events.
-
-join_microseconds is the host's join of the strong correction to union-find's outside the box. With no timing, the host's own time around the call holds the unit.
-
-| Field | Type | Default |
-| --- | --- | --- |
-| `timing` | `Optional[event_time.DetectionEventTime]` | `None` |
-| `join_microseconds` | `float` | `0.0` |
-
 ### `PyMatchingDecoder.Settings`
 
 `decsim/decoders/minimum_weight_perfect_matching/decoder.py`. The row as a run names it: measured, or at a preset latency.
@@ -693,7 +682,7 @@ slack_microseconds is the budget from the source job's arrival.
 
 `decsim/escalation/settings.py`. A strong window row's settings record (strong_window_shapes.py).
 
-restart_reread_buffer_regions is the double window's re-read width; starts_on_a_guess whether a window escalates on a provisional input, and guess_backlog_limit the strong queue's waiting jobs below which it does, None for always. box_shape is the doubtful box the chip packs for the redo (doubtful_box.py), None when it reads the rounds.
+restart_reread_buffer_regions is the double window's re-read width; starts_on_a_guess whether a window escalates on a provisional input, and guess_backlog_limit the strong queue's waiting jobs below which it does, None for always.
 
 | Member | Type |
 | --- | --- |
@@ -703,7 +692,6 @@ restart_reread_buffer_regions is the double window's re-read width; starts_on_a_
 | `restart_reread_buffer_regions` | `int` |
 | `starts_on_a_guess` | `bool` |
 | `guess_backlog_limit` | `Optional[int]` |
-| `box_shape(self)` | `Optional[doubtful_box.BoxShape]` |
 | `build(self, engine: engine_module.Engine)` | `strong_window_shapes.StrongWindowShape` |
 
 ### `SwitchingSettings`
@@ -741,19 +729,11 @@ boundary_policy is the boundary row the windows take: held, the default, where t
 
 starts_on_a_guess, under checked boundaries only, lets a window whose decode read a provisional boundary escalate at once, its past face pinned on that boundary, instead of when it is final. guess_backlog_limit, when set, starts on a guess only while the strong queue holds fewer waiting jobs than it, so redos that may be withdrawn never crowd a busy pool; the window then waits for its final boundary, as without a guess.
 
-box_margin, when set, has the chip pack the doubtful clusters' box widened by that many rounds (escalation/doubtful_box.py), and the redo decodes that box alone: it reads no round and pins no face (plan_box). The target's row must read the box (box_decoder.py). The box's shape (doubtful_box.BoxShape) can differ: box_time_margin and box_space_margin widen it by rounds and by stabilizer columns on their own (each box_margin when unset), box_form is bounding, per_cluster or graph, and box_doubt is walk or all_walks, the latter with box_doubt_nats.
-
 | Field | Type | Default |
 | --- | --- | --- |
 | `boundary_policy` | `ports.BoundaryPolicySettings` | `boundary_policies.Held.Settings()` |
 | `starts_on_a_guess` | `bool` | `False` |
 | `guess_backlog_limit` | `Optional[int]` | `None` |
-| `box_margin` | `Optional[int]` | `None` |
-| `box_time_margin` | `Optional[int]` | `None` |
-| `box_space_margin` | `Optional[int]` | `None` |
-| `box_form` | `str` | `'bounding'` |
-| `box_doubt` | `str` | `'walk'` |
-| `box_doubt_nats` | `Optional[float]` | `None` |
 
 ### `DoubleWindow.Settings`
 

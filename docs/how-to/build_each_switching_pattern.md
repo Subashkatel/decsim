@@ -99,7 +99,7 @@ to this table, when the machine is built:
 | Refused | Why |
 |---|---|
 | `double_window` on an edge past the entry pool | Toshio defines it over the entry pool's sliding chain; a pool past it decodes only what it is sent. A `redo_window` there redoes the double region. |
-| switching on parallel or sandwich windows with a redo that reads the window's rounds | a redo pins its past face on the window that commits the rounds before it, and an A block or a core decodes before that seam. A `redo_window` with `box_margin` reads no round and pins no face, so it is allowed there (`tests/escalation/test_doubtful_box.py` runs it on parallel blocks) |
+| switching on parallel or sandwich windows with a redo that reads the window's rounds | a redo pins its past face on the window that commits the rounds before it, and an A block or a core decodes before that seam. |
 | `starts_on_a_guess` without checked boundaries, or beside `run_both_at_once` | only checked boundaries check a guess again; `run_both_at_once` starts the redo already |
 | `windows.release_stage` provisional on a run without patch streams | an operation decoded on its own windows delivers its result once; a patch stream's blocker releases by segment, which reads the committed prefix |
 | `double_window` beside a router | it absorbs neighbouring windows, which a router may send to two pools |

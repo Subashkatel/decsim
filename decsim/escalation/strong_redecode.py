@@ -14,10 +14,7 @@ several (CUDA-Q QEC's enqueue_syndromes, realtime_decoding.rst lines
 speculative strong decode beside the weak job and selects it at the
 verdict; a landed strong input waits for its selection before it
 decodes. An edge with a deadline (deadlines.py) starts that decode
-when its trigger fires, before the verdict, as DART-Q's rescue. An edge
-whose redo window packs a doubtful box (doubtful_box.py) has the chip
-pack it as the verdict switches (pack_request), and the box rides the
-selection in place of the window's rounds.
+when its trigger fires, before the verdict, as DART-Q's rescue.
 """
 
 import dataclasses
@@ -27,7 +24,6 @@ from typing import Any, Optional
 
 import decsim.engine as engine_module
 import decsim.escalation.deadlines as deadlines
-import decsim.escalation.doubtful_box as doubtful_box
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.ports as ports
@@ -82,9 +78,6 @@ class StrongRedecode:
     next_edge = ports.Port(ports.EscalateEdge, optional=True)
     # the source job's deadline and its rescue; none on most edges
     deadline = ports.Port(deadlines.Deadline, optional=True)
-    # the chip's packer of each escalated window's doubtful box; none
-    # on an edge whose strong side reads the window's rounds
-    packer = ports.Port(doubtful_box.BoxPacker, optional=True)
 
     # the windows escalated, those whose speculative strong decode was
     # selected as it ran, and the strong windows held for their
@@ -299,32 +292,13 @@ class StrongRedecode:
         send_input = self._strong_input_send(assignment.job, None)
         return decoding_records.Submission(assignment.job, send_input)
 
-    def pack_request(
-        self,
-        weak_job: decoding_records.DecodeJob,
-        weak_result: decoding_records.DecodeResult,
-    ) -> int:
-        """Pack the escalated window's box on the chip; its cycles.
-
-        The verdict asks as it switches, and prices the cycles on the
-        switching clock; the escalation that follows takes the box.
-        Zero on an edge that packs nothing.
-        """
-        if self.packer is None:
-            return 0
-        key = (weak_job.stream_id, weak_job.window_id)
-        box = self.packer.pack(weak_job, weak_result)
-        self.selections.hold_box(key, box)
-        return box.packing_cycles()
-
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
         """Ask the strong tier to re-decode the weak job's window.
 
         A speculative strong decode started with the weak job is
         selected as it is; otherwise the shape assigns the strong
         window, whose job is queued behind its selection now or held
-        under its conditions. A window the chip packed a box for has
-        the job on that box, and the box rides the selection.
+        under its conditions.
         """
         self.statistics.escalated.add()
         key = (weak_job.stream_id, weak_job.window_id)
@@ -334,18 +308,9 @@ class StrongRedecode:
             self._send_selection(weak_job, speculative_request_key)
             self.decode_queue.await_strong_result(key, speculative_request_key)
             return
-        box = self.selections.take_box(key)
-        if box is None:
-            _refuse_a_box_redo_without_its_box(self.packer, weak_job)
-            assignment = self.shape.plan(weak_job)
-            box_bits = 0
-        else:
-            assignment = self.shape.plan_box(weak_job, box)
-            box_bits = box.wire_bits()
+        assignment = self.shape.plan(weak_job)
         request_key = assignment.request_key
-        selection_arrival_ticks = self._send_selection(
-            weak_job, request_key, box_bits
-        )
+        selection_arrival_ticks = self._send_selection(weak_job, request_key)
         if assignment.job is not None:
             self._enqueue(assignment.job, selection_arrival_ticks)
         else:
@@ -653,12 +618,8 @@ class StrongRedecode:
         self,
         weak_job: decoding_records.DecodeJob,
         strong_request_key: window_records.DecoderRequestKey,
-        box_bits: int = 0,
     ) -> int:
-        """Send the window's selection; returns the tick it is expected.
-
-        box_bits are the chip's packed box, which rides it.
-        """
+        """Send the window's selection; returns the tick it is expected."""
         key = (weak_job.stream_id, weak_job.window_id)
         on_selection_delivered = functools.partial(
             self.decode_queue.accept_selection, key, strong_request_key
@@ -669,7 +630,7 @@ class StrongRedecode:
             on_selection_delivered,
         )
         expected_delay_ticks = self.decoder_output.send_selection(
-            self.hops.forward, weak_job, strong_request_key, delivered, box_bits
+            self.hops.forward, weak_job, strong_request_key, delivered
         )
         return self.engine.now + expected_delay_ticks
 
@@ -682,42 +643,14 @@ class StrongRedecode:
         on_selection_delivered()
 
 
-def _refuse_a_box_redo_without_its_box(
-    packer: Optional[doubtful_box.BoxPacker],
-    weak_job: decoding_records.DecodeJob,
-) -> None:
-    """Every escalation on a packing edge leaves with its verdict's box."""
-    if packer is None:
-        return
-    raise RuntimeError(
-        f"{weak_job.label} escalates on an edge that packs a doubtful box, "
-        "and its verdict packed none"
-    )
-
-
 class _StrongSelections:
-    """The selection handshake: deferred and speculative decodes, arrivals.
-
-    It also holds the box the chip packed at a window's verdict, which
-    rides that window's selection.
-    """
+    """The selection handshake: deferred and speculative decodes, arrivals."""
 
     def __init__(self) -> None:
         self.speculative_key_by_window: dict = {}
         self.deferred_weak_job_by_window: dict = {}
         self.delivered_request_keys: set = set()
         self.landing_by_request_key: dict = {}
-        # window key -> the box the chip packed at its verdict, until
-        # the escalation leaves with it
-        self.box_by_window: dict = {}
-
-    def hold_box(
-        self, window_key: tuple, box: doubtful_box.DoubtfulBox
-    ) -> None:
-        self.box_by_window[window_key] = box
-
-    def take_box(self, window_key: tuple) -> Optional[doubtful_box.DoubtfulBox]:
-        return self.box_by_window.pop(window_key, None)
 
     def defer_speculative_decode(
         self, window_key: tuple, weak_job: decoding_records.DecodeJob

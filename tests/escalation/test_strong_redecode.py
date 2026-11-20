@@ -133,12 +133,8 @@ class _DecoderOutput:
         self.selections = []
         self.regions = []
 
-    def send_selection(
-        self, path, weak_job, strong_request_key, on_delivered, request_bits=0
-    ):
+    def send_selection(self, path, weak_job, strong_request_key, on_delivered):
         del path
-        # no edge here packs a box, so nothing rides the selection
-        assert request_bits == 0
         self.selections.append((weak_job, strong_request_key, on_delivered))
         return 30
 

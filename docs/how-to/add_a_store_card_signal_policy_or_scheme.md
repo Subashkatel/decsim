@@ -134,7 +134,7 @@ one link per hop; the presets' links and fabrics are in
   `build(weak_algorithm, threshold_nats)`, which builds the signal from
   the weak decoder's record and the threshold. `closes_buffer_boundary`
   is `False` for a signal that walks no cluster gap; the cluster record
-  and the doubtful box follow it.
+  follows it.
 - **Component:** fills `ports.ConfidenceSignal`, with five
   attributes:
   - `source`: `SoftOutputSource(method=...)`, the signal's name;

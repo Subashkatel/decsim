@@ -31,7 +31,6 @@ import dataclasses
 from typing import Optional, Protocol, Union, runtime_checkable
 
 import decsim.engine as engine_module
-import decsim.escalation.doubtful_box as doubtful_box
 import decsim.escalation.pending_strong_windows as pending_strong_windows
 import decsim.escalation.strong_regions as strong_regions
 import decsim.ports as ports
@@ -159,16 +158,6 @@ class RedoWindow(StrongWindowPorts):
         strong queue holds fewer waiting jobs than it, so redos that may
         be withdrawn never crowd a busy pool; the window then waits for
         its final boundary, as without a guess.
-
-        box_margin, when set, has the chip pack the doubtful clusters'
-        box widened by that many rounds (escalation/doubtful_box.py),
-        and the redo decodes that box alone: it reads no round and pins
-        no face (plan_box). The target's row must read the box
-        (box_decoder.py). The box's shape (doubtful_box.BoxShape) can
-        differ: box_time_margin and box_space_margin widen it by rounds
-        and by stabilizer columns on their own (each box_margin when
-        unset), box_form is bounding, per_cluster or graph, and
-        box_doubt is walk or all_walks, the latter with box_doubt_nats.
         """
 
         boundary_policy: ports.BoundaryPolicySettings = (
@@ -176,12 +165,6 @@ class RedoWindow(StrongWindowPorts):
         )
         starts_on_a_guess: bool = False
         guess_backlog_limit: Optional[int] = None
-        box_margin: Optional[int] = None
-        box_time_margin: Optional[int] = None
-        box_space_margin: Optional[int] = None
-        box_form: str = "bounding"
-        box_doubt: str = "walk"
-        box_doubt_nats: Optional[float] = None
         # the word the refusals name this row by
         name = "redo_window"
         # it restarts no weak window, so the width the window interaction
@@ -195,47 +178,6 @@ class RedoWindow(StrongWindowPorts):
                 _check_backlog_limit(
                     self.guess_backlog_limit, self.starts_on_a_guess
                 )
-            if self.box_margin is not None:
-                doubtful_box.check_margin(self.box_margin)
-                self.box_shape()
-            elif self._shapes_a_box():
-                raise ValueError(
-                    "the box's shape settings (box_time_margin, "
-                    "box_space_margin, box_form, box_doubt, box_doubt_nats) "
-                    "shape a box; set box_margin to pack one"
-                )
-
-        def _shapes_a_box(self) -> bool:
-            unset = (None, None, "bounding", "walk", None)
-            given = (
-                self.box_time_margin,
-                self.box_space_margin,
-                self.box_form,
-                self.box_doubt,
-                self.box_doubt_nats,
-            )
-            return given != unset
-
-        def box_shape(self) -> Optional["doubtful_box.BoxShape"]:
-            """The shape the chip packs, each margin box_margin unless set.
-
-            None when box_margin is unset: the redo reads the rounds.
-            """
-            if self.box_margin is None:
-                return None
-            time_margin = self.box_time_margin
-            if time_margin is None:
-                time_margin = self.box_margin
-            space_margin = self.box_space_margin
-            if space_margin is None:
-                space_margin = self.box_margin
-            return doubtful_box.BoxShape(
-                time_margin=time_margin,
-                space_margin=space_margin,
-                form=self.box_form,
-                doubt=self.box_doubt,
-                doubt_nats=self.box_doubt_nats,
-            )
 
         @property
         def absorbs_weak_windows(self) -> bool:
@@ -281,45 +223,6 @@ class RedoWindow(StrongWindowPorts):
             chip_faces,
         )
         return _assignment_of(self, held)
-
-    def plan_box(
-        self,
-        weak_job: decoding_records.DecodeJob,
-        box: object,  # the chip's doubtful_box.DoubtfulBox
-    ) -> pending_strong_windows.StrongAssignment:
-        """The job on the chip's doubtful box, built now.
-
-        The box holds the chip's own detection events, the earlier
-        neighbour's committed boundary folded in already, since the
-        window escalated on a final input or on the guess its redo would
-        pin. So the job reads no round, waits for none in the strong
-        syndrome buffer, and pins no face. Its window and model are the
-        chip's own, the graph the box was packed on: on a sliding window
-        the redo's region and model, on a parallel block (Skoric et al.
-        2209.08552) its buffers on both sides as well.
-        """
-        window = weak_job.window
-        model = weak_job.detector_error_model
-        key = (weak_job.stream_id, weak_job.window_id)
-        request_key = self.builder.new_request_key(
-            key[0], key[1], self.edge.target
-        )
-        job = _strong_redecode_job(
-            self,
-            weak_job,
-            window,
-            model,
-            [],
-            request_key,
-            self.engine.now,
-        )
-        job.request = box
-        return pending_strong_windows.StrongAssignment(
-            request_key,
-            job,
-            round_count=job.round_count,
-            first_round=window.start_round,
-        )
 
     def release_conditions(
         self, assignment: pending_strong_windows.StrongAssignment
@@ -391,10 +294,6 @@ class DoubleWindow(StrongWindowPorts):
 
         def __post_init__(self) -> None:
             _check_restart_reread(self.restart_reread_buffer_regions)
-
-        def box_shape(self) -> None:
-            """None: the double window reads the rounds, never a box."""
-            return None
 
         @property
         def absorbs_weak_windows(self) -> bool:

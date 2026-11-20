@@ -59,8 +59,7 @@ class Switching:
 
     def check_plan(self, plan: decoding_records.RunShape) -> None:
         """Refuse a run shape the escalation cannot serve."""
-        if not plan.reads_no_round:
-            _refuse_unpinned_past_faces(plan.scheme)
+        _refuse_unpinned_past_faces(plan.scheme)
         if self.run_both_at_once:
             _refuse_batches_beside_run_both(plan)
         if not plan.is_absorbing_strong_window:

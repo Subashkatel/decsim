@@ -990,17 +990,6 @@ class EscalateEdge(Protocol):
     ) -> Optional[decoding_records.Submission]:
         """The source job's last boundary arrived: its speculative decode."""
 
-    def pack_request(
-        self,
-        weak_job: decoding_records.DecodeJob,
-        weak_result: decoding_records.DecodeResult,
-    ) -> int:
-        """Pack what the escalation sends in place of rounds; its cycles.
-
-        Asked as the verdict switches to escalate; zero on an edge whose
-        target reads the window's rounds.
-        """
-
     def escalate(self, weak_job: decoding_records.DecodeJob) -> None:
         """Ask the target pool to re-decode the source job's window."""
 
@@ -1147,13 +1136,8 @@ class DecoderOutput(Protocol):
         weak_job: decoding_records.DecodeJob,
         strong_request_key: window_records.DecoderRequestKey,
         on_delivered: Callable[[], None],
-        request_bits: int = 0,
     ) -> int:
-        """Send one window's escalation; returns the delay the link expects.
-
-        request_bits are what the chip packed for the target in place
-        of rounds, riding the escalation.
-        """
+        """Send one window's escalation; returns the delay the link expects."""
 
     def send_region(
         self,
@@ -1329,9 +1313,7 @@ class Decoder(Protocol):
     reads_fired_errors says the decoder decodes on the shot's fired
     errors (decsim/decoders/truth.py); such a decoder answers
     errors_sampled(operation, fired_errors), which the machine connects
-    to the syndrome source's errors_sampled. reads_doubtful_box says it
-    decodes the chip's doubtful box (decsim/escalation/doubtful_box.py)
-    instead of a window's rounds, as a box redo's target must.
+    to the syndrome source's errors_sampled.
     """
 
     fault_model_requirement: fault_models.DecoderFaultModelRequirement
@@ -1343,7 +1325,6 @@ class Decoder(Protocol):
     decoder_evidence: frozenset
     missing_evidence_reasons: dict
     reads_fired_errors: bool
-    reads_doubtful_box: bool
 
     def decode(
         self, job: decoding_records.DecodeJob
@@ -2309,7 +2290,7 @@ class ConfidenceSettings(Protocol):
 
     closes_buffer_boundary says the row's cluster gap walks without the
     buffer's boundary edges (decsim/confidence/cluster.py ClusterGap),
-    so the cluster record and the doubtful box walk the same graph.
+    so the cluster record walks the same graph.
     """
 
     name: str

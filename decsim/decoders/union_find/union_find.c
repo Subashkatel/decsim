@@ -699,12 +699,18 @@ static uint8_t edge_parity(const struct graph_arrays *graph, int32_t edge) {
   return graph->logical_parity[edge];
 }
 
-/* The strongest kind among the batch's fusions. */
+/* The strongest kind among the batch's fusions. A cluster that reaches
+ * the boundary sets its touching flag and moves no parity across
+ * itself, whatever stands at the boundary node already: the node is one
+ * for the whole graph here, so a second cluster that reaches the
+ * boundary is united with the first, which a unit that keeps the
+ * boundary as a flag of each element never does. */
 static int32_t fuse_contact_batch(struct workspace *workspace,
                                   const struct graph_arrays *graph,
                                   const int32_t *contact_edges, int32_t start,
                                   int32_t end) {
   int32_t strongest = fusion_none;
+  int32_t boundary_node = graph->detector_count;
   for (int32_t position = start; position < end; ++position) {
     int32_t edge = contact_edges[position];
     int32_t node_a =
@@ -713,6 +719,11 @@ static int32_t fuse_contact_batch(struct workspace *workspace,
         endpoint_node(graph->endpoint_b[edge], graph->detector_count);
     uint8_t parity = edge_parity(graph, edge);
     int32_t fused = fuse_clusters(workspace, node_a, node_b, parity);
+    int32_t reaches_boundary =
+        node_a == boundary_node || node_b == boundary_node;
+    if (fused == fusion_parity && reaches_boundary) {
+      fused = fusion_roots;
+    }
     if (fused > strongest) {
       strongest = fused;
     }
@@ -1074,20 +1085,24 @@ static int32_t grow_clusters(struct workspace *workspace,
   return union_find_ok;
 }
 
-/* A spanning forest of the contacts, lightest edges first (Kruskal), on
- * a set that carries no defects. */
-static int32_t contact_forest(struct workspace *workspace,
-                              const struct graph_arrays *graph,
-                              const int32_t *contact_edges,
-                              int32_t contact_count, int32_t *forest_edges) {
+/* A spanning forest of the closed edges, lightest first (Kruskal), on a
+ * set that carries no defects. It takes every closed edge, not the
+ * contacts alone: an edge both of whose ends stood in one cluster closes
+ * when that cluster's front meets itself, fuses nothing, and so is no
+ * contact, yet it can be lighter than the contact that first joined its
+ * ends. */
+static int32_t closed_forest(struct workspace *workspace,
+                             const struct graph_arrays *graph,
+                             const uint8_t *interval_is_closed,
+                             int32_t *forest_edges) {
   reset_clusters(workspace, graph->detector_count, NULL);
-  memcpy(workspace->sorted_contacts, contact_edges,
-         (size_t)contact_count * sizeof(int32_t));
+  int32_t closed_count = collect_closed_contacts(graph, interval_is_closed,
+                                                 workspace->sorted_contacts);
   sort_edges(orders_by_length, graph->length_half_ticks,
              workspace->sorted_contacts, workspace->merge_scratch,
-             contact_count);
+             closed_count);
   int32_t forest_count = 0;
-  for (int32_t position = 0; position < contact_count; ++position) {
+  for (int32_t position = 0; position < closed_count; ++position) {
     int32_t edge = workspace->sorted_contacts[position];
     int32_t node_a =
         endpoint_node(graph->endpoint_a[edge], graph->detector_count);
@@ -1347,8 +1362,8 @@ int32_t union_find_decode(
     release_workspace(&workspace);
     return status;
   }
-  *forest_count = contact_forest(&workspace, &graph, contact_edges,
-                                 *contact_count, forest_edges);
+  *forest_count =
+      closed_forest(&workspace, &graph, interval_is_closed, forest_edges);
   *forest_depth = peel_forest(&workspace, &graph, residual_syndrome,
                               forest_edges, *forest_count, selected_edges);
   release_workspace(&workspace);

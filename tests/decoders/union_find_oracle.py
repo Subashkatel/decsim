@@ -1,9 +1,11 @@
 """The pure-Python weighted Union-Find, kept as the compiled row's oracle.
 
 Every function below is the one decsim shipped before the growth, the
-forest and the peeling moved into C, unchanged in logic, so a property
-test can put the two side by side on the same graph and the same
-syndrome. Delfosse and Nickerson 1709.06218 give Algorithm 1 (growth)
+forest and the peeling moved into C, so a property test can put the two
+side by side on the same graph and the same syndrome. One thing
+differs from that code: the forest takes every closed edge, lightest
+first, where it took the contacts alone, as the compiled row now does.
+Delfosse and Nickerson 1709.06218 give Algorithm 1 (growth)
 and Algorithm 2 (peeling); Huang, Newman and Brown 2004.04693 give the
 integer edge lengths. The graph itself is built by
 decsim/decoders/union_find/window_decoder.py, which is the one place
@@ -31,7 +33,8 @@ def decode_graph(
     _disjoint_set, intervals, contacts = _weighted_growth_outcome(
         graph, residual_syndrome
     )
-    forest = _minimum_weight_contact_forest(graph, contacts)
+    closed = _closed_edge_indices(intervals)
+    forest = _minimum_weight_closed_forest(graph, closed)
     selected_residual_edges = _peel_forest(graph, residual_syndrome, forest)
     selected_faults = _selected_faults(graph, selected_residual_edges)
     reproduced = _reproduced_syndrome(
@@ -389,14 +392,23 @@ def _by_length_then_fault(
     return ordered
 
 
-def _minimum_weight_contact_forest(
-    graph: evidence_records.UnionFindGraph, contact_edge_indices: tuple
+def _closed_edge_indices(intervals: tuple) -> tuple:
+    """Every edge the growth closed, a contact or not, in edge order."""
+    closed = []
+    for edge_index, interval in enumerate(intervals):
+        if isinstance(interval, evidence_records.Closed):
+            closed.append(edge_index)
+    return tuple(closed)
+
+
+def _minimum_weight_closed_forest(
+    graph: evidence_records.UnionFindGraph, closed_edge_indices: tuple
 ) -> tuple:
-    """A spanning forest of the contacts, lightest edges first (Kruskal)."""
+    """A spanning forest of the closed edges, lightest first (Kruskal)."""
     no_defects = [0] * graph.detector_count
     forest_set = _DisjointSet(graph.detector_count, no_defects)
     forest_edges = []
-    for edge_index in _by_length_then_fault(graph, contact_edge_indices):
+    for edge_index in _by_length_then_fault(graph, closed_edge_indices):
         edge = graph.edges[edge_index]
         left = _endpoint_node(edge.detector_a, graph.detector_count)
         right = _endpoint_node(edge.detector_b, graph.detector_count)

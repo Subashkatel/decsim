@@ -491,3 +491,82 @@ def test_the_compiled_decoder_stays_inside_its_buffers_on_the_corpus():
     )
     assert child.returncode == 0, child.stderr
     assert "AddressSanitizer" not in child.stderr
+
+
+def lengths_graph(detector_count: int, edges: list):
+    """A graph from (detector, detector or BOUNDARY, half ticks) triples."""
+    made = []
+    for index, (detector_a, detector_b, half_ticks) in enumerate(edges):
+        edge = evidence_records.UnionFindEdge(
+            fault_index=index,
+            detector_a=detector_a,
+            detector_b=detector_b,
+            logical_observables=(),
+            length_half_ticks=half_ticks,
+        )
+        made.append(edge)
+    edge_count = len(made)
+    no_faults = (0,) * edge_count
+    no_events = (0,) * detector_count
+    no_observables = ((),) * edge_count
+    return evidence_records.UnionFindGraph(
+        detector_count=detector_count,
+        fault_count=edge_count,
+        edges=tuple(made),
+        baseline_faults=no_faults,
+        baseline_syndrome=no_events,
+        logical_observables_by_fault=no_observables,
+    )
+
+
+def test_a_second_cluster_that_reaches_the_boundary_moves_no_parity():
+    """Each cluster's boundary contact is its own touching flag.
+
+    Two defects share no edge, and each has one boundary edge. The one
+    boundary node unites them when the second arrives, but a unit that
+    keeps the boundary as a flag of each element sees two clusters, each
+    setting its flag: both steps are roots, as the second defect alone.
+    """
+    boundary = window_decoder.BOUNDARY
+    graph = lengths_graph(2, [(0, boundary, 4), (1, boundary, 8)])
+
+    both = window_decoder.decode_graph(graph, (1, 1))
+    second_alone = window_decoder.decode_graph(graph, (0, 1))
+
+    kinds = [step.fusion for step in both.growth_steps]
+    alone_kinds = [step.fusion for step in second_alone.growth_steps]
+    roots = evidence_records.FUSION_ROOTS
+    assert kinds == [roots, roots]
+    assert alone_kinds == [roots]
+
+
+def test_the_forest_takes_a_lighter_edge_that_closed_inside_a_cluster():
+    """The forest is the lightest over every closed edge.
+
+    Detectors 1, 2 and 3 are joined by contacts of 10 half ticks before
+    the edge of 4 between 1 and 3 closes inside their cluster. That edge
+    is no contact, and the forest still takes it in place of a 10.
+    """
+    boundary = window_decoder.BOUNDARY
+    edges = [
+        (1, 3, 4),
+        (1, boundary, 4),
+        (2, 3, 10),
+        (1, 2, 10),
+        (0, boundary, 10),
+    ]
+    graph = lengths_graph(4, edges)
+
+    evidence = window_decoder.decode_graph(graph, (1, 0, 1, 0))
+
+    closed = [
+        isinstance(interval, evidence_records.Closed)
+        for interval in evidence.edge_intervals
+    ]
+    forest = set(evidence.erasure_forest_faults)
+    forest_half_ticks = sum(edges[index][2] for index in forest)
+    assert all(closed)
+    assert 0 not in evidence.contact_faults
+    assert 0 in forest
+    assert forest_half_ticks == 28
+    assert evidence.unmatched_detectors == ()

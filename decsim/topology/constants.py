@@ -8,8 +8,7 @@ constants.roce.round_trip; a section is a mapping, so it splats into a
 record's parameters (**constants.roce, machine_file.record). Every value
 read is recorded, and a file holding a value nothing read is refused
 (refuse_the_unread), so a misspelt key fails rather than leaving a
-number unused, as qecboard's constants were checked
-(notes/qecboard_prototype). A value is overridden without editing the
+number unused. A value is overridden without editing the
 file by `--set constants.roce.round_trip=2.5us`, which load applies
 (parameters/in_force.py), and for one sweep cell by an axis of that
 name (experiments/sweeps.py, overriding). The comment beside a value is

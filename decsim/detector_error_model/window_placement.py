@@ -13,7 +13,7 @@ The catalog is laid out once as compressed columns (CatalogArrays), the
 layout of qLDPC's DetectorErrorModelArrays and of scipy's csc_matrix,
 and a window is placed with array operations on its columns' entries: a
 Python pass over a strong region's columns was a third of a switching
-d11 shot (stage7_plan.md).
+d11 shot.
 """
 
 import dataclasses

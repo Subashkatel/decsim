@@ -466,7 +466,7 @@ def _intervals(is_closed, lower_tick, upper_tick) -> tuple:
     with the same interval: a window has tens of thousands of edges and
     a few hundred distinct intervals, and one object per edge would be
     most of a decode's Python time. A numpy.unique over the bounds was
-    seven times slower than this dict at d13 (stage7_plan.md, 7a).
+    seven times slower than this dict at d13.
     """
     closed = evidence_records.Closed()
     closed_flags = is_closed.tolist()

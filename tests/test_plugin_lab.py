@@ -4,8 +4,6 @@ The parts live outside decsim and are named by import path. They are
 set from the command line, listed by info and written by describe; the
 verdict's cut is a sweep axis; their statistics reach the run's tables;
 and the decoder's draws repeat for a seed and differ between seeds.
-Appendix C of the design (notes/arch_redesign/design.md) claims each of
-these.
 """
 
 import csv

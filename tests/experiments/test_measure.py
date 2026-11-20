@@ -1178,7 +1178,7 @@ def later_solve_ticks(shot, window_id: int) -> int:
     """What the window decoded after the decode that committed, in ticks.
 
     A complementary gap is two forced-class solves of one window
-    (decision D2) and the window answers when both have, so the solve
+    and the window answers when both have, so the solve
     that did not commit can run after the one that did. That span is
     the window's confidence step, the point of the same name, so the
     tests read it here and expect it there.
@@ -1226,8 +1226,8 @@ def test_the_shipped_two_tier_config_sums_to_its_reaction_time():
     their confidence step is zero because the attempt already runs to the
     verdict. The other six kept a weak result whose complementary gap
     ran a second forced-class solve after it, and that solve is their
-    confidence step (decision D2, and Toshio et al. 2510.25222 Sec.
-    III A steps 2 to 4 for the order of the escalated ones). Both sum
+    confidence step (Toshio et al. 2510.25222 Sec. III A steps 2 to 4
+    for the order of the escalated ones). Both sum
     to the tick.
     """
     shot = shipped_shot("examples/two_tiers.py", "d3")
@@ -1279,7 +1279,7 @@ def test_the_shipped_cluster_gap_config_sums_to_its_reaction_time():
 
     The tests' cluster gap machine (two_tier_machines.py) walks a union
     find decode for its signal and prices that walk at 12.0 us on the weak
-    unit (decision D8), so a window the weak tier answered carries the walk
+    unit, so a window the weak tier answered carries the walk
     between its decode's end and its verdict. A window that escalated
     carries none: its weak attempt already runs to the verdict and the
     strong decode it commits answers after it. The union find decode itself

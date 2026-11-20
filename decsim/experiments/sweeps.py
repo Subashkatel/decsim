@@ -15,8 +15,7 @@
     )
     experiment = sweep.experiment()
 
-The shape is qecboard's Sweep (notes/qecboard_prototype, sweep.py) and
-design.md Appendix A.4. The grid runs in its axes' order, the last
+The grid runs in its axes' order, the last
 fastest (experiment.grid). An axis is an argument of machine when
 machine takes that name; a constant when it is written constants.<name>,
 set for its cell (topology/constants.py overriding); else a path of

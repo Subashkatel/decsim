@@ -29,9 +29,8 @@ on one SST Link share it (sst-core src/sst/core/link.h) and ns-3's net
 devices on one channel share its wire.
 
 A link times a transfer as its latency plus its bits over its rate,
-ns-3's point-to-point law (point-to-point-net-device.cc:243); the rule
-by sites is qecboard's FridgeHostFabric (notes/qecboard_prototype,
-components/fabrics.py), whose prices reproduced Experiment 1's card.
+ns-3's point-to-point law (point-to-point-net-device.cc:243). The rule
+by sites is FridgeHostFabric, whose prices give Experiment 1's card.
 """
 
 import dataclasses

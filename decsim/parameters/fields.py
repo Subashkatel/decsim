@@ -4,8 +4,7 @@ decsim's settings records already list what can be set, and STYLE.md
 rule 2 puts each quantity's unit at the end of its field's name. So a
 parameter is a field with one change: the unit word leaves the name and
 is written with the value, where it is checked and converted exactly as
-decsim converts it. qecboard derived its parts' parameters by the same
-rule (notes/qecboard_prototype, records.py).
+decsim converts it.
 
     decsim field                      parameter        written as
     fetch_cycles_per_round: int       fetch_per_round  "1 cycle", or "8ns"

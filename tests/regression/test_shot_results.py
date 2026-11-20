@@ -14,7 +14,7 @@ each at d = 3 from the shipped presets and the tests' two tier
 machines (tests/experiments/two_tier_machines.py).
 
 The decoders' and confidence walks' host clocks are a counter stepping
-20 microseconds a reading, as the fingerprint harness steps them, so a
+20 microseconds a reading, so a
 host-timed decoder gives the same ticks on any host. Log and trace text
 are formats, not results, and are left out.
 

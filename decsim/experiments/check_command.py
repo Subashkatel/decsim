@@ -5,7 +5,7 @@
 gem5's m5.instantiate() resolves every object's parameters and makes
 every object before a tick runs (src/python/m5/simulate.py:220, 88-89,
 162-163), so a setting no part can take fails then, not hours into a
-job; qecboard's check built each task the same way. Loading the run
+job. Loading the run
 file makes each task (collect.Task), which lowers its workload and
 checks across its parts (topology/graph.py Machine.at_task); building runs
 every part's own checks. No shot runs. A task its build refuses is

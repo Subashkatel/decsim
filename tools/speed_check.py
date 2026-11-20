@@ -3,11 +3,11 @@
     python tools/speed_check.py <base checkout> [--repeats 3]
         [--slowdown 0.2]
 
-design.md section 8.3 asks for a speed test that fails on a slowdown
-past 20%. One tree timed in two Slurm jobs on nodes of one type differed
-by up to 20% (stage7_plan.md), so a stored baseline cannot hold that
-line. This check times the base checkout and this one on the same node,
-one after the other, `repeats` times each, and compares the medians.
+A speed test should fail on a slowdown past 20%. One tree timed in two
+Slurm jobs on nodes of one type differed by up to 20%, so a stored
+baseline cannot hold that line. This check times the base checkout and
+this one on the same node, one after the other, `repeats` times each,
+and compares the medians.
 Run it as one Slurm job, for example
 `srun -c 2 python tools/speed_check.py ../decsim_base`.
 

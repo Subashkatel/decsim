@@ -100,8 +100,8 @@ class UnionFindGraph:
         """Endpoints and lengths in edge order, laid out once per graph.
 
         Every decode on the graph reads them; laid out per decode they
-        were a quarter of a weak-alone d13 shot (stage7_plan.md). They
-        are read-only, since every decode shares them.
+        were a quarter of a weak-alone d13 shot. They are read-only,
+        since every decode shares them.
         """
         detectors_a = []
         detectors_b = []

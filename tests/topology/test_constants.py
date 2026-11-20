@@ -2,8 +2,7 @@
 
 A section splats as a mapping; a value no one read is refused, so a
 misspelt key fails; `--set constants.<name>` replaces a value when the
-file is read, as qecboard's QECBOARD_SET did (notes/qecboard_prototype,
-constants.py); a sweep cell sets one for its machine.
+file is read; a sweep cell sets one for its machine.
 """
 
 import pathlib

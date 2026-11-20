@@ -237,7 +237,7 @@ def test_the_shared_strong_pool_escalates_on_to_a_deep_pool_for_both():
 def test_a_predecoder_per_patch_feeds_one_gpu_over_its_link_and_slots():
     """Chip predecoders in the fridge, one GPU at gpu0 behind one link.
 
-    design.md's mix of a cryo predecoder feeding a room-temperature
+    The mix of a cryo predecoder feeding a room-temperature
     GPU: both patches' escalations queue on the shared link, and the
     GPU's two strong units share its execution slots, so one slot
     decodes one window at a time and two slots decode as with none

@@ -148,13 +148,6 @@ def decode_graph(
     )
 
 
-def length_half_ticks(residual_probability: float, weight_step: float) -> int:
-    """An edge's length in half ticks: its log-odds in weight ticks, doubled."""
-    log_odds = _natural_log_odds(residual_probability)
-    weight_ticks = _quantize_weight_ticks(log_odds, weight_step)
-    return 2 * weight_ticks
-
-
 def _natural_log_odds(residual_probability: float) -> float:
     if residual_probability == 0.5:
         return 0.0
@@ -270,15 +263,17 @@ def _edge_of(
     if residual_probability == 0.0:
         return None
     detector_a, detector_b = _endpoints(check, fault_index)
+    log_odds = _natural_log_odds(residual_probability)
+    weight_ticks = _quantize_weight_ticks(log_odds, weight_step)
     column = observables[:, fault_index]
     logical_observables = decoder_module.int_tuple(column)
-    length = length_half_ticks(residual_probability, weight_step)
+    length_half_ticks = 2 * weight_ticks
     return evidence_records.UnionFindEdge(
         fault_index=fault_index,
         detector_a=detector_a,
         detector_b=detector_b,
         logical_observables=logical_observables,
-        length_half_ticks=length,
+        length_half_ticks=length_half_ticks,
     )
 
 

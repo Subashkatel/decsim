@@ -12,7 +12,6 @@ graph of test_union_find_decoder.py lands on the tick the count names.
 The steps themselves are checked in test_union_find_compiled_decoder.py.
 """
 
-import dataclasses
 import math
 
 import numpy
@@ -243,18 +242,6 @@ def test_a_decode_with_no_steps_pays_its_setup_and_one_quiet_iteration():
     setup = 1 + 2 * 5 + 3 * 4
     assert laid_out.cycles(evidence) == 1 + 2 + 2 + setup
     assert TRACED_CYCLE_COUNT.cycles(None) == 0
-
-
-def test_a_correlated_decode_pays_both_passes_and_the_reweight_between():
-    """The empty machine's 11 cycles, then 3 + 1 to reweight, then 16."""
-    graph = traced_graph(ADJACENT_PAIR_CHECK)
-    quiet = numpy.asarray([0, 0], dtype=numpy.uint8)
-    pair = numpy.asarray([1, 1], dtype=numpy.uint8)
-    first = window_decoder.decode_graph(graph, quiet)
-    second = window_decoder.decode_graph(graph, pair)
-    both = dataclasses.replace(second, earlier_passes=(first,))
-
-    assert TRACED_CYCLE_COUNT.cycles(both) == 11 + 3 + 1 + 16
 
 
 def test_the_count_ends_on_the_edge_of_its_own_clock():

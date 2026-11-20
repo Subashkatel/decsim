@@ -271,10 +271,6 @@ As a gem5 FUPool takes its units as one parameter (src/cpu/o3/FUPool.py:49). nam
 
 `decsim/decoders/ensembles.py`. The most-likely row, which takes no setting.
 
-### `CorrelatedMostLikely.Settings`
-
-`decsim/decoders/ensembles.py`. The correlated most-likely row, which takes no setting.
-
 ### `FirstConverged.Settings`
 
 `decsim/decoders/ensembles.py`. count is VibeLSD's M, the converged members it waits for.
@@ -560,12 +556,6 @@ detector_beam, beam_climbing, no_revisit_detectors, priority_queue_limit and mer
 | `merge_errors` | `bool` | `False` |
 
 ## decsim/decoders/union_find
-
-### `CorrelatedUnionFindDecoder.Settings`
-
-`decsim/decoders/union_find/correlated_decoder.py`. The union_find row's settings; both passes run on one unit.
-
-It extends `union_find.UnionFindDecoder.Settings`, and holds its fields.
 
 ### `UnionFindDecoder.Settings`
 

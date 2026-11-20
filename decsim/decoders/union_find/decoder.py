@@ -75,8 +75,7 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
 
     def __init__(self, settings: "UnionFindDecoder.Settings") -> None:
         decoder_module.WindowDecoderBase.__init__(self)
-        row = type(self)
-        self.compile_key = (row, settings)
+        self.compile_key = (UnionFindDecoder, settings)
         # absolute natural-log units represented by one weight tick
         self.weight_step = settings.weight_step
         self.timing = settings.timing
@@ -124,19 +123,12 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         del model
         del faults
         evidence = window_decoder.decode_graph(backend, syndrome)
-        return window_decode_of(evidence)
-
-
-def window_decode_of(
-    evidence: evidence_records.UnionFindHardEvidence,
-) -> decoding_records.WindowDecode:
-    """One decode's hard correction, with the growth that produced it."""
-    decode_status = _status_of(evidence)
-    return decoding_records.WindowDecode(
-        evidence.selected_faults,
-        decode_status,
-        cluster_evidence=evidence,
-    )
+        decode_status = _status_of(evidence)
+        return decoding_records.WindowDecode(
+            evidence.selected_faults,
+            decode_status,
+            cluster_evidence=evidence,
+        )
 
 
 def _status_of(evidence: evidence_records.UnionFindHardEvidence):

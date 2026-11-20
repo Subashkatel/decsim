@@ -15,10 +15,6 @@ on the pool's unit, and its pooling row picks the answer.
     most_likely      the most likely member's answer (Harmony)
     first_converged  the most likely of the first count members to
                      converge; the rest are stopped (VibeLSD)
-    most_likely_correlated
-                     the member of least correlated weight: a fault
-                     its own correction pairs with a partner is priced
-                     as correlated matching's second pass prices it
 
 A member's likelihood is its whole selected error set's, priced on the
 shared window model as the sum of log((1 - p) / p) over its faults, the
@@ -43,22 +39,18 @@ earliest listed member that gives it (the Coset Ensemble takes any).
 
 import dataclasses
 import math
-from collections.abc import Callable
 from typing import Optional, Protocol
 
 import numpy
 
 import decsim.decoders.decoder as decoder_module
-import decsim.decoders.union_find.correlated_decoder as correlated_decoder
 import decsim.engine as engine_module
 import decsim.ports as ports
 import decsim.records.decoding as decoding_records
-import decsim.records.fault_model_contracts as fault_models
 import decsim.records.seeds as seed_records
 import decsim.refusals as refusals
 
 _SUCCEEDED = decoding_records.BackendDecodeStatus.SUCCEEDED
-_GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
 
 
 class PoolingSettings(Protocol):
@@ -146,7 +138,7 @@ class SumLikelihood:
 
     def pooled(self, runs: tuple, model: object) -> Pooled:
         """The winning prediction's most likely member, at the last finish."""
-        weights = _weights(runs, model, selection_weight)
+        weights = _weights(runs, model)
         winning = _largest_summed_likelihood(runs, weights)
         giving = _runs_giving(runs, winning)
         answer = _most_likely(giving, weights)
@@ -170,39 +162,7 @@ class MostLikely:
 
     def pooled(self, runs: tuple, model: object) -> Pooled:
         """The member of least weight, once every member has finished."""
-        weights = _weights(runs, model, selection_weight)
-        with_prediction = _runs_with_prediction(runs)
-        answer = _most_likely(with_prediction, weights)
-        ticks = _last_finish(runs)
-        return Pooled(answer, ticks)
-
-
-class CorrelatedMostLikely:
-    """The most likely member, each correction priced with its correlations.
-
-    MostLikely prices a correction's faults one by one at their priors,
-    so a correction that explains one Y error by its X and Z parts pays
-    for two errors. Correlated matching reweights a matching's partners
-    by P(partner | selected) and matches again (Fowler 1310.0863); here
-    each correction is priced once on that rule
-    (correlated_decoder.partnered_probabilities), and the member of
-    least such weight answers. Its members select graphlike faults.
-    """
-
-    @dataclasses.dataclass(frozen=True)
-    class Settings:
-        """The correlated most-likely row, which takes no setting."""
-
-        name = "most_likely_correlated"
-        reads_likelihood = True
-
-        def build(self) -> "CorrelatedMostLikely":
-            """The correlated most-likely pooling."""
-            return CorrelatedMostLikely()
-
-    def pooled(self, runs: tuple, model: object) -> Pooled:
-        """The member of least correlated weight, once all have finished."""
-        weights = _weights(runs, model, correlated_selection_weight)
+        weights = _weights(runs, model)
         with_prediction = _runs_with_prediction(runs)
         answer = _most_likely(with_prediction, weights)
         ticks = _last_finish(runs)
@@ -244,7 +204,7 @@ class FirstConverged:
 
     def pooled(self, runs: tuple, model: object) -> Pooled:
         """The most likely of the first count converged, when the last lands."""
-        weights = _weights(runs, model, selection_weight)
+        weights = _weights(runs, model)
         finished = sorted(runs, key=_finish_order)
         converged = [run for run in finished if run.has_converged]
         if len(converged) >= self.count:
@@ -454,34 +414,8 @@ def selection_weight(
     priors = numpy.asarray(faults.priors, dtype=float)
     selected = numpy.asarray(result.selected_faults, dtype=bool)
     chosen = priors[selected]
-    return _summed_log_odds(chosen)
-
-
-def correlated_selection_weight(
-    result: decoding_records.DecodeResult, model: object
-) -> float:
-    """selection_weight, each selected fault at its partnered probability.
-
-    +inf without a correction. A member that selects physical faults has
-    no graphlike partners to read, so it is refused rather than priced
-    on the wrong faults.
-    """
-    if result.selected_faults is None or model is None:
-        return math.inf
-    if result.fault_representation is not _GRAPHLIKE:
-        raise RuntimeError(
-            "most_likely_correlated prices graphlike corrections, but a "
-            f"member selected {result.fault_representation.value} faults"
-        )
-    selected = numpy.flatnonzero(result.selected_faults)
-    probabilities = correlated_decoder.partnered_probabilities(model, selected)
-    return _summed_log_odds(probabilities)
-
-
-def _summed_log_odds(probabilities: numpy.ndarray) -> float:
-    """The sum of log((1 - p) / p); +inf when a p is zero."""
     with numpy.errstate(divide="ignore"):
-        weights = numpy.log1p(-probabilities) - numpy.log(probabilities)
+        weights = numpy.log1p(-chosen) - numpy.log(chosen)
     total = numpy.sum(weights)
     return float(total)
 
@@ -516,13 +450,13 @@ def _prediction_counts(runs: tuple) -> dict:
     return counts
 
 
-def _weights(runs: tuple, model: object, weigh: Callable) -> dict:
-    """Each run's weight by its index, weigh(result, model) pricing it."""
+def _weights(runs: tuple, model: object) -> dict:
+    """Each run's selection weight by its index."""
     weights = {}
     for run in runs:
         weight = math.inf
         if run.result is not None:
-            weight = weigh(run.result, model)
+            weight = selection_weight(run.result, model)
         weights[run.index] = weight
     return weights
 
